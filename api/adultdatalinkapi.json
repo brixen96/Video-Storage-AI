@@ -1,0 +1,213 @@
+{
+	"base_url": "https://api.adultdatalink.com",
+	"endpoints": [
+		{
+			"category": "functions",
+			"routes": [
+				{ "method": "GET", "path": "/functions/download-video", "description": "Stream and download an MP4 file." },
+				{ "method": "GET", "path": "/functions/stream-video", "description": "Stream a video file directly." }
+			]
+		},
+		{
+			"category": "auntmia",
+			"routes": [
+				{ "method": "GET", "path": "/auntmia/feed", "description": "Retrieve the latest feed." },
+				{ "method": "GET", "path": "/auntmia/search", "description": "General search for Auntmia content." },
+				{ "method": "GET", "path": "/auntmia/search-by-category", "description": "Search Auntmia by category." },
+				{ "method": "GET", "path": "/auntmia/search-by-model", "description": "Search Auntmia by model." },
+				{ "method": "GET", "path": "/auntmia/search-pornstars", "description": "Search Auntmia by pornstar." },
+				{ "method": "GET", "path": "/auntmia/scrape-gallery", "description": "Scrape gallery data." }
+			]
+		},
+		{
+			"category": "barelist",
+			"routes": [
+				{ "method": "GET", "path": "/barelist/feed", "description": "Retrieve latest Barelist feed." },
+				{ "method": "GET", "path": "/barelist/search", "description": "Search Barelist for models, scenes, pictures, or videos." },
+				{ "method": "GET", "path": "/barelist/video-information", "description": "Retrieve detailed video information." },
+				{ "method": "GET", "path": "/barelist/pornstar-information", "description": "Retrieve pornstar information." }
+			]
+		},
+		{
+			"category": "boobpedia",
+			"routes": [
+				{ "method": "GET", "path": "/boobpedia/search-model-by-features", "description": "List performers by category/feature." },
+				{ "method": "GET", "path": "/boobpedia/pornstar-information", "description": "Retrieve detailed performer data." }
+			]
+		},
+		{
+			"category": "eporner",
+			"routes": [
+				{ "method": "GET", "path": "/eporner/search", "description": "Search for Eporner videos." },
+				{ "method": "GET", "path": "/eporner/video", "description": "Retrieve video by ID." },
+				{ "method": "GET", "path": "/eporner/video-information", "description": "Detailed video metadata." },
+				{ "method": "GET", "path": "/eporner/model-information", "description": "Retrieve model information." },
+				{ "method": "GET", "path": "/eporner/gifs", "description": "List GIF galleries." },
+				{ "method": "GET", "path": "/eporner/gif-gallery-information", "description": "Retrieve detailed GIF/photo gallery info." }
+			]
+		},
+		{
+			"category": "erome",
+			"routes": [
+				{ "method": "GET", "path": "/erome/home", "description": "Retrieve homepage albums." },
+				{ "method": "GET", "path": "/erome/album", "description": "Get detailed album metadata." },
+				{ "method": "GET", "path": "/erome/search", "description": "Search for albums." },
+				{ "method": "GET", "path": "/erome/user", "description": "Retrieve user profile data." }
+			]
+		},
+		{
+			"category": "freeones",
+			"routes": [{ "method": "GET", "path": "/freeones/model-information", "description": "Retrieve model information." }]
+		},
+		{
+			"category": "letsjerktv",
+			"routes": [
+				{ "method": "GET", "path": "/letsjerktv/feed", "description": "Retrieve LetsJerk.tv feed." },
+				{ "method": "GET", "path": "/letsjerktv/categories", "description": "List categories." },
+				{ "method": "GET", "path": "/letsjerktv/category-videos", "description": "Get videos by category." },
+				{ "method": "GET", "path": "/letsjerktv/pornstars", "description": "Get list of pornstars." },
+				{ "method": "GET", "path": "/letsjerktv/pornstar-videos", "description": "Get videos by pornstar." },
+				{ "method": "GET", "path": "/letsjerktv/search", "description": "Search LetsJerk.tv videos." },
+				{ "method": "GET", "path": "/letsjerktv/video-information", "description": "Retrieve detailed video information." }
+			]
+		},
+		{
+			"category": "pimpandhost",
+			"routes": [
+				{ "method": "GET", "path": "/pimpandhost/categories", "description": "Get tag categories." },
+				{ "method": "GET", "path": "/pimpandhost/pornstars", "description": "List pornstars." },
+				{ "method": "GET", "path": "/pimpandhost/gifs", "description": "Get GIFs." },
+				{ "method": "GET", "path": "/pimpandhost/category-media", "description": "Get media by category." },
+				{ "method": "GET", "path": "/pimpandhost/pornstar-media", "description": "Get media by pornstar." },
+				{ "method": "GET", "path": "/pimpandhost/trending-images", "description": "Get trending images." }
+			]
+		},
+		{
+			"category": "pornhub",
+			"routes": [
+				{ "method": "GET", "path": "/pornhub/search", "description": "Search for videos." },
+				{ "method": "GET", "path": "/pornhub/get-video-by-id", "description": "Retrieve video by ID." }
+			]
+		},
+		{
+			"category": "pornpics",
+			"routes": [
+				{ "method": "GET", "path": "/pornpics/search", "description": "Search Pornpics galleries." },
+				{ "method": "GET", "path": "/pornpics/tags", "description": "Get tags." },
+				{ "method": "GET", "path": "/pornpics/tag-image-links", "description": "Get image links by tag." },
+				{ "method": "GET", "path": "/pornpics/gallery-image-links", "description": "Get gallery image links." }
+			]
+		},
+		{
+			"category": "pornstar",
+			"routes": [
+				{ "method": "GET", "path": "/pornstar/social-profiles", "description": "Get pornstar social profiles." },
+				{ "method": "GET", "path": "/pornstar/pornstar-data", "description": "Aggregate pornstar biography data." }
+			]
+		},
+		{
+			"category": "redgifs",
+			"routes": [
+				{ "method": "GET", "path": "/redgifs/feed", "description": "Retrieve top weekly content." },
+				{ "method": "GET", "path": "/redgifs/trending", "description": "Retrieve trending content." },
+				{ "method": "GET", "path": "/redgifs/search", "description": "Search GIFs." },
+				{ "method": "GET", "path": "/redgifs/gif", "description": "Retrieve a specific GIF." },
+				{ "method": "GET", "path": "/redgifs/creator", "description": "Get creator profile." },
+				{ "method": "GET", "path": "/redgifs/creators", "description": "List all creators." },
+				{ "method": "GET", "path": "/redgifs/tags", "description": "Retrieve tags." },
+				{ "method": "GET", "path": "/redgifs/tag-suggestions", "description": "Get tag suggestions." },
+				{ "method": "GET", "path": "/redgifs/web-urls", "description": "Get GIF web URLs." },
+				{ "method": "GET", "path": "/redgifs/embed-url", "description": "Convert web URL to embed URL." }
+			]
+		},
+		{
+			"category": "rule34",
+			"routes": [
+				{ "method": "GET", "path": "/rule34/posts", "description": "Retrieve posts." },
+				{ "method": "GET", "path": "/rule34/deleted-posts", "description": "Retrieve deleted posts." },
+				{ "method": "GET", "path": "/rule34/comments", "description": "Retrieve comments." },
+				{ "method": "GET", "path": "/rule34/tags", "description": "Retrieve tags." },
+				{ "method": "GET", "path": "/rule34/autocomplete", "description": "Autocomplete for tags." }
+			]
+		},
+		{
+			"category": "redtube",
+			"routes": [
+				{ "method": "GET", "path": "/redtube/search", "description": "Search for videos." },
+				{ "method": "GET", "path": "/redtube/video", "description": "Retrieve video details by ID." },
+				{ "method": "GET", "path": "/redtube/video-embed-code", "description": "Retrieve embed code." },
+				{ "method": "GET", "path": "/redtube/deleted-videos", "description": "Retrieve deleted videos." },
+				{ "method": "GET", "path": "/redtube/categories", "description": "List categories." },
+				{ "method": "GET", "path": "/redtube/tags", "description": "List tags." },
+				{ "method": "GET", "path": "/redtube/stars", "description": "Retrieve stars." },
+				{ "method": "GET", "path": "/redtube/stars-detailed", "description": "Retrieve detailed star data." }
+			]
+		},
+		{
+			"category": "sexstories",
+			"routes": [
+				{ "method": "GET", "path": "/sexstories/home", "description": "Retrieve homepage data." },
+				{ "method": "GET", "path": "/sexstories/themes", "description": "Get available themes." },
+				{ "method": "GET", "path": "/sexstories/genres", "description": "Get genres." },
+				{ "method": "GET", "path": "/sexstories/updates", "description": "Get updates." },
+				{ "method": "GET", "path": "/sexstories/authors", "description": "Retrieve authors." },
+				{ "method": "GET", "path": "/sexstories/story", "description": "Retrieve story details." },
+				{ "method": "GET", "path": "/sexstories/search", "description": "Search for stories." }
+			]
+		},
+		{
+			"category": "motherless",
+			"routes": [
+				{ "method": "GET", "path": "/motherless/search", "description": "Search for media." },
+				{ "method": "GET", "path": "/motherless/video", "description": "Retrieve video details." },
+				{ "method": "GET", "path": "/motherless/galleries", "description": "Retrieve galleries by type." },
+				{ "method": "GET", "path": "/motherless/gallery", "description": "Retrieve detailed gallery info." },
+				{ "method": "GET", "path": "/motherless/images", "description": "Retrieve images by type." },
+				{ "method": "GET", "path": "/motherless/image", "description": "Retrieve detailed image info." }
+			]
+		},
+		{
+			"category": "tnaflix",
+			"routes": [
+				{ "method": "GET", "path": "/tnaflix/feed", "description": "Retrieve Tnaflix feed." },
+				{ "method": "GET", "path": "/tnaflix/categories", "description": "List categories." },
+				{ "method": "GET", "path": "/tnaflix/search", "description": "Search Tnaflix videos." },
+				{ "method": "GET", "path": "/tnaflix/video-info", "description": "Scrape detailed video info by URL." }
+			]
+		},
+		{
+			"category": "xhamster",
+			"routes": [
+				{ "method": "GET", "path": "/xhamster/videos", "description": "List videos with filters and pagination." },
+				{ "method": "GET", "path": "/xhamster/search", "description": "Advanced video search." },
+				{ "method": "GET", "path": "/xhamster/video-information", "description": "Retrieve detailed video info." },
+				{ "method": "GET", "path": "/xhamster/pornstar-information", "description": "Retrieve pornstar information with pagination." },
+				{ "method": "GET", "path": "/xhamster/photo-categories", "description": "Retrieve photo categories." },
+				{ "method": "GET", "path": "/xhamster/category-results", "description": "Retrieve gallery results by category." },
+				{ "method": "GET", "path": "/xhamster/gallery-information", "description": "Retrieve detailed gallery info." }
+			]
+		},
+		{
+			"category": "xnxx",
+			"routes": [
+				{ "method": "GET", "path": "/xnxx/todays-selection", "description": "Retrieve today’s selection." },
+				{ "method": "GET", "path": "/xnxx/best-videos", "description": "Retrieve best videos." },
+				{ "method": "GET", "path": "/xnxx/hits", "description": "Retrieve most viewed videos." },
+				{ "method": "GET", "path": "/xnxx/search", "description": "Search videos." },
+				{ "method": "GET", "path": "/xnxx/tags", "description": "Retrieve tags." },
+				{ "method": "GET", "path": "/xnxx/video-information", "description": "Retrieve video details." }
+			]
+		},
+		{
+			"category": "xvideos",
+			"routes": [
+				{ "method": "GET", "path": "/xvideos/feed", "description": "Retrieve feed." },
+				{ "method": "GET", "path": "/xvideos/search", "description": "Search for videos." },
+				{ "method": "GET", "path": "/xvideos/pornstar", "description": "Retrieve pornstar info." },
+				{ "method": "GET", "path": "/xvideos/categories", "description": "Retrieve categories." },
+				{ "method": "GET", "path": "/xvideos/pornstars-index", "description": "Paginated pornstar index." },
+				{ "method": "GET", "path": "/xvideos/video-information", "description": "Retrieve video details." }
+			]
+		}
+	]
+}
