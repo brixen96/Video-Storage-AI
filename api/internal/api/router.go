@@ -75,6 +75,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			performers.GET("", getPerformers)                      // List all performers
 			performers.GET("/:id", getPerformer)                   // Get single performer
 			performers.POST("", createPerformer)                   // Create performer
+			performers.POST("/scan", scanPerformers)               // Scan performer folders
 			performers.PUT("/:id", updatePerformer)                // Update performer
 			performers.DELETE("/:id", deletePerformer)             // Delete performer
 			performers.POST("/:id/fetch-metadata", fetchMetadata)  // Fetch from AdultDataLink

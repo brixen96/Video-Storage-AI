@@ -1,18 +1,652 @@
 <template>
 	<div class="performers-page">
-		<div class="container-fluid py-4">
-			<h1 class="mb-4">
-				<font-awesome-icon :icon="['fas', 'users']" class="me-2" />
-				Performers
-			</h1>
-			<p class="lead">Your performer collection will appear here.</p>
+		<div class="container-fluid py-2">
+			<!-- Controls Bar -->
+			<div class="controls-bar mb-2">
+				<div class="row g-3">
+					<!-- Search -->
+					<div class="col-md-4">
+						<div class="search-box">
+							<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
+							<input v-model="searchQuery" type="text" class="form-control" placeholder="Search performers..." />
+							<button v-if="searchQuery" class="btn-clear-search" @click="searchQuery = ''">
+								<font-awesome-icon :icon="['fas', 'times-circle']" />
+							</button>
+						</div>
+					</div>
+
+					<!-- Sort -->
+					<div class="col-md-3">
+						<select v-model="sortBy" class="form-select">
+							<option value="name">Sort by Name</option>
+							<option value="age">Sort by Age</option>
+							<option value="breast">Sort by Breast Size</option>
+							<option value="height">Sort by Height</option>
+							<option value="scenes">Sort by Scene Count</option>
+						</select>
+					</div>
+
+					<!-- View Toggle -->
+					<div class="col-md-2">
+						<div class="btn-group w-100" role="group">
+							<button :class="['btn', 'btn-outline-primary', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'">
+								<font-awesome-icon :icon="['fas', 'th']" />
+							</button>
+							<button :class="['btn', 'btn-outline-primary', { active: viewMode === 'list' }]" @click="viewMode = 'list'">
+								<font-awesome-icon :icon="['fas', 'list']" />
+							</button>
+						</div>
+					</div>
+
+					<!-- Filter Toggle -->
+					<div class="col-md-3">
+						<button class="btn btn-outline-secondary w-100" @click="showFilters = !showFilters">
+							<font-awesome-icon :icon="['fas', 'filter']" class="me-2" />
+							{{ showFilters ? 'Hide Filters' : 'Show Filters' }}
+						</button>
+					</div>
+				</div>
+
+				<!-- Advanced Filters -->
+				<div v-if="showFilters" class="filters-panel mt-3">
+					<div class="row g-3">
+						<!-- Zoo Toggle -->
+						<div class="col-md-3">
+							<div class="filter-group">
+								<label class="form-label">Content Filter</label>
+								<div class="form-check form-switch">
+									<input v-model="filters.showZoo" class="form-check-input" type="checkbox" id="zooToggle" />
+									<label class="form-check-label" for="zooToggle"> Show Zoo Content </label>
+								</div>
+							</div>
+						</div>
+
+						<!-- Age Range -->
+						<div class="col-md-3">
+							<div class="filter-group">
+								<label class="form-label">Age Range</label>
+								<div class="range-inputs">
+									<input v-model.number="filters.ageMin" type="number" class="form-control form-control-sm" placeholder="Min" min="18" />
+									<span class="range-separator">-</span>
+									<input v-model.number="filters.ageMax" type="number" class="form-control form-control-sm" placeholder="Max" />
+								</div>
+							</div>
+						</div>
+
+						<!-- Breast Size Range -->
+						<div class="col-md-3">
+							<div class="filter-group">
+								<label class="form-label">Breast Size</label>
+								<div class="range-inputs">
+									<input v-model="filters.breastMin" type="text" class="form-control form-control-sm" placeholder="Min (e.g., A)" maxlength="2" />
+									<span class="range-separator">-</span>
+									<input v-model="filters.breastMax" type="text" class="form-control form-control-sm" placeholder="Max (e.g., DD)" maxlength="3" />
+								</div>
+							</div>
+						</div>
+
+						<!-- Height Range -->
+						<div class="col-md-3">
+							<div class="filter-group">
+								<label class="form-label">Height (cm)</label>
+								<div class="range-inputs">
+									<input v-model.number="filters.heightMin" type="number" class="form-control form-control-sm" placeholder="Min" />
+									<span class="range-separator">-</span>
+									<input v-model.number="filters.heightMax" type="number" class="form-control form-control-sm" placeholder="Max" />
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Clear Filters -->
+					<div class="row mt-2">
+						<div class="col-12">
+							<button class="btn btn-sm btn-outline-danger" @click="clearFilters">
+								<font-awesome-icon :icon="['fas', 'times']" class="me-1" />
+								Clear Filters
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Loading State -->
+			<div v-if="loading" class="loading-state">
+				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" />
+				<p class="mt-3">Loading performers...</p>
+			</div>
+
+			<!-- Error State -->
+			<div v-else-if="error" class="error-state">
+				<font-awesome-icon :icon="['fas', 'exclamation-triangle']" size="3x" />
+				<p class="mt-3">{{ error }}</p>
+				<button class="btn btn-primary mt-2" @click="loadPerformers">
+					<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
+					Retry
+				</button>
+			</div>
+
+			<!-- Empty State -->
+			<div v-else-if="filteredPerformers.length === 0" class="empty-state">
+				<font-awesome-icon :icon="['fas', 'users']" size="3x" />
+				<p class="mt-3">
+					{{ performers.length === 0 ? 'No performers found.' : 'No performers match your filters.' }}
+				</p>
+			</div>
+
+			<!-- Performers Grid View -->
+			<div v-else-if="viewMode === 'grid'" class="performers-grid">
+				<div
+					v-for="performer in filteredPerformers"
+					:key="performer.id"
+					class="performer-card text-center"
+					@click="openDetails(performer)"
+					@contextmenu.prevent="openContextMenu($event, performer)"
+				>
+					<!-- Video Preview -->
+					<div class="card-preview">
+						<video
+							v-if="performer.preview_path"
+							class="preview-video"
+							:src="getPreviewUrl(performer.preview_path)"
+							loop
+							muted
+							playsinline
+							@mouseenter="playPreview"
+							@mouseleave="pausePreview"
+						></video>
+						<div v-else class="no-preview">
+							<font-awesome-icon :icon="['fas', 'user']" size="3x" />
+						</div>
+
+						<!-- Scene Count Badge -->
+						<div class="scene-badge">
+							<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
+							{{ performer.scene_count || 0 }}
+						</div>
+
+						<!-- Zoo Badge -->
+						<div v-if="performer.zoo" class="zoo-badge">Zoo</div>
+					</div>
+
+					<!-- Card Info -->
+					<div class="card-info">
+						<span class="performer-name">{{ performer.name }}</span>
+						<div class="performer-meta">
+							<span v-if="getAge(performer)" class="meta-item">
+								<font-awesome-icon :icon="['fas', 'birthday-cake']" class="me-1" />
+								{{ getAge(performer) }}
+							</span>
+							<span v-if="performer.metadata?.measurements" class="meta-item">
+								{{ performer.metadata.measurements }}
+							</span>
+							<span v-if="performer.metadata?.height" class="meta-item"> {{ performer.metadata.height }} </span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Performers List View -->
+			<div v-else class="performers-list">
+				<div
+					v-for="performer in filteredPerformers"
+					:key="performer.id"
+					class="list-item"
+					@click="openDetails(performer)"
+					@contextmenu.prevent="openContextMenu($event, performer)"
+				>
+					<div class="list-preview">
+						<video v-if="performer.preview_path" class="preview-video-small" :src="getPreviewUrl(performer.preview_path)" loop muted playsinline></video>
+						<div v-else class="no-preview-small">
+							<font-awesome-icon :icon="['fas', 'user']" />
+						</div>
+					</div>
+					<div class="list-content">
+						<h5 class="performer-name">{{ performer.name }}</h5>
+						<div class="performer-details">
+							<span v-if="getAge(performer)" class="detail-item">Age: {{ getAge(performer) }}</span>
+							<span v-if="performer.metadata?.measurements" class="detail-item">Measurements: {{ performer.metadata.measurements }}</span>
+							<span v-if="performer.metadata?.height" class="detail-item">Height: {{ performer.metadata.height }}</span>
+							<span v-if="performer.metadata?.weight" class="detail-item">Weight: {{ performer.metadata.weight }}</span>
+							<span class="detail-item">Scenes: {{ performer.scene_count || 0 }}</span>
+						</div>
+					</div>
+					<div class="list-actions">
+						<button class="btn btn-sm btn-outline-primary" @click.stop="openDetails(performer)">
+							<font-awesome-icon :icon="['fas', 'eye']" />
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Context Menu -->
+		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click="closeContextMenu">
+			<button class="context-menu-item" @click="fetchMetadata(contextMenu.performer)">
+				<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
+				Fetch Metadata
+			</button>
+			<button class="context-menu-item" @click="resetPerformer(contextMenu.performer)">
+				<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
+				Reset Performer
+			</button>
+			<button class="context-menu-item danger" @click="confirmDelete(contextMenu.performer)">
+				<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+				Delete Performer
+			</button>
+		</div>
+
+		<!-- Details Panel (Side Drawer) -->
+		<div v-if="detailsPanel.visible" class="details-panel" @click.self="closeDetails">
+			<div class="panel-content">
+				<!-- Carousel -->
+				<div class="panel-carousel">
+					<div v-if="getPerformerPreviews(detailsPanel.performer).length > 0" class="carousel-container">
+						<button v-if="carouselIndex > 0" class="carousel-btn prev" @click="carouselIndex--">
+							<font-awesome-icon :icon="['fas', 'chevron-left']" />
+						</button>
+						<video :src="getPerformerPreviews(detailsPanel.performer)[carouselIndex]" class="carousel-video" controls autoplay loop muted></video>
+						<button v-if="carouselIndex < getPerformerPreviews(detailsPanel.performer).length - 1" class="carousel-btn next" @click="carouselIndex++">
+							<font-awesome-icon :icon="['fas', 'chevron-right']" />
+						</button>
+						<div class="carousel-indicator">{{ carouselIndex + 1 }} / {{ getPerformerPreviews(detailsPanel.performer).length }}</div>
+					</div>
+					<div v-else class="no-carousel">
+						<font-awesome-icon :icon="['fas', 'user']" size="5x" />
+						<p class="mt-3">No preview videos available</p>
+					</div>
+				</div>
+
+				<!-- Metadata Grid -->
+				<div class="panel-metadata">
+					<div class="metadata-grid">
+						<div class="metadata-item">
+							<span class="metadata-label">Name:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.name }}</span>
+						</div>
+						<div v-if="getAge(detailsPanel.performer)" class="metadata-item">
+							<span class="metadata-label">Age:</span>
+							<span class="metadata-value">{{ getAge(detailsPanel.performer) }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.birthdate" class="metadata-item">
+							<span class="metadata-label">Birthdate:</span>
+							<span class="metadata-value">{{ formatDate(detailsPanel.performer.metadata.birthdate) }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.birthplace" class="metadata-item">
+							<span class="metadata-label">Birthplace:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.birthplace }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.measurements" class="metadata-item">
+							<span class="metadata-label">Measurements:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.measurements }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.height" class="metadata-item">
+							<span class="metadata-label">Height:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.height }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.weight" class="metadata-item">
+							<span class="metadata-label">Weight:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.weight }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.ethnicity" class="metadata-item">
+							<span class="metadata-label">Ethnicity:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.ethnicity }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.hair_color" class="metadata-item">
+							<span class="metadata-label">Hair Color:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.hair_color }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.eye_color" class="metadata-item">
+							<span class="metadata-label">Eye Color:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.eye_color }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.career_start" class="metadata-item">
+							<span class="metadata-label">Career Start:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.career_start }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.career_end" class="metadata-item">
+							<span class="metadata-label">Career End:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.career_end }}</span>
+						</div>
+						<div class="metadata-item">
+							<span class="metadata-label">Scene Count:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.scene_count || 0 }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.tattoos" class="metadata-item full-width">
+							<span class="metadata-label">Tattoos:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.tattoos }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.piercings" class="metadata-item full-width">
+							<span class="metadata-label">Piercings:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.piercings }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.bio" class="metadata-item full-width">
+							<span class="metadata-label">Bio:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.bio }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.metadata?.aliases?.length" class="metadata-item full-width">
+							<span class="metadata-label">Aliases:</span>
+							<span class="metadata-value">{{ detailsPanel.performer.metadata.aliases.join(', ') }}</span>
+						</div>
+						<div v-if="detailsPanel.performer.zoo" class="metadata-item full-width">
+							<span class="metadata-label">Content Type:</span>
+							<span class="metadata-value zoo-indicator">Zoo Content</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Action Buttons -->
+				<div class="panel-actions">
+					<button class="btn btn-primary" @click="fetchMetadata(detailsPanel.performer)">
+						<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
+						Fetch Metadata
+					</button>
+					<button class="btn btn-secondary" @click="resetPerformer(detailsPanel.performer)">
+						<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
+						Reset
+					</button>
+					<button class="btn btn-danger" @click="confirmDelete(detailsPanel.performer)">
+						<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+						Delete
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Delete Confirmation Modal -->
+		<div v-if="deleteModal.visible" class="modal-overlay" @click="deleteModal.visible = false">
+			<div class="modal-dialog" @click.stop>
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title">Confirm Delete</h5>
+						<button class="btn-close-modal" @click="deleteModal.visible = false">
+							<font-awesome-icon :icon="['fas', 'times']" />
+						</button>
+					</div>
+					<div class="modal-body">
+						<p>
+							Are you sure you want to delete
+							<strong>{{ deleteModal.performer?.name }}</strong
+							>?
+						</p>
+						<p class="text-muted">This action cannot be undone.</p>
+					</div>
+					<div class="modal-footer">
+						<button class="btn btn-secondary" @click="deleteModal.visible = false">Cancel</button>
+						<button class="btn btn-danger" @click="deletePerformer">
+							<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+							Delete
+						</button>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
 
 <script>
+import { performersAPI } from '@/services/api'
+
 export default {
 	name: 'PerformersPage',
+	data() {
+		return {
+			performers: [],
+			loading: false,
+			error: null,
+			searchQuery: '',
+			sortBy: 'name',
+			viewMode: 'grid',
+			showFilters: false,
+			filters: {
+				showZoo: true,
+				ageMin: null,
+				ageMax: null,
+				breastMin: '',
+				breastMax: '',
+				heightMin: null,
+				heightMax: null,
+			},
+			contextMenu: {
+				visible: false,
+				x: 0,
+				y: 0,
+				performer: null,
+			},
+			detailsPanel: {
+				visible: false,
+				performer: null,
+			},
+			carouselIndex: 0,
+			deleteModal: {
+				visible: false,
+				performer: null,
+			},
+		}
+	},
+	computed: {
+		filteredPerformers() {
+			let result = this.performers
+
+			// Search filter
+			if (this.searchQuery) {
+				const query = this.searchQuery.toLowerCase()
+				result = result.filter((p) => p.name.toLowerCase().includes(query))
+			}
+
+			// Zoo filter
+			if (!this.filters.showZoo) {
+				result = result.filter((p) => !p.zoo)
+			}
+
+			// Age filter
+			if (this.filters.ageMin) {
+				result = result.filter((p) => {
+					const age = this.getAge(p)
+					return age && age >= this.filters.ageMin
+				})
+			}
+			if (this.filters.ageMax) {
+				result = result.filter((p) => {
+					const age = this.getAge(p)
+					return age && age <= this.filters.ageMax
+				})
+			}
+
+			// Height filter (parse height from metadata string like "5'7" or "170 cm")
+			if (this.filters.heightMin) {
+				result = result.filter((p) => {
+					const height = this.parseHeight(p.metadata?.height)
+					return height && height >= this.filters.heightMin
+				})
+			}
+			if (this.filters.heightMax) {
+				result = result.filter((p) => {
+					const height = this.parseHeight(p.metadata?.height)
+					return height && height <= this.filters.heightMax
+				})
+			}
+
+			// Breast size filter (basic implementation)
+			if (this.filters.breastMin) {
+				// Convert breast sizes to numeric for comparison (simplified)
+				result = result.filter((p) => {
+					if (!p.breast_size) return false
+					return p.breast_size >= this.filters.breastMin
+				})
+			}
+			if (this.filters.breastMax) {
+				result = result.filter((p) => {
+					if (!p.breast_size) return false
+					return p.breast_size <= this.filters.breastMax
+				})
+			}
+
+			// Sort
+			result = [...result].sort((a, b) => {
+				switch (this.sortBy) {
+					case 'name':
+						return a.name.localeCompare(b.name)
+					case 'age':
+						return (this.getAge(a) || 0) - (this.getAge(b) || 0)
+					case 'breast':
+						return (a.metadata?.measurements || '').localeCompare(b.metadata?.measurements || '')
+					case 'height':
+						return (this.parseHeight(a.metadata?.height) || 0) - (this.parseHeight(b.metadata?.height) || 0)
+					case 'scenes':
+						return (b.scene_count || 0) - (a.scene_count || 0)
+					default:
+						return 0
+				}
+			})
+
+			return result
+		},
+	},
+	methods: {
+		// Calculate age from birthdate
+		getAge(performer) {
+			if (!performer.metadata?.birthdate) return null
+			const birthDate = new Date(performer.metadata.birthdate)
+			const today = new Date()
+			let age = today.getFullYear() - birthDate.getFullYear()
+			const monthDiff = today.getMonth() - birthDate.getMonth()
+			if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+				age--
+			}
+			return age
+		},
+		// Parse height from various formats to cm
+		parseHeight(heightStr) {
+			if (!heightStr) return null
+			// Try to extract numeric value (assumes cm if just a number)
+			const match = heightStr.match(/(\d+)/)
+			return match ? parseInt(match[1]) : null
+		},
+		async loadPerformers() {
+			this.loading = true
+			this.error = null
+			try {
+				const response = await performersAPI.getAll()
+				console.log('data', response)
+				this.performers = response.data || []
+			} catch (err) {
+				console.error('Failed to load performers:', err)
+				this.error = 'Failed to load performers. Please try again.'
+			} finally {
+				this.loading = false
+			}
+		},
+		getPreviewUrl(path) {
+			return `http://localhost:8080${path}`
+		},
+		getPerformerPreviews(performer) {
+			// Return array of preview video URLs from performer's asset folder
+			if (!performer.preview_path) return []
+			// For now, return single preview. Later can scan asset folder for multiple videos
+			return [this.getPreviewUrl(performer.preview_path)]
+		},
+		playPreview(event) {
+			const video = event.target
+			video.play().catch(() => {
+				// Ignore autoplay errors
+			})
+		},
+		pausePreview(event) {
+			const video = event.target
+			video.pause()
+		},
+		openDetails(performer) {
+			this.detailsPanel.visible = true
+			this.detailsPanel.performer = performer
+			this.carouselIndex = 0
+		},
+		closeDetails() {
+			this.detailsPanel.visible = false
+			this.detailsPanel.performer = null
+		},
+		openContextMenu(event, performer) {
+			this.contextMenu.visible = true
+			this.contextMenu.x = event.clientX
+			this.contextMenu.y = event.clientY
+			this.contextMenu.performer = performer
+		},
+		closeContextMenu() {
+			this.contextMenu.visible = false
+			this.contextMenu.performer = null
+		},
+		async fetchMetadata(performer) {
+			this.closeContextMenu()
+			try {
+				// Call API to fetch metadata from AdultDataLink
+				await performersAPI.fetchMetadata(performer.id)
+				// Reload performers to get updated data
+				await this.loadPerformers()
+				// TODO: Show success notification
+			} catch (err) {
+				console.error('Failed to fetch metadata:', err)
+				// TODO: Show error notification
+			}
+		},
+		async resetPerformer(performer) {
+			this.closeContextMenu()
+			try {
+				// Call API to reset performer metadata
+				await performersAPI.resetMetadata(performer.id)
+				// Reload performers
+				await this.loadPerformers()
+				// TODO: Show success notification
+			} catch (err) {
+				console.error('Failed to reset performer:', err)
+				// TODO: Show error notification
+			}
+		},
+		confirmDelete(performer) {
+			this.closeContextMenu()
+			this.closeDetails()
+			this.deleteModal.visible = true
+			this.deleteModal.performer = performer
+		},
+		async deletePerformer() {
+			const performer = this.deleteModal.performer
+			this.deleteModal.visible = false
+			try {
+				await performersAPI.delete(performer.id)
+				// Remove from local list
+				this.performers = this.performers.filter((p) => p.id !== performer.id)
+				// TODO: Show success notification
+			} catch (err) {
+				console.error('Failed to delete performer:', err)
+				// TODO: Show error notification
+			}
+		},
+		clearFilters() {
+			this.filters = {
+				showZoo: true,
+				ageMin: null,
+				ageMax: null,
+				breastMin: '',
+				breastMax: '',
+				heightMin: null,
+				heightMax: null,
+			}
+		},
+		formatDate(dateString) {
+			if (!dateString) return ''
+			const date = new Date(dateString)
+			return date.toLocaleDateString()
+		},
+	},
+	mounted() {
+		this.loadPerformers()
+
+		// Close context menu on click outside
+		document.addEventListener('click', () => {
+			if (this.contextMenu.visible) {
+				this.closeContextMenu()
+			}
+		})
+	},
 }
 </script>
 
@@ -21,5 +655,662 @@ export default {
 	min-height: calc(100vh - 60px);
 	background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
 	color: #fff;
+}
+
+.page-header h1 {
+	font-size: 2.5rem;
+	font-weight: 700;
+	color: #00d9ff;
+	display: flex;
+	align-items: center;
+}
+
+.performer-count {
+	font-size: 1.5rem;
+	color: rgba(255, 255, 255, 0.6);
+	margin-left: 0.5rem;
+}
+
+/* Controls Bar */
+.controls-bar {
+	background: rgba(255, 255, 255, 0.05);
+	padding: 1.5rem;
+	border-radius: 1rem;
+	backdrop-filter: blur(10px);
+}
+
+.search-box {
+	position: relative;
+}
+
+.search-icon {
+	position: absolute;
+	left: 1rem;
+	top: 50%;
+	transform: translateY(-50%);
+	color: rgba(255, 255, 255, 0.5);
+}
+
+.search-box input {
+	padding-left: 2.5rem;
+	padding-right: 2.5rem;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	color: #fff;
+}
+
+.search-box input:focus {
+	background: rgba(0, 0, 0, 0.5);
+	border-color: #00d9ff;
+	box-shadow: 0 0 0 0.2rem rgba(0, 217, 255, 0.25);
+	color: #fff;
+}
+
+.btn-clear-search {
+	position: absolute;
+	right: 0.5rem;
+	top: 50%;
+	transform: translateY(-50%);
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.5);
+	cursor: pointer;
+	padding: 0.25rem 0.5rem;
+}
+
+.btn-clear-search:hover {
+	color: #dc3545;
+}
+
+.form-select {
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	color: #fff;
+}
+
+.form-select:focus {
+	background: rgba(0, 0, 0, 0.5);
+	border-color: #00d9ff;
+	box-shadow: 0 0 0 0.2rem rgba(0, 217, 255, 0.25);
+	color: #fff;
+}
+
+.form-select option {
+	background: #1a1a2e;
+	color: #fff;
+}
+
+.btn-outline-primary {
+	border-color: rgba(0, 217, 255, 0.5);
+	color: #00d9ff;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary.active {
+	background: #00d9ff;
+	border-color: #00d9ff;
+	color: #000;
+}
+
+.btn-outline-secondary {
+	border-color: rgba(255, 255, 255, 0.3);
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.btn-outline-secondary:hover {
+	background: rgba(255, 255, 255, 0.1);
+	border-color: rgba(255, 255, 255, 0.5);
+	color: #fff;
+}
+
+/* Filters Panel */
+.filters-panel {
+	background: rgba(0, 0, 0, 0.3);
+	padding: 1.5rem;
+	border-radius: 0.5rem;
+	border: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.filter-group label {
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 0.875rem;
+	margin-bottom: 0.5rem;
+}
+
+.form-check-input {
+	background-color: rgba(0, 0, 0, 0.3);
+	border-color: rgba(0, 217, 255, 0.5);
+}
+
+.form-check-input:checked {
+	background-color: #00d9ff;
+	border-color: #00d9ff;
+}
+
+.form-check-label {
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.range-inputs {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.range-separator {
+	color: rgba(255, 255, 255, 0.5);
+}
+
+.range-inputs input {
+	flex: 1;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	color: #fff;
+}
+
+.range-inputs input:focus {
+	background: rgba(0, 0, 0, 0.5);
+	border-color: #00d9ff;
+	color: #fff;
+}
+
+.btn-outline-danger {
+	border-color: rgba(220, 53, 69, 0.5);
+	color: #dc3545;
+}
+
+.btn-outline-danger:hover {
+	background: #dc3545;
+	border-color: #dc3545;
+	color: #fff;
+}
+
+/* Loading/Error/Empty States */
+.loading-state,
+.error-state,
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 4rem 2rem;
+	color: rgba(255, 255, 255, 0.6);
+}
+
+/* Grid View */
+.performers-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(650px, 1fr));
+	gap: 0.5rem;
+}
+
+.performer-card {
+	background: linear-gradient(135deg, rgba(26, 26, 46, 0.9) 0%, rgba(22, 33, 62, 0.9) 100%);
+	border-radius: 1rem;
+	overflow: hidden;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	border: 2px solid transparent;
+}
+
+.performer-card:hover {
+	transform: translateY(-5px);
+	box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+	border-color: #00d9ff;
+}
+
+.card-preview {
+	position: relative;
+	width: 100%;
+	background: rgba(0, 0, 0, 0.5);
+	overflow: hidden;
+	height: 29.4rem;
+}
+
+.preview-video {
+	width: 100%;
+	height: 100%;
+	aspect-ratio: 16/9;
+}
+
+.no-preview {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.scene-badge {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	background: rgba(0, 0, 0, 0.8);
+	padding: 0.25rem 0.75rem;
+	border-radius: 1rem;
+	font-size: 0.875rem;
+	color: #00d9ff;
+	font-weight: 600;
+}
+
+.zoo-badge {
+	position: absolute;
+	bottom: 0.5rem;
+	left: 0.5rem;
+	background: rgba(220, 53, 69, 0.9);
+	padding: 0.25rem 0.75rem;
+	border-radius: 1rem;
+	font-size: 0.75rem;
+	color: #fff;
+	font-weight: 600;
+}
+
+.card-info {
+	padding: 0.5rem;
+}
+
+.performer-name {
+	font-size: 2rem;
+	font-weight: 600;
+	color: #00d9ff;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	padding: 0.1em;
+}
+
+.performer-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	font-size: 0.875rem;
+	color: rgba(255, 255, 255, 0.7);
+}
+
+.meta-item {
+	display: flex;
+	align-items: center;
+}
+
+/* List View */
+.performers-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+}
+
+.list-item {
+	display: flex;
+	align-items: center;
+	background: linear-gradient(135deg, rgba(26, 26, 46, 0.9) 0%, rgba(22, 33, 62, 0.9) 100%);
+	border-radius: 0.75rem;
+	padding: 1rem;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	border: 2px solid transparent;
+}
+
+.list-item:hover {
+	border-color: #00d9ff;
+	box-shadow: 0 5px 20px rgba(0, 217, 255, 0.2);
+}
+
+.list-preview {
+	width: 80px;
+	height: 80px;
+	border-radius: 0.5rem;
+	overflow: hidden;
+	background: rgba(0, 0, 0, 0.5);
+	flex-shrink: 0;
+}
+
+.preview-video-small {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.no-preview-small {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.list-content {
+	flex: 1;
+	margin-left: 1.5rem;
+}
+
+.list-content .performer-name {
+	margin-bottom: 0.5rem;
+}
+
+.performer-details {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	font-size: 0.875rem;
+	color: rgba(255, 255, 255, 0.7);
+}
+
+.detail-item {
+	display: flex;
+	align-items: center;
+}
+
+.list-actions {
+	display: flex;
+	gap: 0.5rem;
+	margin-left: 1rem;
+}
+
+/* Context Menu */
+.context-menu {
+	position: fixed;
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	border-radius: 0.5rem;
+	padding: 0.5rem 0;
+	min-width: 200px;
+	z-index: 10000;
+	box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.context-menu-item {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 0.75rem 1rem;
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.9);
+	text-align: left;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.context-menu-item:hover {
+	background: rgba(0, 217, 255, 0.1);
+	color: #00d9ff;
+}
+
+.context-menu-item.danger:hover {
+	background: rgba(220, 53, 69, 0.1);
+	color: #dc3545;
+}
+
+/* Details Panel */
+.details-panel {
+	position: fixed;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	left: 0;
+	background: rgba(0, 0, 0, 0.8);
+	z-index: 9999;
+	display: flex;
+	justify-content: flex-end;
+}
+
+.panel-content {
+	width: 70%;
+	max-width: 90vw;
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+	overflow-y: auto;
+	box-shadow: -5px 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.panel-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 1.5rem;
+	border-bottom: 2px solid rgba(0, 217, 255, 0.2);
+	position: sticky;
+	top: 0;
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+	z-index: 10;
+}
+
+.panel-header h3 {
+	font-size: 1.75rem;
+	font-weight: 700;
+	color: #00d9ff;
+	margin: 0;
+}
+
+.btn-close-panel {
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 1.5rem;
+	cursor: pointer;
+	padding: 0.5rem;
+	transition: all 0.3s ease;
+}
+
+.btn-close-panel:hover {
+	color: #dc3545;
+}
+
+/* Carousel */
+.panel-carousel {
+	padding: 1.5rem;
+	background: rgba(0, 0, 0, 0.3);
+}
+
+.carousel-container {
+	position: relative;
+	aspect-ratio: 16 / 9;
+	background: #000;
+	border-radius: 0.75rem;
+	overflow: hidden;
+}
+
+.carousel-video {
+	width: 100%;
+}
+
+.carousel-btn {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	background: rgba(0, 0, 0, 0.7);
+	border: none;
+	color: #fff;
+	font-size: 2rem;
+	padding: 1rem;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	z-index: 10;
+}
+
+.carousel-btn:hover {
+	background: rgba(0, 217, 255, 0.8);
+	color: #000;
+}
+
+.carousel-btn.prev {
+	left: 0;
+}
+
+.carousel-btn.next {
+	right: 0;
+}
+
+.carousel-indicator {
+	position: absolute;
+	bottom: 1rem;
+	left: 50%;
+	transform: translateX(-50%);
+	background: rgba(0, 0, 0, 0.8);
+	padding: 0.5rem 1rem;
+	border-radius: 1rem;
+	font-size: 0.875rem;
+	color: #fff;
+}
+
+.no-carousel {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+/* Metadata */
+.panel-metadata {
+	padding: 1.5rem;
+}
+
+.metadata-title {
+	font-size: 1.25rem;
+	font-weight: 600;
+	color: #00d9ff;
+	margin-bottom: 1rem;
+}
+
+.metadata-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 1rem;
+}
+
+.metadata-item {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
+.metadata-item.full-width {
+	grid-column: 1 / -1;
+}
+
+.metadata-label {
+	font-size: 0.875rem;
+	color: rgba(255, 255, 255, 0.6);
+}
+
+.metadata-value {
+	font-size: 1rem;
+	color: #fff;
+	font-weight: 500;
+}
+
+.zoo-indicator {
+	color: #dc3545;
+	font-weight: 600;
+}
+
+/* Panel Actions */
+.panel-actions {
+	display: flex;
+	gap: 1rem;
+	padding: 1.5rem;
+	border-top: 2px solid rgba(0, 217, 255, 0.2);
+}
+
+.panel-actions .btn {
+	flex: 1;
+}
+
+/* Modal */
+.modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.8);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 10000;
+}
+
+.modal-dialog {
+	width: 90%;
+	max-width: 500px;
+}
+
+.modal-content {
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+	border-radius: 1rem;
+	border: 2px solid rgba(0, 217, 255, 0.3);
+	overflow: hidden;
+}
+
+.modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 1.5rem;
+	border-bottom: 2px solid rgba(0, 217, 255, 0.2);
+}
+
+.modal-title {
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: #00d9ff;
+	margin: 0;
+}
+
+.btn-close-modal {
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 1.25rem;
+	cursor: pointer;
+	padding: 0.25rem 0.5rem;
+}
+
+.btn-close-modal:hover {
+	color: #dc3545;
+}
+
+.modal-body {
+	padding: 1.5rem;
+	color: rgba(255, 255, 255, 0.9);
+}
+
+.text-muted {
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 0.875rem;
+}
+
+.modal-footer {
+	display: flex;
+	gap: 1rem;
+	padding: 1.5rem;
+	border-top: 2px solid rgba(0, 217, 255, 0.2);
+}
+
+.modal-footer .btn {
+	flex: 1;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+	.performers-grid {
+		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+		gap: 1rem;
+	}
+
+	.panel-content {
+		width: 100%;
+		max-width: 100%;
+	}
+
+	.metadata-grid {
+		grid-template-columns: 1fr;
+	}
 }
 </style>

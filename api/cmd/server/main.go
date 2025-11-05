@@ -13,6 +13,7 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/api"
 	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
+	"github.com/brixen96/video-storage-ai/internal/services"
 )
 
 func main() {
@@ -29,6 +30,22 @@ func main() {
 	defer database.Close()
 
 	log.Println("Database initialized successfully")
+
+	// Run startup performer scan
+	log.Println("Running startup performer scan...")
+	scanService := services.NewPerformerScanService()
+	scanResult, err := scanService.ScanPerformerFolders()
+	if err != nil {
+		log.Printf("Warning: Performer scan failed: %v", err)
+	} else {
+		log.Printf("Performer scan complete: %d folders found, %d new created, %d existing",
+			scanResult.TotalFolders, scanResult.NewCreated, scanResult.Existing)
+		if len(scanResult.Errors) > 0 {
+			for _, errMsg := range scanResult.Errors {
+				log.Printf("  Scan error: %s", errMsg)
+			}
+		}
+	}
 
 	// Setup router
 	router := api.SetupRouter(cfg)

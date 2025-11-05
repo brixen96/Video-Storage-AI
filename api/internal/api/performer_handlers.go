@@ -235,3 +235,22 @@ func resetPreviews(c *gin.Context) {
 		"Preview reset not yet implemented. Coming soon!",
 	))
 }
+
+// scanPerformers scans the performer asset folders and creates/updates performers
+func scanPerformers(c *gin.Context) {
+	scanService := services.NewPerformerScanService()
+
+	result, err := scanService.ScanPerformerFolders()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to scan performer folders",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		result,
+		"Performer scan completed successfully",
+	))
+}

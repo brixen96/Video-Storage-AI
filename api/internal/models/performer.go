@@ -12,6 +12,7 @@ type Performer struct {
 	PreviewPath string    `json:"preview_path" db:"preview_path"`
 	FolderPath  string    `json:"folder_path" db:"folder_path"`
 	SceneCount  int       `json:"scene_count" db:"scene_count"`
+	Zoo         bool      `json:"zoo" db:"zoo"`
 	Metadata    string    `json:"-" db:"metadata"` // JSON string in DB
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
@@ -22,6 +23,7 @@ type Performer struct {
 
 // PerformerMetadata represents additional performer information from external APIs
 type PerformerMetadata struct {
+	// Commonly used flat fields for easy access
 	Bio         string   `json:"bio,omitempty"`
 	Birthdate   string   `json:"birthdate,omitempty"`
 	Birthplace  string   `json:"birthplace,omitempty"`
@@ -39,6 +41,9 @@ type PerformerMetadata struct {
 	URLs        []string `json:"urls,omitempty"`
 	ImageURL    string   `json:"image_url,omitempty"`
 	ExternalID  string   `json:"external_id,omitempty"` // AdultDataLink ID
+
+	// Full AdultDataLink response (stored for advanced use)
+	AdultDataLinkResponse map[string]interface{} `json:"adult_data_link_response,omitempty"`
 }
 
 // PerformerCreate represents the data needed to create a performer

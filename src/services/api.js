@@ -49,6 +49,7 @@ export const performersAPI = {
 	},
 	getById: (id) => api.get(`/performers/${id}`),
 	create: (data) => api.post('/performers', data),
+	scan: () => api.post('/performers/scan'),
 	update: (id, data) => api.put(`/performers/${id}`, data),
 	delete: (id) => api.delete(`/performers/${id}`),
 	fetchMetadata: (id) => api.post(`/performers/${id}/fetch-metadata`),

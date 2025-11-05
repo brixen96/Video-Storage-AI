@@ -86,8 +86,8 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	return &p, nil
 }
 
-// GetByName retrieves a performer by name
-func (s *PerformerService) GetByName(name string) (*models.Performer, error) {
+// GetPerformerByName retrieves a performer by name
+func (s *PerformerService) GetPerformerByName(name string) (*models.Performer, error) {
 	query := `
 		SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
 		FROM performers
@@ -118,7 +118,7 @@ func (s *PerformerService) GetByName(name string) (*models.Performer, error) {
 // Create creates a new performer
 func (s *PerformerService) Create(create *models.PerformerCreate) (*models.Performer, error) {
 	// Check if performer already exists
-	existing, _ := s.GetByName(create.Name)
+	existing, _ := s.GetPerformerByName(create.Name)
 	if existing != nil {
 		return nil, fmt.Errorf("performer with name '%s' already exists", create.Name)
 	}

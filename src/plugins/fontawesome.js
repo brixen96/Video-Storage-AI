@@ -5,6 +5,7 @@ import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 import {
 	faHome,
 	faUsers,
+	faUser,
 	faVideo,
 	faBuilding,
 	faTags,
@@ -40,11 +41,13 @@ import {
 	faInfoCircle,
 	faSpinner,
 	faList,
+	faTh,
 	faExpand,
 	faClock,
 	faFilm,
 	faBookOpen,
 	faCheckCircle,
+	faBirthdayCake,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -54,6 +57,7 @@ import { faHeart as farHeart, faStar as farStar } from '@fortawesome/free-regula
 library.add(
 	faHome,
 	faUsers,
+	faUser,
 	faVideo,
 	faBuilding,
 	faTags,
@@ -89,13 +93,15 @@ library.add(
 	faInfoCircle,
 	faSpinner,
 	faList,
+	faTh,
 	faExpand,
 	faClock,
 	faFilm,
 	faBookOpen,
 	farHeart,
 	farStar,
-	faCheckCircle
+	faCheckCircle,
+	faBirthdayCake
 )
 
 export default FontAwesomeIcon

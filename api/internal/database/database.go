@@ -245,6 +245,14 @@ func runMigrations() error {
 		return fmt.Errorf("failed to add in_edit_list column: %w", err)
 	}
 
+	// Migration 4: Add zoo column to performers table
+	_, err = DB.Exec(`
+		ALTER TABLE performers ADD COLUMN zoo BOOLEAN DEFAULT 0
+	`)
+	if err != nil && !isColumnExistsError(err) {
+		return fmt.Errorf("failed to add zoo column: %w", err)
+	}
+
 	return nil
 }
 
