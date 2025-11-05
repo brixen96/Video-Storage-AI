@@ -15,6 +15,7 @@ video-organizer.exe
 video_organizer.db
 # Test binary, built with `go test -c`
 *.test
+nul
 
 node_modules
 
