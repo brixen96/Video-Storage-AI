@@ -17,7 +17,12 @@
       "Bash(dir:*)",
       "Bash(TagsPage.vue)",
       "Bash(touch:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(make run:*)",
+      "Bash(timeout 5 go run:*)",
+      "Bash(taskkill:*)",
+      "Bash(taskkill /F /PID 25204)",
+      "Bash(timeout 5 powershell:*)"
     ],
     "deny": [],
     "ask": []

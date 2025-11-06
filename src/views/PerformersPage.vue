@@ -555,19 +555,26 @@ export default {
 			},
 		}
 	},
+
 	computed: {
 		filteredPerformers() {
+			// Ensure performers is always an array
+			if (!Array.isArray(this.performers)) {
+				console.warn('performers is not an array:', this.performers)
+				return []
+			}
+
 			let result = this.performers
 
 			// Search filter
 			if (this.searchQuery) {
 				const query = this.searchQuery.toLowerCase()
-				result = result.filter((p) => p.name.toLowerCase().includes(query))
+				result = result.filter((p) => p && p.name && p.name.toLowerCase().includes(query))
 			}
 
 			// Zoo filter
 			if (!this.filters.showZoo) {
-				result = result.filter((p) => !p.zoo)
+				result = result.filter((p) => p && !p.zoo)
 			}
 
 			// Age filter
@@ -602,22 +609,24 @@ export default {
 			if (this.filters.breastMin) {
 				// Convert breast sizes to numeric for comparison (simplified)
 				result = result.filter((p) => {
-					if (!p.breast_size) return false
+					if (!p || !p.breast_size) return false
 					return p.breast_size >= this.filters.breastMin
 				})
 			}
 			if (this.filters.breastMax) {
 				result = result.filter((p) => {
-					if (!p.breast_size) return false
+					if (!p || !p.breast_size) return false
 					return p.breast_size <= this.filters.breastMax
 				})
 			}
 
 			// Sort
 			result = [...result].sort((a, b) => {
+				if (!a || !b) return 0
+
 				switch (this.sortBy) {
 					case 'name':
-						return a.name.localeCompare(b.name)
+						return (a.name || '').localeCompare(b.name || '')
 					case 'age':
 						return (this.getAge(a) || 0) - (this.getAge(b) || 0)
 					case 'breast':
@@ -654,23 +663,46 @@ export default {
 			const match = heightStr.match(/(\d+)/)
 			return match ? parseInt(match[1]) : null
 		},
+
 		async loadPerformers() {
 			this.loading = true
 			this.error = null
 			try {
 				const response = await performersAPI.getAll()
-				console.log('data', response)
-				this.performers = response.data || []
+				console.log('API response:', response)
+
+				// Ensure we always have an array
+				if (response.data) {
+					// Handle different response structures
+					if (Array.isArray(response.data)) {
+						this.performers = response.data
+					} else if (response.data.performers && Array.isArray(response.data.performers)) {
+						this.performers = response.data.performers
+					} else if (response.data.data && Array.isArray(response.data.data)) {
+						this.performers = response.data.data
+					} else {
+						console.warn('Unexpected response structure:', response.data)
+						this.performers = []
+					}
+				} else {
+					this.performers = []
+				}
+
+				console.log('Loaded performers:', this.performers.length)
 
 				// Preload previews for all performers in background (non-blocking)
-				this.preloadAllPreviews()
+				if (this.performers.length > 0) {
+					this.preloadAllPreviews()
+				}
 			} catch (err) {
 				console.error('Failed to load performers:', err)
 				this.error = 'Failed to load performers. Please try again.'
+				this.performers = [] // Ensure it's always an array even on error
 			} finally {
 				this.loading = false
 			}
 		},
+
 		getPreviewUrl(path) {
 			return `http://localhost:8080${path}`
 		},
@@ -715,9 +747,15 @@ export default {
 			}
 		},
 		async preloadAllPreviews() {
+			// Safety check
+			if (!Array.isArray(this.performers)) {
+				console.warn('performers is not an array, skipping preview preload')
+				return
+			}
+
 			// Preload previews for all performers in background
 			for (const performer of this.performers) {
-				if (!this.performerPreviews[performer.id]) {
+				if (performer && performer.id && !this.performerPreviews[performer.id]) {
 					await this.loadPerformerPreviews(performer.id)
 				}
 			}
@@ -775,14 +813,14 @@ export default {
 			try {
 				// Update performer with new primary preview path
 				await performersAPI.update(performer.id, {
-					preview_path: selectedPreviewPath
+					preview_path: selectedPreviewPath,
 				})
 
 				// Reload performers
 				await this.loadPerformers()
 
 				// Update details panel
-				const updatedPerformer = this.performers.find(p => p.id === performer.id)
+				const updatedPerformer = this.performers.find((p) => p.id === performer.id)
 				if (updatedPerformer) {
 					this.detailsPanel.performer = updatedPerformer
 				}
@@ -803,7 +841,7 @@ export default {
 				await this.loadPerformers()
 				// Reload the current performer in details panel
 				if (this.detailsPanel.visible && this.detailsPanel.performer?.id === performer.id) {
-					const updatedPerformer = this.performers.find(p => p.id === performer.id)
+					const updatedPerformer = this.performers.find((p) => p.id === performer.id)
 					if (updatedPerformer) {
 						this.detailsPanel.performer = updatedPerformer
 						console.log('Updated performer in panel:', updatedPerformer)

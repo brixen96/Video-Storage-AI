@@ -301,3 +301,106 @@ func (s *PerformerService) ResetMetadata(id int64) error {
 
 	return nil
 }
+
+// GetAllPaginated retrieves performers with pagination
+func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performer, int64, error) {
+    // Get total count
+    var total int64
+    countQuery := "SELECT COUNT(*) FROM performers"
+    err := s.db.QueryRow(countQuery).Scan(&total)
+    if err != nil {
+        return nil, 0, fmt.Errorf("failed to count performers: %w", err)
+    }
+
+    // Get paginated results
+    query := `
+        SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+        FROM performers
+        ORDER BY name ASC
+        LIMIT ? OFFSET ?
+    `
+
+    rows, err := s.db.Query(query, limit, offset)
+    if err != nil {
+        return nil, 0, fmt.Errorf("failed to query performers: %w", err)
+    }
+    defer rows.Close()
+
+    var performers []models.Performer
+    for rows.Next() {
+        var p models.Performer
+        err := rows.Scan(
+            &p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
+            &p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+        )
+        if err != nil {
+            return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
+        }
+
+        // Parse metadata JSON
+        if err := p.UnmarshalMetadata(); err != nil {
+            return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
+        }
+
+        performers = append(performers, p)
+    }
+
+    if err = rows.Err(); err != nil {
+        return nil, 0, fmt.Errorf("error iterating performers: %w", err)
+    }
+
+    return performers, total, nil
+}
+
+// SearchPaginated searches performers with pagination
+func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int) ([]models.Performer, int64, error) {
+    searchPattern := "%" + searchTerm + "%"
+
+    // Get total count
+    var total int64
+    countQuery := "SELECT COUNT(*) FROM performers WHERE name LIKE ?"
+    err := s.db.QueryRow(countQuery, searchPattern).Scan(&total)
+    if err != nil {
+        return nil, 0, fmt.Errorf("failed to count performers: %w", err)
+    }
+
+    // Get paginated results
+    query := `
+        SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+        FROM performers
+        WHERE name LIKE ?
+        ORDER BY name ASC
+        LIMIT ? OFFSET ?
+    `
+
+    rows, err := s.db.Query(query, searchPattern, limit, offset)
+    if err != nil {
+        return nil, 0, fmt.Errorf("failed to query performers: %w", err)
+    }
+    defer rows.Close()
+
+    var performers []models.Performer
+    for rows.Next() {
+        var p models.Performer
+        err := rows.Scan(
+            &p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
+            &p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+        )
+        if err != nil {
+            return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
+        }
+
+        // Parse metadata JSON
+        if err := p.UnmarshalMetadata(); err != nil {
+            return nil, 0, fmt.Errorf("failed to unmarshal metadata: %w", err)
+        }
+
+        performers = append(performers, p)
+    }
+
+    if err = rows.Err(); err != nil {
+        return nil, 0, fmt.Errorf("error iterating performers: %w", err)
+    }
+
+    return performers, total, nil
+}

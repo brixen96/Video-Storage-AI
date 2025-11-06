@@ -115,7 +115,7 @@ func updateActivity(c *gin.Context) {
 		return
 	}
 
-	activity, err := svc.Update(id, &update)
+	activity, err := svc.Update(int(id), &update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to update activity",

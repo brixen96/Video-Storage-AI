@@ -98,11 +98,18 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 
 						// Build thumbnail directory path
 						var thumbnailDir = os.Getenv("THUMBNAIL_DIR")
-						thumbnailFullPath := filepath.Join(thumbnailDir, thumbnailName)
-						fmt.Printf("Generating thumbnail for %s at %s\n", entry.Name(), thumbnailFullPath)
+						// Build thumbnail directory path with library ID
+						libraryThumbnailDir := filepath.Join(thumbnailDir, fmt.Sprintf("%d", libraryID))
+                        // Build thumbnail directory path with library ID and relative path
+                        if relativePath != "" {
+                            libraryThumbnailDir = filepath.Join(libraryThumbnailDir, relativePath)
+                        }
+                        // Build full thumbnail path with library ID and relative path
+                        thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
+                        fmt.Printf("Generating thumbnail for %s at %s\n", entry.Name(), thumbnailFullPath)
 						
 						// Create thumbnail directory if it doesn't exist
-						if err := os.MkdirAll(thumbnailDir, 0755); err == nil {
+						if err := os.MkdirAll(libraryThumbnailDir, 0755); err == nil {
 							// Check if thumbnail exists
 							if _, err := os.Stat(thumbnailFullPath); os.IsNotExist(err) {
 								// Create activity log for thumbnail generation
@@ -112,7 +119,7 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 									map[string]interface{}{
 										"video_name":  entry.Name(),
 										"library_id":  libraryID,
-										"path":        relativePath,
+										"path":        thumbnailFullPath,
 									},
 								)
 								if actErr != nil {
@@ -135,7 +142,7 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 
 									// Mark activity as completed
 									if activity != nil {
-										s.activityService.CompleteTask(activity.ID, fmt.Sprintf("Generated thumbnail for %s", entry.Name()))
+										s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", entry.Name()))
 									}
 								} else {
 									// Mark activity as failed

@@ -6,11 +6,24 @@
 		</div>
 
 		<!-- Thumbnail / Preview -->
-		<div class="video-thumbnail">
-			<img v-if="video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" loading="lazy" />
-			<div v-else class="thumbnail-placeholder">
+		<div class="video-thumbnail" @mouseenter="startPreview" @mouseleave="stopPreview">
+			<!-- Static Thumbnail -->
+			<img v-if="!isPreviewPlaying && video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" loading="lazy" class="thumbnail-image" />
+			<div v-else-if="!isPreviewPlaying" class="thumbnail-placeholder">
 				<font-awesome-icon :icon="['fas', 'video']" size="3x" />
 			</div>
+
+			<!-- Video Preview (plays on hover) -->
+			<video
+				v-if="hasPreview"
+				ref="previewVideo"
+				:src="getPreviewURL(video)"
+				class="preview-video"
+				:class="{ active: isPreviewPlaying }"
+				loop
+				muted
+				@loadeddata="onPreviewLoaded"
+			></video>
 
 			<!-- Hover Overlay -->
 			<div class="hover-overlay">
@@ -27,6 +40,20 @@
 					<button class="btn-quick-action" @click.stop="openInExplorer" title="Open in Explorer">
 						<font-awesome-icon :icon="['fas', 'folder-open']" />
 					</button>
+				</div>
+			</div>
+
+			<!-- Status Badges -->
+			<div class="status-badges">
+				<div v-if="video.is_favorite" class="badge-favorite" title="Favorite">
+					<font-awesome-icon :icon="['fas', 'heart']" />
+				</div>
+				<div v-if="video.is_pinned" class="badge-pinned" title="Pinned">
+					<font-awesome-icon :icon="['fas', 'thumbtack']" />
+				</div>
+				<div v-if="video.rating" class="badge-rating" :title="`Rating: ${video.rating}/5`">
+					<font-awesome-icon :icon="['fas', 'star']" />
+					{{ video.rating }}
 				</div>
 			</div>
 
@@ -91,6 +118,18 @@ export default {
 		},
 	},
 	emits: ['click', 'toggle-select', 'context-menu', 'play', 'add-tag', 'edit-metadata', 'open-performer', 'open-studio'],
+	data() {
+		return {
+			isPreviewPlaying: false,
+			previewLoaded: false,
+			hoverTimeout: null,
+		}
+	},
+	computed: {
+		hasPreview() {
+			return this.video.preview_path || (this.video.previews && this.video.previews.length > 0)
+		},
+	},
 	methods: {
 		getAssetURL,
 		getThumbnailURL(video) {
@@ -98,6 +137,43 @@ export default {
 				return getAssetURL(video.thumbnail_path)
 			}
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
+		},
+		getPreviewURL(video) {
+			if (video.preview_path) {
+				return getAssetURL(video.preview_path)
+			}
+			if (video.previews && video.previews.length > 0) {
+				return getAssetURL(video.previews[0])
+			}
+			return null
+		},
+		startPreview() {
+			// Delay preview start by 500ms to avoid loading on quick hovers
+			this.hoverTimeout = setTimeout(() => {
+				if (this.hasPreview && this.$refs.previewVideo) {
+					this.isPreviewPlaying = true
+					this.$refs.previewVideo.play().catch(() => {
+						// Ignore play errors (e.g., if user navigates away quickly)
+					})
+				}
+			}, 500)
+		},
+		stopPreview() {
+			// Clear the timeout if user moves away before preview starts
+			if (this.hoverTimeout) {
+				clearTimeout(this.hoverTimeout)
+				this.hoverTimeout = null
+			}
+
+			// Stop preview if playing
+			if (this.isPreviewPlaying && this.$refs.previewVideo) {
+				this.$refs.previewVideo.pause()
+				this.$refs.previewVideo.currentTime = 0
+				this.isPreviewPlaying = false
+			}
+		},
+		onPreviewLoaded() {
+			this.previewLoaded = true
 		},
 		formatDuration(seconds) {
 			const mins = Math.floor(seconds / 60)
@@ -134,6 +210,12 @@ export default {
 			// This would need native integration or electron
 			console.log('Open in explorer:', this.video.file_path)
 		},
+	},
+	beforeUnmount() {
+		// Clean up timeout on component destroy
+		if (this.hoverTimeout) {
+			clearTimeout(this.hoverTimeout)
+		}
 	},
 }
 </script>
@@ -188,10 +270,24 @@ export default {
 	overflow: hidden;
 }
 
-.video-thumbnail img {
+.video-thumbnail .thumbnail-image,
+.video-thumbnail .preview-video {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+}
+
+.preview-video {
+	position: absolute;
+	top: 0;
+	left: 0;
+	opacity: 0;
+	transition: opacity 0.3s;
+	pointer-events: none;
+}
+
+.preview-video.active {
+	opacity: 1;
 }
 
 .thumbnail-placeholder {
@@ -260,6 +356,43 @@ export default {
 
 .btn-quick-action:hover {
 	background: rgba(255, 255, 255, 0.3);
+}
+
+/* Status Badges */
+.status-badges {
+	position: absolute;
+	top: 0.5rem;
+	right: 0.5rem;
+	display: flex;
+	gap: 0.25rem;
+	z-index: 5;
+}
+
+.badge-favorite,
+.badge-pinned,
+.badge-rating {
+	background: rgba(0, 0, 0, 0.8);
+	color: white;
+	padding: 0.25rem 0.5rem;
+	border-radius: 0.25rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.badge-favorite {
+	background: rgba(220, 53, 69, 0.9);
+}
+
+.badge-pinned {
+	background: rgba(13, 110, 253, 0.9);
+}
+
+.badge-rating {
+	background: rgba(255, 193, 7, 0.9);
+	color: #000;
 }
 
 /* Duration Badge */

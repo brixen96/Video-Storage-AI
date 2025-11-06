@@ -32,6 +32,7 @@ deps:
 	@echo "Downloading dependencies..."
 	$(GOMOD) download
 	$(GOMOD) tidy
+	$(GOGET) github.com/gorilla/websocket
 
 ## build: Build the application (optimized)
 build: deps

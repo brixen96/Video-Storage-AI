@@ -1,51 +1,98 @@
 
 <template>
-    <div class="activity-status-widget px-2 py-2" v-click-outside="closeDetails">
-        <div class="status-indicator-container" @click="toggleDetails">
-            <div class="status-indicator" :class="statusColor">
-                <div class="status-pulse" :class="statusColor" v-if="statusColor !== 'green'"></div>
-            </div>
-            <div class="status-text">
-                <div class="status-label">{{ statusLabel }}</div>
-                <div class="status-message" v-if="currentActivity">{{ currentActivity.message }}</div>
-                <div class="status-message" v-else>{{ idleMessage }}</div>
-            </div>
+    <div class="activity-status-widget" v-click-outside="closeDetails">
+        <div class="status-indicator" @click="toggleDetails" :class="statusColor">
+            <div class="status-dot"></div>
+            <span class="status-label">{{ statusLabel }}</span>
+            <span v-if="wsConnected" class="ws-indicator" title="Real-time updates active">
+                <i class="bi bi-broadcast"></i>
+            </span>
         </div>
 
-        <!-- Expandable Details -->
-        <transition name="slide-fade">
-            <div v-if="showDetails" class="status-details position-absolute rounded mt-2 p-2 text-center">
-                <div v-if="currentActivity" class="current-task">
-                    <div class="task-header">
+        <div v-if="showDetails" class="status-details">
+            <div class="details-header">
+                <h6>Activity Status</h6>
+                <button @click="closeDetails" class="btn-close btn-sm"></button>
+            </div>
+
+            <div class="details-body">
+                <!-- Connection Status -->
+                <div class="connection-status mb-3">
+                    <small :class="wsConnected ? 'text-success' : 'text-warning'">
+                        <i :class="wsConnected ? 'bi bi-wifi' : 'bi bi-wifi-off'"></i>
+                        {{ wsConnected ? 'Real-time updates active' : 'Connecting...' }}
+                    </small>
+                </div>
+
+                <!-- Current Activity -->
+                <div v-if="currentActivity" class="current-activity mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="badge" :class="getTaskTypeBadge(currentActivity.task_type)">
                             {{ formatTaskType(currentActivity.task_type) }}
                         </span>
-                        <span class="task-time">{{ formatTime(currentActivity.started_at) }}</span>
+                        <span class="badge" :class="'bg-' + statusColor">{{ currentActivity.status }}</span>
                     </div>
-                    <div class="progress mt-2" style="height: 6px">
+                    <p class="mb-1">{{ currentActivity.message }}</p>
+                    <div v-if="currentActivity.progress !== undefined" class="progress" style="height: 4px">
                         <div
-                            class="progress-bar progress-bar-striped progress-bar-animated"
-                            :class="statusColor === 'yellow' ? 'bg-warning' : 'bg-danger'"
+                            class="progress-bar"
+                            :class="'bg-' + statusColor"
                             :style="{ width: currentActivity.progress + '%' }"
                         ></div>
                     </div>
-                    <small class="progress-text">{{ currentActivity.progress }}% complete</small>
+                    <small class="text-muted">Started: {{ formatTime(currentActivity.started_at) }}</small>
                 </div>
-                <div v-else class="idle-state">
-                    <font-awesome-icon :icon="['fas', 'check-circle']" class="text-success me-2" />
-                    <span class="text-info">All systems operational</span>
+
+                <!-- Idle State -->
+                <div v-else class="text-center text-muted py-3">
+                    <i class="bi bi-check-circle fs-3"></i>
+                    <p class="mb-0 mt-2">{{ idleMessage }}</p>
                 </div>
-                <router-link to="/activity" class="btn btn-sm btn-outline-primary mt-2 w-100">
-                    <font-awesome-icon :icon="['fas', 'chart-line']" class="me-1" />
-                    View Full Monitor
-                </router-link>
+
+                <!-- Status Summary -->
+                <div class="status-summary">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <div class="stat-value text-warning">{{ status.running_tasks || 0 }}</div>
+                                <div class="stat-label">Running</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <div class="stat-value text-info">{{ status.pending_tasks || 0 }}</div>
+                                <div class="stat-label">Pending</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <div class="stat-value text-success">{{ status.completed_tasks || 0 }}</div>
+                                <div class="stat-label">Completed</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="stat-box">
+                                <div class="stat-value text-danger">{{ status.failed_tasks || 0 }}</div>
+                                <div class="stat-label">Failed</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- View All Link -->
+                <div class="text-center mt-3">
+                    <router-link to="/activity" class="btn btn-sm btn-outline-primary" @click="closeDetails">
+                        View All Activities
+                    </router-link>
+                </div>
             </div>
-        </transition>
+        </div>
     </div>
 </template>
 
 <script>
 import { activityAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 export default {
     name: 'ActivityStatusWidget',
@@ -53,21 +100,21 @@ export default {
         return {
             status: {},
             currentActivity: null,
-            autoRefresh: null,
             showDetails: false,
+            wsConnected: false,
+            unsubscribeWs: null,
+            unsubscribeStatus: null,
+            unsubscribeConnection: null,
         }
     },
     computed: {
         statusColor() {
-            // Red: Error (failed tasks)
             if (this.status.failed_tasks > 0 || (this.currentActivity && this.currentActivity.status === 'failed')) {
                 return 'red'
             }
-            // Yellow: Processing (running or pending tasks)
             if (this.status.running_tasks > 0 || this.status.pending_tasks > 0) {
                 return 'yellow'
             }
-            // Green: Idle (no active tasks)
             return 'green'
         },
         statusLabel() {
@@ -83,9 +130,7 @@ export default {
         clickOutside: {
             mounted(el, binding) {
                 el.clickOutsideEvent = function (event) {
-                    // Check if the click is outside the element
                     if (!(el === event.target || el.contains(event.target))) {
-                        // Call the provided method
                         binding.value(event)
                     }
                 }
@@ -97,11 +142,48 @@ export default {
         },
     },
     async mounted() {
+        // Load initial status
         await this.loadStatus()
-        this.startAutoRefresh()
+
+        // Connect to WebSocket
+        websocketService.connect()
+
+        // Subscribe to WebSocket events
+        this.unsubscribeConnection = websocketService.on('connected', (data) => {
+            this.wsConnected = data.connected
+            if (data.connected) {
+                // Reload status when connected
+                this.loadStatus()
+            }
+        })
+
+        this.unsubscribeStatus = websocketService.on('status_update', (data) => {
+            console.log('Status update received:', data)
+            this.status = data
+            this.updateCurrentActivity()
+        })
+
+        this.unsubscribeWs = websocketService.on('activity_update', (data) => {
+            console.log('Activity update received:', data)
+            // Update current activity if it matches
+            if (this.currentActivity && this.currentActivity.id === data.id) {
+                this.currentActivity = data
+            }
+            // Reload status to get updated counts
+            this.loadStatus()
+        })
+
+        // Check initial connection state
+        this.wsConnected = websocketService.isConnected()
     },
     beforeUnmount() {
-        this.stopAutoRefresh()
+        // Unsubscribe from WebSocket events
+        if (this.unsubscribeWs) this.unsubscribeWs()
+        if (this.unsubscribeStatus) this.unsubscribeStatus()
+        if (this.unsubscribeConnection) this.unsubscribeConnection()
+        
+        // Disconnect WebSocket
+        websocketService.disconnect()
     },
     methods: {
         async loadStatus() {
@@ -129,22 +211,19 @@ export default {
                 console.error('Failed to load status:', error)
             }
         },
+        updateCurrentActivity() {
+            // Update current activity based on status
+            if (this.status.current_tasks && this.status.current_tasks.length > 0) {
+                this.currentActivity = this.status.current_tasks[0]
+            } else {
+                this.currentActivity = null
+            }
+        },
         toggleDetails() {
             this.showDetails = !this.showDetails
         },
         closeDetails() {
             this.showDetails = false
-        },
-        startAutoRefresh() {
-            // Refresh every 3 seconds
-            this.autoRefresh = setInterval(() => {
-                this.loadStatus()
-            }, 3000)
-        },
-        stopAutoRefresh() {
-            if (this.autoRefresh) {
-                clearInterval(this.autoRefresh)
-            }
         },
         formatTaskType(taskType) {
             return taskType
@@ -174,178 +253,146 @@ export default {
 
 <style scoped>
 .activity-status-widget {
-	position: relative;
-	background: rgba(255, 255, 255, 0.05);
-	border-radius: 0.75rem;
-	backdrop-filter: blur(10px);
-	transition: all 0.3s ease;
+    position: relative;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 0.75rem;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    min-width: 250px;
 }
 
 .activity-status-widget:hover {
-	background: rgba(255, 255, 255, 0.08);
-}
-
-.status-indicator-container {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-	cursor: pointer;
-	user-select: none;
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .status-indicator {
-	position: relative;
-	width: 16px;
-	height: 16px;
-	border-radius: 50%;
-	flex-shrink: 0;
-	transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
 }
 
-.status-indicator.green {
-	background: #28a745;
-	box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+.status-indicator:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
-.status-indicator.yellow {
-	background: #ffc107;
-	box-shadow: 0 0 10px rgba(255, 193, 7, 0.5);
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    transition: all 0.3s ease;
 }
 
-.status-indicator.red {
-	background: #dc3545;
-	box-shadow: 0 0 10px rgba(220, 53, 69, 0.5);
+.status-indicator.green .status-dot {
+    background: #28a745;
+    box-shadow: 0 0 8px rgba(40, 167, 69, 0.5);
 }
 
-.status-pulse {
-	position: absolute;
-	top: 50%;
-	left: 50%;
-	transform: translate(-50%, -50%);
-	width: 100%;
-	height: 100%;
-	border-radius: 50%;
-	animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+.status-indicator.yellow .status-dot {
+    background: #ffc107;
+    box-shadow: 0 0 8px rgba(255, 193, 7, 0.5);
 }
 
-.status-pulse.yellow {
-	background: rgba(255, 193, 7, 0.5);
-}
-
-.status-pulse.red {
-	background: rgba(220, 53, 69, 0.5);
-}
-
-@keyframes pulse-ring {
-	0% {
-		transform: translate(-50%, -50%) scale(1);
-		opacity: 1;
-	}
-	100% {
-		transform: translate(-50%, -50%) scale(2.5);
-		opacity: 0;
-	}
-}
-
-.status-text {
-	flex: 1;
-	min-width: 0;
+.status-indicator.red .status-dot {
+    background: #dc3545;
+    box-shadow: 0 0 8px rgba(220, 53, 69, 0.5);
 }
 
 .status-label {
-	font-weight: 600;
-	font-size: 0.875rem;
-	color: #00d9ff;
-	margin-bottom: 0.125rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #00d9ff;
 }
 
-.status-message {
-	font-size: 0.75rem;
-	color: rgba(255, 255, 255, 0.7);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+.ws-indicator {
+    font-size: 0.75rem;
+    color: #28a745;
 }
 
 .status-details {
-	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
-
-	border-top: 1px solid rgba(255, 255, 255, 0.1);
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    margin-top: 0.5rem;
+    overflow: hidden;
 }
 
-.current-task {
-	margin-bottom: 0.5rem;
+.details-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
 }
 
-.task-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 0.5rem;
+.details-body {
+    padding: 1rem;
 }
 
-.task-time {
-	font-size: 0.75rem;
-	color: rgba(255, 255, 255, 0.6);
+.connection-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
 }
 
-.progress {
-	background: rgba(0, 0, 0, 0.3);
-	border-radius: 0.5rem;
+.current-activity {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
 }
 
-.progress-text {
-	display: block;
-	margin-top: 0.25rem;
-	font-size: 0.7rem;
-	color: rgba(255, 255, 255, 0.6);
+.stat-box {
+    text-align: center;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
 }
 
-.idle-state {
-	display: flex;
-	align-items: center;
-	padding: 0.5rem 0;
-	font-size: 0.875rem;
-	color: rgba(255, 255, 255, 0.8);
+.stat-value {
+    font-size: 1.25rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
 }
 
-.badge.bg-purple {
-	background-color: #6f42c1 !important;
-}
-
-.badge.bg-cyan {
-	background-color: #00d9ff !important;
-	color: #000 !important;
+.stat-label {
+    font-size: 0.75rem;
+    opacity: 0.7;
 }
 
 .btn-outline-primary {
-	border-color: rgba(0, 217, 255, 0.5);
-	color: #00d9ff;
-	font-size: 0.75rem;
+    border-color: rgba(0, 217, 255, 0.5);
+    color: #00d9ff;
+    font-size: 0.75rem;
 }
 
 .btn-outline-primary:hover {
-	background-color: #00d9ff;
-	border-color: #00d9ff;
-	color: #000;
+    background-color: #00d9ff;
+    border-color: #00d9ff;
+    color: #000;
 }
 
-/* Transition animations */
-.slide-fade-enter-active {
-	transition: all 0.3s ease-out;
-}
-
-.slide-fade-leave-active {
-	transition: all 0.2s cubic-bezier(1, 0.5, 0.8, 1);
-}
-
-.slide-fade-enter-from {
-	transform: translateY(-10px);
-	opacity: 0;
-}
-
-.slide-fade-leave-to {
-	transform: translateY(-5px);
-	opacity: 0;
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .activity-status-widget {
+        min-width: 200px;
+    }
+    
+    .status-details {
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 90vw;
+    }
 }
 </style>

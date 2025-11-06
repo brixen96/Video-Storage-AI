@@ -1,4 +1,3 @@
-
 <template>
 	<div class="browser-page">
 		<!-- Tab Navigation -->
@@ -312,25 +311,14 @@ export default {
 			}
 
 			// IMPORTANT: Update pathSegments based on currentPath
-			this.tabs[tabIndex].pathSegments = this.tabs[tabIndex].currentPath
-				.split('/')
-				.filter((s) => s && s.trim())
-
-			console.log('Loading content for path:', this.tabs[tabIndex].currentPath)
-			console.log('Path segments:', this.tabs[tabIndex].pathSegments)
+			this.tabs[tabIndex].pathSegments = this.tabs[tabIndex].currentPath.split('/').filter((s) => s && s.trim())
 
 			// Set loading state
 			this.tabs[tabIndex].loading = true
 
 			try {
 				// Always request metadata extraction and thumbnail generation
-				const response = await librariesAPI.browse(
-					this.tabs[tabIndex].libraryId, 
-					this.tabs[tabIndex].currentPath, 
-					true
-				)
-
-				console.log('Browse response:', response.data)
+				const response = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, true)
 
 				// Map API response to tab items
 				if (response.data && response.data.items) {
@@ -348,7 +336,6 @@ export default {
 			}
 		},
 		handleItemClick(tab, item) {
-			console.log('Item clicked:', item)
 			if (item.type === 'folder') {
 				this.navigateToFolder(tab, item.path)
 			} else if (item.type === 'video') {
@@ -356,7 +343,6 @@ export default {
 			}
 		},
 		navigateToFolder(tab, folderPath) {
-			console.log('navigateToFolder called with path:', folderPath)
 			const tabIndex = this.tabs.findIndex((t) => t.id === tab.id)
 			if (tabIndex === -1) {
 				console.log('Tab not found!')
@@ -365,46 +351,35 @@ export default {
 
 			// Update the path
 			this.tabs[tabIndex].currentPath = folderPath
-			
+
 			// Reload content (which will update pathSegments)
 			this.loadLibraryContent(this.tabs[tabIndex])
 		},
 
 		navigateToPath(tab, path) {
-			console.log('navigateToPath called with path:', path)
 			const tabIndex = this.tabs.findIndex((t) => t.id === tab.id)
 			if (tabIndex === -1) {
-				console.log('Tab not found!')
 				return
 			}
 
 			// Update the path
 			this.tabs[tabIndex].currentPath = path
-			
+
 			// Reload content (which will update pathSegments)
 			this.loadLibraryContent(this.tabs[tabIndex])
 		},
 
 		navigateToSegment(tab, index) {
-			console.log('navigateToSegment called with index:', index)
-			console.log('Current pathSegments:', tab.pathSegments)
-			
 			// Build the path from segments
 			const path = tab.pathSegments.slice(0, index + 1).join('/')
-			console.log('Navigating to path:', path)
-			
+
 			this.navigateToPath(tab, path)
 		},
 
 		goBack(tab) {
-			console.log('goBack called')
-			console.log('Current path:', tab.currentPath)
-			console.log('Current pathSegments:', tab.pathSegments)
-			
 			if (tab.pathSegments.length > 0) {
 				// Go back one level
 				const path = tab.pathSegments.slice(0, -1).join('/')
-				console.log('Going back to path:', path)
 				this.navigateToPath(tab, path)
 			} else {
 				console.log('Already at root')
@@ -426,12 +401,10 @@ export default {
 		toggleNotInterested(tab, item) {
 			item.not_interested = !item.not_interested
 			// TODO: Persist to backend
-			console.log('Toggle not interested:', item.path, item.not_interested)
 		},
 		toggleEditList(tab, item) {
 			item.in_edit_list = !item.in_edit_list
 			// TODO: Persist to backend
-			console.log('Toggle edit list:', item.path, item.in_edit_list)
 		},
 		filteredItems(tab) {
 			if (!tab.items) return []

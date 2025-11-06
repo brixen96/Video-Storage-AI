@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,13 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	log.Println("Database connection established")
 	return nil
+}
+
+// GetDB returns the database instance
+func GetDB() *sql.DB {
+	return DB
 }
 
 // Close closes the database connection
@@ -218,39 +225,69 @@ func HealthCheck() error {
 	return DB.Ping()
 }
 
-// runMigrations runs database migrations
+// runMigrations executes database migrations
 func runMigrations() error {
-	// Migration 1: Add primary_lib column to libraries table if it doesn't exist
-	_, err := DB.Exec(`
+	migrations := []string{
+		// Migration 1: Add primary_lib column to libraries table if it doesn't exist
+		`
 		ALTER TABLE libraries ADD COLUMN primary_lib BOOLEAN DEFAULT 0
-	`)
-	// Ignore error if column already exists
-	if err != nil && !isColumnExistsError(err) {
-		return fmt.Errorf("failed to add primary_lib column: %w", err)
-	}
-
-	// Migration 2: Add not_interested column to videos table
-	_, err = DB.Exec(`
+	`,
+		// Ignore error if column already exists
+		// Migration 2: Add not_interested column to videos table
+		`
 		ALTER TABLE videos ADD COLUMN not_interested BOOLEAN DEFAULT 0
-	`)
-	if err != nil && !isColumnExistsError(err) {
-		return fmt.Errorf("failed to add not_interested column: %w", err)
-	}
-
-	// Migration 3: Add in_edit_list column to videos table
-	_, err = DB.Exec(`
+	`,
+		// Migration 3: Add in_edit_list column to videos table
+		`
 		ALTER TABLE videos ADD COLUMN in_edit_list BOOLEAN DEFAULT 0
-	`)
-	if err != nil && !isColumnExistsError(err) {
-		return fmt.Errorf("failed to add in_edit_list column: %w", err)
+	`,
+		// Migration 4: Add zoo column to performers table
+		`
+		ALTER TABLE performers ADD COLUMN zoo BOOLEAN DEFAULT 0
+	`,
+		`CREATE TABLE IF NOT EXISTS activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            details TEXT,
+            progress INTEGER DEFAULT 0,
+            started_at DATETIME NOT NULL,
+            completed_at DATETIME,
+            error TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_status ON activities(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_task_type ON activities(task_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_activities_started_at ON activities(started_at)`,
+		
+		`CREATE TABLE IF NOT EXISTS activity_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            progress INTEGER DEFAULT 0,
+            started_at DATETIME NOT NULL,
+            completed_at DATETIME,
+            details TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_status ON activity_logs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_task_type ON activity_logs(task_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_started_at ON activity_logs(started_at)`,
+		// Migration 5: Add updated_at column to activity_logs table
+		`ALTER TABLE activity_logs ADD COLUMN updated_at DATETIME`,
+		// Migration 6: Add error column to activity_logs table
+		`ALTER TABLE activity_logs ADD COLUMN error TEXT`,
 	}
 
-	// Migration 4: Add zoo column to performers table
-	_, err = DB.Exec(`
-		ALTER TABLE performers ADD COLUMN zoo BOOLEAN DEFAULT 0
-	`)
-	if err != nil && !isColumnExistsError(err) {
-		return fmt.Errorf("failed to add zoo column: %w", err)
+	for _, migration := range migrations {
+		if _, err := DB.Exec(migration); err != nil {
+			// Ignore error if column already exists
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("migration failed: %w", err)
+			}
+		}
 	}
 
 	return nil

@@ -25,14 +25,29 @@ func ensurePerformerService() *services.PerformerService {
 func getPerformers(c *gin.Context) {
 	svc := ensurePerformerService()
 	searchTerm := c.Query("search")
+	
+	// Pagination parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	
+	// Ensure valid pagination values
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+	
+	offset := (page - 1) * limit
 
 	var performers []models.Performer
+	var total int64
 	var err error
 
 	if searchTerm != "" {
-		performers, err = svc.Search(searchTerm)
+		performers, total, err = svc.SearchPaginated(searchTerm, limit, offset)
 	} else {
-		performers, err = svc.GetAll()
+		performers, total, err = svc.GetAllPaginated(limit, offset)
 	}
 
 	if err != nil {
@@ -43,7 +58,19 @@ func getPerformers(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(performers, "Performers retrieved successfully"))
+	totalPages := int((total + int64(limit) - 1) / int64(limit))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Performers retrieved successfully",
+		"data":    performers,
+		"pagination": gin.H{
+			"page":        page,
+			"limit":       limit,
+			"total":       total,
+			"total_pages": totalPages,
+		},
+	})
 }
 
 // getPerformer retrieves a single performer by ID
@@ -181,7 +208,7 @@ func deletePerformer(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(activity.ID, fmt.Sprintf("Successfully deleted %s", performer.Name))
+		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully deleted %s", performer.Name))
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Performer deleted successfully"))
@@ -271,7 +298,7 @@ func fetchMetadata(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(activity.ID, fmt.Sprintf("Successfully fetched metadata for %s", performer.Name))
+		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully fetched metadata for %s", performer.Name))
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(
@@ -332,7 +359,7 @@ func resetMetadata(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(activity.ID, fmt.Sprintf("Successfully reset metadata for %s", performer.Name))
+		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully reset metadata for %s", performer.Name))
 	}
 
 	performer, _ = svc.GetByID(id)
@@ -399,7 +426,7 @@ func scanPerformers(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(activity.ID, fmt.Sprintf("Scan completed: %d new, %d existing, %d errors",
+		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan completed: %d new, %d existing, %d errors",
 			result.NewCreated, result.Existing, len(result.Errors)))
 	}
 

@@ -1,9 +1,9 @@
+
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import FontAwesomeIcon from './plugins/fontawesome'
 import ToastNotification from './components/ToastNotification.vue'
-
 // Import Bootstrap JS for interactive components
 import 'bootstrap/dist/js/bootstrap.bundle'
 

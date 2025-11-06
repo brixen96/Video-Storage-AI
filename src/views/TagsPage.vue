@@ -307,15 +307,10 @@ export default {
 }
 
 .tags-table-container {
-	background: #16213e;
+	background-color: rgba(255, 255, 255, 0.05);
 	border-radius: 0.5rem;
 	overflow: hidden;
 	border: 1px solid #2a3f5f;
-}
-
-.table {
-	color: #e0e0e0;
-	margin: 0;
 }
 
 .table thead {
@@ -328,6 +323,7 @@ export default {
 	color: #00d9ff;
 	font-weight: 600;
 	padding: 1rem;
+	background-color: rgba(255, 255, 255, 0.05);
 }
 
 .table tbody tr {
@@ -339,6 +335,8 @@ export default {
 }
 
 .table tbody td {
+	background-color: rgba(255, 255, 255, 0.05);
+
 	border: none;
 	padding: 1rem;
 	vertical-align: middle;

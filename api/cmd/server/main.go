@@ -50,6 +50,9 @@ func main() {
 	// Setup router
 	router := api.SetupRouter(cfg)
 
+	// Initialize WebSocket hub
+	api.InitWebSocket()
+
 	// Create HTTP server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),

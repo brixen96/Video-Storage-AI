@@ -15,15 +15,471 @@ type ActivityService struct {
 	db *sql.DB
 }
 
+// WebSocketHub interface for broadcasting updates
+type WebSocketHub interface {
+	BroadcastActivityUpdate(activity *models.ActivityLog)
+	BroadcastStatusUpdate(status *models.ActivityStatus)
+}
+
+// Global WebSocket hub reference (will be set by API layer)
+var wsHub WebSocketHub
+
+// SetWebSocketHub sets the WebSocket hub for broadcasting
+func SetWebSocketHub(hub WebSocketHub) {
+	wsHub = hub
+}
+
 // NewActivityService creates a new activity service
 func NewActivityService() *ActivityService {
 	return &ActivityService{
-		db: database.DB,
+		db: database.GetDB(),
 	}
 }
 
 // Create creates a new activity log
-func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.ActivityLog, error) {
+func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Activity, error) {
+	var detailsJSON []byte
+	var err error
+	if create.Details != nil {
+		detailsJSON, err = json.Marshal(create.Details)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal details: %w", err)
+		}
+	}
+
+	query := `
+		INSERT INTO activity_logs (task_type, status, message, progress, details, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	now := time.Now()
+	result, err := s.db.Exec(query, create.TaskType, create.Status, create.Message, create.Progress, detailsJSON, now, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create activity: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get last insert ID: %w", err)
+	}
+
+	return s.GetByID(id)
+}
+
+// GetByID retrieves an activity log by ID
+func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
+	query := `
+		SELECT id, task_type, status, message, progress, details, created_at, updated_at, completed_at
+		FROM activity_logs
+		WHERE id = ?
+	`
+
+	var activity models.Activity
+	var detailsJSON []byte
+	var completedAt sql.NullTime
+
+	err := s.db.QueryRow(query, id).Scan(
+		&activity.ID,
+		&activity.TaskType,
+		&activity.Status,
+		&activity.Message,
+		&activity.Progress,
+		&detailsJSON,
+		&activity.StartedAt,
+		&activity.UpdatedAt,
+		&completedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("activity not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get activity: %w", err)
+	}
+
+	if completedAt.Valid {
+		activity.CompletedAt = &completedAt.Time
+	}
+
+	if len(detailsJSON) > 0 {
+		if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal details: %w", err)
+		}
+	}
+
+	return &activity, nil
+}
+
+// GetAll retrieves all activity logs with optional filtering
+func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]models.Activity, error) {
+	query := `
+		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at, error
+		FROM activity_logs
+		WHERE 1=1
+	`
+	args := []interface{}{}
+
+	if status != "" {
+		query += " AND status = ?"
+		args = append(args, status)
+	}
+
+	if taskType != "" {
+		query += " AND task_type = ?"
+		args = append(args, taskType)
+	}
+
+	query += " ORDER BY started_at DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query activities: %w", err)
+	}
+	defer rows.Close()
+
+	var activities []models.Activity
+	for rows.Next() {
+		var activity models.Activity
+		var detailsJSON []byte
+		var completedAt sql.NullTime
+		var errorMsg sql.NullString
+
+		err := rows.Scan(
+			&activity.ID,
+			&activity.TaskType,
+			&activity.Status,
+			&activity.Message,
+			&activity.Progress,
+			&detailsJSON,
+			&activity.StartedAt,
+			&activity.UpdatedAt,
+			&completedAt,
+			&errorMsg,
+		)
+		if err != nil {
+			continue
+		}
+
+		if completedAt.Valid {
+			activity.CompletedAt = &completedAt.Time
+		}
+
+		if errorMsg.Valid {
+			activity.Error = &errorMsg.String
+		}
+
+		if len(detailsJSON) > 0 {
+			json.Unmarshal(detailsJSON, &activity.Details)
+		}
+
+		activities = append(activities, activity)
+	}
+
+	return activities, nil
+}
+
+// Update updates an existing activity log
+func (s *ActivityService) Update(id int, update *models.ActivityLogUpdate) (*models.Activity, error) {
+	// Build dynamic update query
+	query := "UPDATE activity_logs SET updated_at = ?"
+	args := []interface{}{time.Now()}
+
+	if update.Status != nil {
+		query += ", status = ?"
+		args = append(args, *update.Status)
+	}
+
+	if update.Message != nil {
+		query += ", message = ?"
+		args = append(args, *update.Message)
+	}
+
+	if update.Progress != nil {
+		query += ", progress = ?"
+		args = append(args, *update.Progress)
+	}
+
+	if update.Details != nil {
+		detailsJSON, err := json.Marshal(update.Details)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal details: %w", err)
+		}
+		query += ", details = ?"
+		args = append(args, detailsJSON)
+	}
+
+	// If status is completed or failed, set completed_at
+	if update.Status != nil && (*update.Status == models.TaskStatusCompleted || *update.Status == models.TaskStatusFailed) {
+		query += ", completed_at = ?"
+		args = append(args, time.Now())
+	}
+
+	query += " WHERE id = ?"
+	args = append(args, id)
+
+	_, err := s.db.Exec(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update activity: %w", err)
+	}
+
+    return s.GetByID(int64(id))
+}
+
+// Delete deletes an activity log
+func (s *ActivityService) Delete(id int64) error {
+	query := "DELETE FROM activity_logs WHERE id = ?"
+	result, err := s.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete activity: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("activity not found")
+	}
+
+	return nil
+}
+
+// GetStatus returns the current status of all activities
+func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
+	query := `
+		SELECT 
+			COUNT(*) as total,
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as running,
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as completed,
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed,
+			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending
+		FROM activity_logs
+	`
+
+	var status models.ActivityStatus
+	var total, running, completed, failed, pending int
+	err := s.db.QueryRow(query,
+		models.TaskStatusRunning,
+		models.TaskStatusCompleted,
+		models.TaskStatusFailed,
+		models.TaskStatusPending,
+	).Scan(&total, &running, &completed, &failed, &pending)
+
+	if err == nil {
+		status.RunningTasks = running
+		status.CompletedTasks = completed
+		status.FailedTasks = failed
+		status.PendingTasks = pending
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get status: %w", err)
+	}
+
+	return &status, nil
+}
+
+// GetRecent retrieves the most recent activity logs
+func (s *ActivityService) GetRecent(limit int) ([]models.Activity, error) {
+	return s.GetAll("", "", limit)
+}
+
+// CleanOld removes old completed activity logs
+func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
+	query := `
+		DELETE FROM activity_logs
+		WHERE status IN (?, ?)
+		AND completed_at < datetime('now', '-' || ? || ' days')
+	`
+
+	result, err := s.db.Exec(query, models.TaskStatusCompleted, models.TaskStatusFailed, daysOld)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clean old activities: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return count, nil
+}
+
+// GetStatsByType returns activity counts grouped by task type
+func (s *ActivityService) GetStatsByType() (map[string]int, error) {
+	query := `
+		SELECT task_type, COUNT(*) as count
+		FROM activity_logs
+		GROUP BY task_type
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]int)
+	for rows.Next() {
+		var taskType string
+		var count int
+		if err := rows.Scan(&taskType, &count); err != nil {
+			continue
+		}
+		stats[taskType] = count
+	}
+
+	return stats, nil
+}
+
+// StartTask is a helper to create and start a new task
+func (s *ActivityService) StartTask(taskType, message string, details ...map[string]interface{}) (*models.Activity, error) {
+	var detailsMap map[string]interface{}
+	if len(details) > 0 {
+		detailsMap = details[0]
+	}
+
+	create := &models.ActivityLogCreate{
+		TaskType: taskType,
+		Status:   models.TaskStatusRunning,
+		Message:  message,
+		Progress: 0,
+		Details:  detailsMap,
+	}
+
+	return s.Create(create)
+}
+
+// CompleteTask is a helper to mark a task as completed
+func (s *ActivityService) CompleteTask(id int64, message string) error {
+	status := models.TaskStatusCompleted
+	progress := 100
+	update := &models.ActivityLogUpdate{
+		Status:   &status,
+		Message:  &message,
+		Progress: &progress,
+	}
+
+	_, err := s.Update(int(id), update)
+	return err
+}
+
+// FailTask is a helper to mark a task as failed
+func (s *ActivityService) FailTask(id int, errorMsg string) error {
+	status := models.TaskStatusFailed
+	update := &models.ActivityLogUpdate{
+		Status:  &status,
+		Message: &errorMsg,
+	}
+
+	_, err := s.Update(id, update)
+	return err
+}
+
+// UpdateProgress is a helper to update task progress
+func (s *ActivityService) UpdateProgress(id int, progress int, message string) error {
+	update := &models.ActivityLogUpdate{
+		Progress: &progress,
+		Message:  &message,
+	}
+
+	_, err := s.Update(id, update)
+	return err
+}
+
+// GetTasksByStatus retrieves tasks filtered by status with pagination
+func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]models.Activity, int, error) {
+	// Get total count
+	var total int
+	countQuery := "SELECT COUNT(*) FROM activity_logs WHERE status = ?"
+	err := s.db.QueryRow(countQuery, status).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count tasks: %w", err)
+	}
+
+	// Get tasks
+	query := `
+		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at, error
+		FROM activity_logs
+		WHERE status = ?
+		ORDER BY started_at DESC
+		LIMIT ? OFFSET ?
+	`
+
+	rows, err := s.db.Query(query, status, limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var activities []models.Activity
+	for rows.Next() {
+		var activity models.Activity
+		var detailsJSON []byte
+		var completedAt sql.NullTime
+		var errorMsg sql.NullString
+
+		err := rows.Scan(
+			&activity.ID,
+			&activity.TaskType,
+			&activity.Status,
+			&activity.Message,
+			&activity.Progress,
+			&detailsJSON,
+			&activity.StartedAt,
+			&activity.UpdatedAt,
+			&completedAt,
+			&errorMsg,
+		)
+		if err != nil {
+			continue
+		}
+
+		if completedAt.Valid {
+			activity.CompletedAt = &completedAt.Time
+		}
+
+		if errorMsg.Valid {
+			activity.Error = &errorMsg.String
+		}
+
+		if len(detailsJSON) > 0 {
+			json.Unmarshal(detailsJSON, &activity.Details)
+		}
+
+		activities = append(activities, activity)
+	}
+
+	return activities, total, nil
+}
+
+// BroadcastUpdate sends a real-time update via WebSocket
+func (s *ActivityService) BroadcastUpdate(activity *models.Activity) error {
+	// Convert Activity to ActivityLog for broadcasting
+	activityLog := &models.ActivityLog{
+		ID:          int64(activity.ID),
+		TaskType:    activity.TaskType,
+		Status:      activity.Status,
+		Message:     activity.Message,
+		Progress:    activity.Progress,
+		StartedAt:   activity.StartedAt,
+		CompletedAt: activity.CompletedAt,
+	}
+	
+	hub := wsHub
+	if hub != nil {
+		hub.BroadcastActivityUpdate(activityLog)
+	}
+	return nil
+}
+
+// Create creates a new activity log entry
+func (s *ActivityService) CreateLog(create *models.ActivityLogCreate) (*models.ActivityLog, error) {
 	activity := &models.ActivityLog{
 		TaskType:   create.TaskType,
 		Status:     create.Status,
@@ -59,7 +515,7 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 }
 
 // GetByID retrieves an activity log by ID
-func (s *ActivityService) GetByID(id int64) (*models.ActivityLog, error) {
+func (s *ActivityService) GetLogByID(id int64) (*models.ActivityLog, error) {
 	query := `
 		SELECT id, task_type, status, message, progress, started_at, completed_at, details
 		FROM activity_logs
@@ -88,7 +544,7 @@ func (s *ActivityService) GetByID(id int64) (*models.ActivityLog, error) {
 }
 
 // GetAll retrieves all activity logs with optional filtering
-func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]models.ActivityLog, error) {
+func (s *ActivityService) GetAllLogs(status string, taskType string, limit int) ([]models.ActivityLog, error) {
 	query := `
 		SELECT id, task_type, status, message, progress, started_at, completed_at, details
 		FROM activity_logs
@@ -143,9 +599,9 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 }
 
 // Update updates an existing activity log
-func (s *ActivityService) Update(id int64, update *models.ActivityLogUpdate) (*models.ActivityLog, error) {
+func (s *ActivityService) UpdateLog(id int64, update *models.ActivityLogUpdate) (*models.ActivityLog, error) {
 	// Get existing activity
-	activity, err := s.GetByID(id)
+	activity, err := s.GetLogByID(id)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +645,7 @@ func (s *ActivityService) Update(id int64, update *models.ActivityLogUpdate) (*m
 }
 
 // Delete deletes an activity log
-func (s *ActivityService) Delete(id int64) error {
+func (s *ActivityService) DeleteLog(id int64) error {
 	query := `DELETE FROM activity_logs WHERE id = ?`
 	result, err := s.db.Exec(query, id)
 	if err != nil {
@@ -209,7 +665,7 @@ func (s *ActivityService) Delete(id int64) error {
 }
 
 // GetStatus returns the current status of all activities
-func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
+func (s *ActivityService) GetStatusAll() (*models.ActivityStatus, error) {
 	status := &models.ActivityStatus{}
 
 	// Count by status
@@ -234,7 +690,7 @@ func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
 	}
 
 	// Get current running tasks
-	currentTasks, err := s.GetAll(models.TaskStatusRunning, "", 10)
+	currentTasks, err := s.GetAllLogs(models.TaskStatusRunning, "", 10)
 	if err != nil {
 		currentTasks = []models.ActivityLog{}
 	}
@@ -244,15 +700,15 @@ func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
 }
 
 // GetRecent retrieves the most recent activity logs
-func (s *ActivityService) GetRecent(limit int) ([]models.ActivityLog, error) {
+func (s *ActivityService) GetRecentLogs(limit int) ([]models.ActivityLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	return s.GetAll("", "", limit)
+	return s.GetAllLogs("", "", limit)
 }
 
 // CleanOld removes old completed activity logs
-func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
+func (s *ActivityService) CleanOldLogs(daysOld int) (int64, error) {
 	if daysOld <= 0 {
 		daysOld = 30
 	}
@@ -279,7 +735,7 @@ func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
 }
 
 // GetStatsByType returns activity counts grouped by task type
-func (s *ActivityService) GetStatsByType() (map[string]int, error) {
+func (s *ActivityService) GetStatsByTypeLogs() (map[string]int, error) {
 	query := `
 		SELECT task_type, COUNT(*) as count
 		FROM activity_logs
@@ -306,7 +762,7 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 }
 
 // StartTask is a helper to create and start a new task
-func (s *ActivityService) StartTask(taskType, message string, details map[string]interface{}) (*models.ActivityLog, error) {
+func (s *ActivityService) StartTaskLog(taskType, message string, details map[string]interface{}) (*models.ActivityLog, error) {
 	create := &models.ActivityLogCreate{
 		TaskType: taskType,
 		Status:   models.TaskStatusRunning,
@@ -314,39 +770,39 @@ func (s *ActivityService) StartTask(taskType, message string, details map[string
 		Progress: 0,
 		Details:  details,
 	}
-	return s.Create(create)
+	return s.CreateLog(create)
 }
 
 // CompleteTask is a helper to mark a task as completed
-func (s *ActivityService) CompleteTask(id int64, message string) error {
+func (s *ActivityService) CompleteTaskLog(id int64, message string) error {
 	update := &models.ActivityLogUpdate{
 		Status:    stringPtr(models.TaskStatusCompleted),
 		Message:   stringPtr(message),
 		Progress:  intPtr(100),
 		Completed: true,
 	}
-	_, err := s.Update(id, update)
+	_, err := s.UpdateLog(id, update)
 	return err
 }
 
 // FailTask is a helper to mark a task as failed
-func (s *ActivityService) FailTask(id int64, errorMsg string) error {
+func (s *ActivityService) FailTaskLog(id int64, errorMsg string) error {
 	update := &models.ActivityLogUpdate{
 		Status:    stringPtr(models.TaskStatusFailed),
 		Message:   stringPtr(errorMsg),
 		Completed: true,
 	}
-	_, err := s.Update(id, update)
+	_, err := s.UpdateLog(id, update)
 	return err
 }
 
 // UpdateProgress is a helper to update task progress
-func (s *ActivityService) UpdateProgress(id int64, progress int, message string) error {
+func (s *ActivityService) UpdateProgressLog(id int64, progress int, message string) error {
 	update := &models.ActivityLogUpdate{
 		Progress: intPtr(progress),
 		Message:  stringPtr(message),
 	}
-	_, err := s.Update(id, update)
+	_, err := s.UpdateLog(id, update)
 	return err
 }
 
@@ -359,55 +815,11 @@ func intPtr(i int) *int {
 	return &i
 }
 
-// GetTasksByStatus retrieves tasks filtered by status with pagination
-func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]models.ActivityLog, int, error) {
-	// Get total count
-	var total int
-	countQuery := "SELECT COUNT(*) FROM activity_logs WHERE status = ?"
-	err := s.db.QueryRow(countQuery, status).Scan(&total)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count tasks: %w", err)
+// BroadcastUpdateLog sends a real-time update via WebSocket
+func (s *ActivityService) BroadcastUpdateLog(activity *models.ActivityLog) error {
+	hub := wsHub
+	if hub != nil {
+		hub.BroadcastActivityUpdate(activity)
 	}
-
-	// Get tasks
-	query := `
-		SELECT id, task_type, status, message, progress, started_at, completed_at, details
-		FROM activity_logs
-		WHERE status = ?
-		ORDER BY started_at DESC
-		LIMIT ? OFFSET ?
-	`
-
-	rows, err := s.db.Query(query, status, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to query tasks: %w", err)
-	}
-	defer rows.Close()
-
-	var activities []models.ActivityLog
-	for rows.Next() {
-		var activity models.ActivityLog
-		err := rows.Scan(
-			&activity.ID, &activity.TaskType, &activity.Status, &activity.Message,
-			&activity.Progress, &activity.StartedAt, &activity.CompletedAt, &activity.Details,
-		)
-		if err != nil {
-			continue
-		}
-
-		// Unmarshal details
-		activity.UnmarshalDetails()
-		activities = append(activities, activity)
-	}
-
-	return activities, total, nil
-}
-
-// BroadcastUpdate sends a real-time update (placeholder for WebSocket integration)
-func (s *ActivityService) BroadcastUpdate(activity *models.ActivityLog) error {
-	// This will be implemented when we add WebSocket support
-	// For now, we'll just log that an update should be broadcast
-	data, _ := json.Marshal(activity)
-	fmt.Printf("Broadcasting activity update: %s\n", string(data))
 	return nil
 }

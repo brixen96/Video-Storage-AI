@@ -2,11 +2,11 @@ import axios from 'axios'
 
 // Create axios instance with base configuration
 const api = axios.create({
-	baseURL: 'http://localhost:8080/api/v1',
-	timeout: 30000,
+	baseURL: 'http://localhost:8080/api/v1', // Add /api/v1 prefix
 	headers: {
 		'Content-Type': 'application/json',
 	},
+	timeout: 10000,
 })
 
 // Request interceptor

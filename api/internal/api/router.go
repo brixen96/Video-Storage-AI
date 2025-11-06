@@ -1,11 +1,12 @@
 package api
 
 import (
+	"net/http"
+
 	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"net/http"
 )
 
 // SetupRouter configures and returns the Gin router
@@ -73,6 +74,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.PUT("/:id", updateVideo)     // Update video
 			videos.DELETE("/:id", deleteVideo)  // Delete video
 			videos.GET("/search", searchVideos) // Search videos
+			videos.POST("/scan", scanVideos)    // Scan library for videos
 		}
 
 		// Performers endpoints
@@ -152,19 +154,15 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/suggest-naming", aiSuggestNaming) // AI naming suggestions
 			ai.POST("/analyze-library", aiAnalyzeLibrary) // AI library analysis
 		}
+
+		// WebSocket endpoint
+		v1.GET("/ws", handleWebSocket)
 	}
 
 	return router
 }
 
-// Placeholder handlers - will implement these next
-func getVideos(c *gin.Context)           { c.JSON(http.StatusOK, gin.H{"message": "Get videos"}) }
-func getVideo(c *gin.Context)            { c.JSON(http.StatusOK, gin.H{"message": "Get video"}) }
-func createVideo(c *gin.Context)         { c.JSON(http.StatusOK, gin.H{"message": "Create video"}) }
-func updateVideo(c *gin.Context)         { c.JSON(http.StatusOK, gin.H{"message": "Update video"}) }
-func deleteVideo(c *gin.Context)         { c.JSON(http.StatusOK, gin.H{"message": "Delete video"}) }
-func searchVideos(c *gin.Context)        { c.JSON(http.StatusOK, gin.H{"message": "Search videos"}) }
-
+// Video handlers are implemented in video_handlers.go
 // Performer handlers are implemented in performer_handlers.go
 
 func getStudios(c *gin.Context)          { c.JSON(http.StatusOK, gin.H{"message": "Get studios"}) }
