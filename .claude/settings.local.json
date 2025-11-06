@@ -8,7 +8,16 @@
       "Bash(netstat:*)",
       "Bash(cmd /c \"if not exist C:\\TestLibrary mkdir C:\\TestLibrary\")",
       "Bash(sqlite3:*)",
-      "Bash(go build:*)"
+      "Bash(go build:*)",
+      "Bash(npm run build:*)",
+      "Bash(go run:*)",
+      "Bash(yarn dev)",
+      "Bash(yarn serve)",
+      "Bash(where:*)",
+      "Bash(dir:*)",
+      "Bash(TagsPage.vue)",
+      "Bash(touch:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

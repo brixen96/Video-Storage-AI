@@ -11,15 +11,17 @@ import (
 
 // BrowseService handles filesystem browsing
 type BrowseService struct {
-	libraryService *LibraryService
-	mediaService   *MediaService
+	libraryService  *LibraryService
+	mediaService    *MediaService
+	activityService *ActivityService
 }
 
 // NewBrowseService creates a new browse service
 func NewBrowseService() *BrowseService {
 	return &BrowseService{
-		libraryService: NewLibraryService(),
-		mediaService:   NewMediaService(),
+		libraryService:  NewLibraryService(),
+		mediaService:    NewMediaService(),
+		activityService: NewActivityService(),
 	}
 }
 
@@ -95,37 +97,58 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 						thumbnailName := strings.TrimSuffix(entry.Name(), ext) + ".jpg"
 
 						// Build thumbnail directory path
-						var thumbnailDir string
-						if relativePath == "" {
-							thumbnailDir = filepath.Join("api", "assets", "thumbnails", fmt.Sprintf("%d", libraryID))
-						} else {
-							thumbnailDir = filepath.Join("api", "assets", "thumbnails", fmt.Sprintf("%d", libraryID), relativePath)
-						}
+						var thumbnailDir = os.Getenv("THUMBNAIL_DIR")
 						thumbnailFullPath := filepath.Join(thumbnailDir, thumbnailName)
-
+						fmt.Printf("Generating thumbnail for %s at %s\n", entry.Name(), thumbnailFullPath)
+						
 						// Create thumbnail directory if it doesn't exist
 						if err := os.MkdirAll(thumbnailDir, 0755); err == nil {
 							// Check if thumbnail exists
 							if _, err := os.Stat(thumbnailFullPath); os.IsNotExist(err) {
+								// Create activity log for thumbnail generation
+								activity, actErr := s.activityService.StartTask(
+									"generate_thumbnail",
+									fmt.Sprintf("Generating thumbnail for %s", entry.Name()),
+									map[string]interface{}{
+										"video_name":  entry.Name(),
+										"library_id":  libraryID,
+										"path":        relativePath,
+									},
+								)
+								if actErr != nil {
+									fmt.Printf("Failed to create thumbnail activity: %v\n", actErr)
+								}
+
 								// Generate thumbnail at 10% of duration or 5 seconds
 								timestamp := metadata.Duration * 0.1
 								if timestamp > 5 {
 									timestamp = 5
 								}
+
 								if err := s.mediaService.GenerateThumbnail(itemFullPath, thumbnailFullPath, timestamp); err == nil {
 									// Store relative path for API access
 									if relativePath == "" {
-										item.Thumbnail = fmt.Sprintf("/thumbnails/%d/%s", libraryID, thumbnailName)
+										item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
 									} else {
-										item.Thumbnail = fmt.Sprintf("/thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
+										item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
+									}
+
+									// Mark activity as completed
+									if activity != nil {
+										s.activityService.CompleteTask(activity.ID, fmt.Sprintf("Generated thumbnail for %s", entry.Name()))
+									}
+								} else {
+									// Mark activity as failed
+									if activity != nil {
+										s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to generate thumbnail: %v", err))
 									}
 								}
 							} else {
 								// Thumbnail already exists
 								if relativePath == "" {
-									item.Thumbnail = fmt.Sprintf("/thumbnails/%d/%s", libraryID, thumbnailName)
+									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
 								} else {
-									item.Thumbnail = fmt.Sprintf("/thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
+									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
 								}
 							}
 						}

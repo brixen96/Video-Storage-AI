@@ -141,7 +141,7 @@
 										</div>
 									</div>
 									<div class="col">
-										<div class="d-flex justify-content-between align-items-start mb-2">
+										<div class="d-flex justify-content-between align-items-start mb-2 text-light">
 											<div>
 												<h5 class="mb-1">
 													<span class="badge me-2" :class="getTaskTypeBadge(activity.task_type)">
@@ -150,10 +150,10 @@
 													{{ activity.message }}
 												</h5>
 												<small>
-													<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
+													<font-awesome-icon :icon="['fas', 'clock']" class="me-1 text-primary" />
 													Started: {{ formatDateTime(activity.started_at) }}
 													<span v-if="activity.completed_at" class="ms-3">
-														<font-awesome-icon :icon="['fas', 'flag-checkered']" class="me-1" />
+														<font-awesome-icon :icon="['fas', 'flag-checkered']" class="me-1 text-success" />
 														Completed: {{ formatDateTime(activity.completed_at) }}
 													</span>
 												</small>

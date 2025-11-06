@@ -24,7 +24,7 @@ func NewPerformerService() *PerformerService {
 // GetAll retrieves all performers
 func (s *PerformerService) GetAll() ([]models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
 		FROM performers
 		ORDER BY name ASC
 	`
@@ -40,7 +40,7 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 		var p models.Performer
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan performer: %w", err)
@@ -60,7 +60,7 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 // GetByID retrieves a performer by ID
 func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
 		FROM performers
 		WHERE id = ?
 	`
@@ -68,7 +68,7 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	var p models.Performer
 	err := s.db.QueryRow(query, id).Scan(
 		&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-		&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+		&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -89,7 +89,7 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 // GetPerformerByName retrieves a performer by name
 func (s *PerformerService) GetPerformerByName(name string) (*models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
 		FROM performers
 		WHERE name = ?
 	`
@@ -97,7 +97,7 @@ func (s *PerformerService) GetPerformerByName(name string) (*models.Performer, e
 	var p models.Performer
 	err := s.db.QueryRow(query, name).Scan(
 		&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-		&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+		&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {

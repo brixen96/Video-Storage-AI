@@ -48,6 +48,7 @@ export const performersAPI = {
 		return api.get('/performers', { params })
 	},
 	getById: (id) => api.get(`/performers/${id}`),
+	getPreviews: (id) => api.get(`/performers/${id}/previews`),
 	create: (data) => api.post('/performers', data),
 	scan: () => api.post('/performers/scan'),
 	update: (id, data) => api.put(`/performers/${id}`, data),
@@ -58,12 +59,18 @@ export const performersAPI = {
 }
 
 export const videosAPI = {
-	getAll: () => api.get('/videos'),
+	getAll: (params) => api.get('/videos', { params }),
 	getById: (id) => api.get(`/videos/${id}`),
 	search: (params) => api.get('/videos/search', { params }),
 	create: (data) => api.post('/videos', data),
 	update: (id, data) => api.put(`/videos/${id}`, data),
 	delete: (id) => api.delete(`/videos/${id}`),
+	scan: () => api.post('/videos/scan'),
+	fetchMetadata: (id) => api.post(`/videos/${id}/fetch`),
+	addTags: (id, tagIds) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }),
+	removeTags: (id, tagIds) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds } }),
+	bulk: (operation, videoIds, data = {}) => api.post('/videos/bulk', { operation, video_ids: videoIds, ...data }),
+	getThumbnail: (id) => `http://localhost:8080/api/v1/videos/${id}/thumbnail`,
 }
 
 export const studiosAPI = {
@@ -72,6 +79,14 @@ export const studiosAPI = {
 	create: (data) => api.post('/studios', data),
 	update: (id, data) => api.put(`/studios/${id}`, data),
 	delete: (id) => api.delete(`/studios/${id}`),
+}
+
+export const groupsAPI = {
+	getAll: () => api.get('/groups'),
+	getById: (id) => api.get(`/groups/${id}`),
+	create: (data) => api.post('/groups', data),
+	update: (id, data) => api.put(`/groups/${id}`, data),
+	delete: (id) => api.delete(`/groups/${id}`),
 }
 
 export const tagsAPI = {

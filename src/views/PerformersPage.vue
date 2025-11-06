@@ -245,7 +245,15 @@
 						<button v-if="carouselIndex > 0" class="carousel-btn prev" @click="carouselIndex--">
 							<font-awesome-icon :icon="['fas', 'chevron-left']" />
 						</button>
-						<video :src="getPerformerPreviews(detailsPanel.performer)[carouselIndex]" class="carousel-video" controls autoplay loop muted></video>
+						<video
+							:src="getPerformerPreviews(detailsPanel.performer)[carouselIndex]"
+							class="carousel-video"
+							controls
+							autoplay
+							loop
+							muted
+							@contextmenu.prevent="openCarouselContextMenu($event, carouselIndex)"
+						></video>
 						<button v-if="carouselIndex < getPerformerPreviews(detailsPanel.performer).length - 1" class="carousel-btn next" @click="carouselIndex++">
 							<font-awesome-icon :icon="['fas', 'chevron-right']" />
 						</button>
@@ -257,80 +265,176 @@
 					</div>
 				</div>
 
-				<!-- Metadata Grid -->
+				<!-- Metadata Tabs -->
 				<div class="panel-metadata">
-					<div class="metadata-grid">
-						<div class="metadata-item">
-							<span class="metadata-label">Name:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.name }}</span>
+					<!-- Tab Navigation -->
+					<ul class="nav nav-tabs">
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'basic' }]" @click="activeTab = 'basic'">Basic</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'appearance' }]" @click="activeTab = 'appearance'">Appearance</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'performances' }]" @click="activeTab = 'performances'">Performances</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'social_media' }]" @click="activeTab = 'social_media'">Social Media</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'platform' }]" @click="activeTab = 'platform'">Platform</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'tags' }]" @click="activeTab = 'tags'">Tags</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'bios' }]" @click="activeTab = 'bios'">Bios</a>
+						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'external_links' }]" @click="activeTab = 'external_links'">Links</a>
+						</li>
+					</ul>
+
+					<!-- Tab Content -->
+					<div class="tab-content mt-3">
+						<!-- Basic Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'basic' }]">
+							<div class="metadata-grid">
+								<div class="metadata-item">
+									<span class="metadata-label">Name:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.name }}</span>
+								</div>
+								<div v-if="getAge(detailsPanel.performer)" class="metadata-item">
+									<span class="metadata-label">Age:</span>
+									<span class="metadata-value">{{ getAge(detailsPanel.performer) }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.metadata?.birthdate" class="metadata-item">
+									<span class="metadata-label">Birthdate:</span>
+									<span class="metadata-value">{{ formatDate(detailsPanel.performer.metadata.birthdate) }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.metadata?.birthplace" class="metadata-item">
+									<span class="metadata-label">Birthplace:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.metadata.birthplace }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.metadata?.career_start" class="metadata-item">
+									<span class="metadata-label">Career Start:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.metadata.career_start }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.metadata?.career_end" class="metadata-item">
+									<span class="metadata-label">Career End:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.metadata.career_end }}</span>
+								</div>
+								<div class="metadata-item">
+									<span class="metadata-label">Scene Count:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.scene_count || 0 }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.metadata?.aliases?.length" class="metadata-item full-width">
+									<span class="metadata-label">Aliases:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.metadata.aliases.join(', ') }}</span>
+								</div>
+								<div v-if="detailsPanel.performer.zoo" class="metadata-item full-width">
+									<span class="metadata-label">Content Type:</span>
+									<span class="metadata-value zoo-indicator">Zoo Content</span>
+								</div>
+							</div>
 						</div>
-						<div v-if="getAge(detailsPanel.performer)" class="metadata-item">
-							<span class="metadata-label">Age:</span>
-							<span class="metadata-value">{{ getAge(detailsPanel.performer) }}</span>
+
+						<!-- Appearance Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'appearance' }]">
+							<div v-if="getAppearanceData(detailsPanel.performer)" class="metadata-grid">
+								<div v-for="(value, key) in getAppearanceData(detailsPanel.performer)" :key="key" class="metadata-item">
+									<span class="metadata-label">{{ formatLabel(key) }}:</span>
+									<span class="metadata-value">{{ value }}</span>
+								</div>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No appearance data available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.birthdate" class="metadata-item">
-							<span class="metadata-label">Birthdate:</span>
-							<span class="metadata-value">{{ formatDate(detailsPanel.performer.metadata.birthdate) }}</span>
+
+						<!-- Performances Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'performances' }]">
+							<div v-if="getPerformancesData(detailsPanel.performer)" class="metadata-grid">
+								<div v-for="(value, key) in getPerformancesData(detailsPanel.performer)" :key="key" class="metadata-item">
+									<span class="metadata-label">{{ formatLabel(key) }}:</span>
+									<span class="metadata-value">{{ formatValue(value) }}</span>
+								</div>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No performance data available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.birthplace" class="metadata-item">
-							<span class="metadata-label">Birthplace:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.birthplace }}</span>
+
+						<!-- Social Media Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'social_media' }]">
+							<div v-if="getSocialMediaData(detailsPanel.performer)" class="metadata-grid">
+								<div v-for="(value, key) in getSocialMediaData(detailsPanel.performer)" :key="key" class="metadata-item">
+									<span class="metadata-label">{{ formatLabel(key) }}:</span>
+									<span class="metadata-value">
+										<a v-if="isURL(value)" :href="value" target="_blank" rel="noopener">{{ value }}</a>
+										<span v-else>{{ formatValue(value) }}</span>
+									</span>
+								</div>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No social media data available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.measurements" class="metadata-item">
-							<span class="metadata-label">Measurements:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.measurements }}</span>
+
+						<!-- Platform Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'platform' }]">
+							<div v-if="getPlatformData(detailsPanel.performer)" class="metadata-grid">
+								<div v-for="(value, key) in getPlatformData(detailsPanel.performer)" :key="key" class="metadata-item">
+									<span class="metadata-label">{{ formatLabel(key) }}:</span>
+									<span class="metadata-value">{{ formatValue(value) }}</span>
+								</div>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No platform data available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.height" class="metadata-item">
-							<span class="metadata-label">Height:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.height }}</span>
+
+						<!-- Tags Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'tags' }]">
+							<div v-if="getTagsData(detailsPanel.performer)?.length" class="tags-container">
+								<span v-for="(tag, index) in getTagsData(detailsPanel.performer)" :key="index" class="tag-badge">{{ tag }}</span>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No tags available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.weight" class="metadata-item">
-							<span class="metadata-label">Weight:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.weight }}</span>
+
+						<!-- Bios Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'bios' }]">
+							<div v-if="getBiosData(detailsPanel.performer)" class="bios-container">
+								<div v-for="(bio, source) in getBiosData(detailsPanel.performer)" :key="source" class="bio-item">
+									<h6 class="bio-source">{{ formatLabel(source) }}</h6>
+									<p class="bio-text">{{ bio }}</p>
+								</div>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No bios available</p>
+							</div>
 						</div>
-						<div v-if="detailsPanel.performer.metadata?.ethnicity" class="metadata-item">
-							<span class="metadata-label">Ethnicity:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.ethnicity }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.hair_color" class="metadata-item">
-							<span class="metadata-label">Hair Color:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.hair_color }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.eye_color" class="metadata-item">
-							<span class="metadata-label">Eye Color:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.eye_color }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.career_start" class="metadata-item">
-							<span class="metadata-label">Career Start:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.career_start }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.career_end" class="metadata-item">
-							<span class="metadata-label">Career End:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.career_end }}</span>
-						</div>
-						<div class="metadata-item">
-							<span class="metadata-label">Scene Count:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.scene_count || 0 }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.tattoos" class="metadata-item full-width">
-							<span class="metadata-label">Tattoos:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.tattoos }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.piercings" class="metadata-item full-width">
-							<span class="metadata-label">Piercings:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.piercings }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.bio" class="metadata-item full-width">
-							<span class="metadata-label">Bio:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.bio }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.metadata?.aliases?.length" class="metadata-item full-width">
-							<span class="metadata-label">Aliases:</span>
-							<span class="metadata-value">{{ detailsPanel.performer.metadata.aliases.join(', ') }}</span>
-						</div>
-						<div v-if="detailsPanel.performer.zoo" class="metadata-item full-width">
-							<span class="metadata-label">Content Type:</span>
-							<span class="metadata-value zoo-indicator">Zoo Content</span>
+
+						<!-- External Links Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'external_links' }]">
+							<div v-if="getExternalLinksData(detailsPanel.performer)?.length" class="links-container">
+								<a
+									v-for="(link, index) in getExternalLinksData(detailsPanel.performer)"
+									:key="index"
+									:href="getLinkURL(link)"
+									target="_blank"
+									rel="noopener"
+									class="external-link"
+								>
+									<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-2" />
+									{{ getLinkTitle(link) }}
+								</a>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No external links available</p>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -381,6 +485,14 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Carousel Context Menu -->
+		<div v-if="carouselContextMenu.visible" class="context-menu" :style="{ top: carouselContextMenu.y + 'px', left: carouselContextMenu.x + 'px' }" @click.stop>
+			<button class="context-menu-item" @click="setAsPrimaryPreview">
+				<font-awesome-icon :icon="['fas', 'star']" class="me-2" />
+				Set as Primary
+			</button>
+		</div>
 	</div>
 </template>
 
@@ -390,6 +502,17 @@ import { performersAPI } from '@/services/api'
 export default {
 	name: 'PerformersPage',
 	data() {
+		// Load preview cache from localStorage
+		let cachedPreviews = {}
+		try {
+			const stored = localStorage.getItem('performerPreviews')
+			if (stored) {
+				cachedPreviews = JSON.parse(stored)
+			}
+		} catch (e) {
+			console.error('Failed to load preview cache:', e)
+		}
+
 		return {
 			performers: [],
 			loading: false,
@@ -418,9 +541,17 @@ export default {
 				performer: null,
 			},
 			carouselIndex: 0,
+			activeTab: 'basic', // Tab in details panel: basic, appearance, performances, social_media, platform, tags, bios, external_links
 			deleteModal: {
 				visible: false,
 				performer: null,
+			},
+			performerPreviews: cachedPreviews, // Cache for performer previews: { performerId: [urls] }
+			carouselContextMenu: {
+				visible: false,
+				x: 0,
+				y: 0,
+				previewIndex: 0,
 			},
 		}
 	},
@@ -530,6 +661,9 @@ export default {
 				const response = await performersAPI.getAll()
 				console.log('data', response)
 				this.performers = response.data || []
+
+				// Preload previews for all performers in background (non-blocking)
+				this.preloadAllPreviews()
 			} catch (err) {
 				console.error('Failed to load performers:', err)
 				this.error = 'Failed to load performers. Please try again.'
@@ -541,10 +675,52 @@ export default {
 			return `http://localhost:8080${path}`
 		},
 		getPerformerPreviews(performer) {
-			// Return array of preview video URLs from performer's asset folder
-			if (!performer.preview_path) return []
-			// For now, return single preview. Later can scan asset folder for multiple videos
-			return [this.getPreviewUrl(performer.preview_path)]
+			// Return cached preview URLs or fallback to primary preview
+			if (this.performerPreviews[performer.id]) {
+				return this.performerPreviews[performer.id]
+			}
+			// Fallback to primary preview while loading
+			if (performer.preview_path) {
+				return [this.getPreviewUrl(performer.preview_path)]
+			}
+			return []
+		},
+		async loadPerformerPreviews(performerId) {
+			// Skip if already in cache (check for existence, not just truthiness)
+			if (Object.prototype.hasOwnProperty.call(this.performerPreviews, performerId) && this.performerPreviews[performerId]) {
+				console.log(`Using cached previews for performer ${performerId}`)
+				return
+			}
+
+			console.log(`Fetching previews from API for performer ${performerId}`)
+			try {
+				const response = await performersAPI.getPreviews(performerId)
+				if (response.data && response.data.previews) {
+					// Convert relative paths to full URLs
+					const previewUrls = response.data.previews.map((path) => this.getPreviewUrl(path))
+					this.performerPreviews[performerId] = previewUrls
+
+					// Save to localStorage
+					this.savePreviewCache()
+				}
+			} catch (err) {
+				console.error('Failed to load performer previews:', err)
+			}
+		},
+		savePreviewCache() {
+			try {
+				localStorage.setItem('performerPreviews', JSON.stringify(this.performerPreviews))
+			} catch (e) {
+				console.error('Failed to save preview cache:', e)
+			}
+		},
+		async preloadAllPreviews() {
+			// Preload previews for all performers in background
+			for (const performer of this.performers) {
+				if (!this.performerPreviews[performer.id]) {
+					await this.loadPerformerPreviews(performer.id)
+				}
+			}
 		},
 		playPreview(event) {
 			const video = event.target
@@ -556,10 +732,13 @@ export default {
 			const video = event.target
 			video.pause()
 		},
-		openDetails(performer) {
+		async openDetails(performer) {
 			this.detailsPanel.visible = true
 			this.detailsPanel.performer = performer
 			this.carouselIndex = 0
+			this.activeTab = 'basic' // Reset to basic tab
+			// Load all previews for this performer
+			await this.loadPerformerPreviews(performer.id)
 		},
 		closeDetails() {
 			this.detailsPanel.visible = false
@@ -575,17 +754,66 @@ export default {
 			this.contextMenu.visible = false
 			this.contextMenu.performer = null
 		},
+		openCarouselContextMenu(event, previewIndex) {
+			this.carouselContextMenu.visible = true
+			this.carouselContextMenu.x = event.clientX
+			this.carouselContextMenu.y = event.clientY
+			this.carouselContextMenu.previewIndex = previewIndex
+		},
+		closeCarouselContextMenu() {
+			this.carouselContextMenu.visible = false
+		},
+		async setAsPrimaryPreview() {
+			if (!this.detailsPanel.performer) return
+
+			const performer = this.detailsPanel.performer
+			const previews = await performersAPI.getPreviews(performer.id)
+			const selectedPreviewPath = previews.data.previews[this.carouselContextMenu.previewIndex]
+
+			this.closeCarouselContextMenu()
+
+			try {
+				// Update performer with new primary preview path
+				await performersAPI.update(performer.id, {
+					preview_path: selectedPreviewPath
+				})
+
+				// Reload performers
+				await this.loadPerformers()
+
+				// Update details panel
+				const updatedPerformer = this.performers.find(p => p.id === performer.id)
+				if (updatedPerformer) {
+					this.detailsPanel.performer = updatedPerformer
+				}
+
+				this.$toast.success('Primary Set', 'Primary preview updated successfully')
+			} catch (err) {
+				console.error('Failed to set primary preview:', err)
+				this.$toast.error('Update Failed', 'Failed to set primary preview')
+			}
+		},
 		async fetchMetadata(performer) {
 			this.closeContextMenu()
 			try {
 				// Call API to fetch metadata from AdultDataLink
-				await performersAPI.fetchMetadata(performer.id)
+				const response = await performersAPI.fetchMetadata(performer.id)
+				console.log('Metadata fetch response:', response)
 				// Reload performers to get updated data
 				await this.loadPerformers()
-				// TODO: Show success notification
+				// Reload the current performer in details panel
+				if (this.detailsPanel.visible && this.detailsPanel.performer?.id === performer.id) {
+					const updatedPerformer = this.performers.find(p => p.id === performer.id)
+					if (updatedPerformer) {
+						this.detailsPanel.performer = updatedPerformer
+						console.log('Updated performer in panel:', updatedPerformer)
+						console.log('Performer metadata:', updatedPerformer.metadata)
+					}
+				}
+				this.$toast.success('Metadata Fetched', `Successfully fetched metadata for ${performer.name}`)
 			} catch (err) {
 				console.error('Failed to fetch metadata:', err)
-				// TODO: Show error notification
+				this.$toast.error('Fetch Failed', err.response?.data?.error || 'Failed to fetch metadata from AdultDataLink')
 			}
 		},
 		async resetPerformer(performer) {
@@ -595,10 +823,10 @@ export default {
 				await performersAPI.resetMetadata(performer.id)
 				// Reload performers
 				await this.loadPerformers()
-				// TODO: Show success notification
+				this.$toast.success('Metadata Reset', `Metadata for ${performer.name} has been reset`)
 			} catch (err) {
 				console.error('Failed to reset performer:', err)
-				// TODO: Show error notification
+				this.$toast.error('Reset Failed', 'Failed to reset metadata')
 			}
 		},
 		confirmDelete(performer) {
@@ -614,10 +842,10 @@ export default {
 				await performersAPI.delete(performer.id)
 				// Remove from local list
 				this.performers = this.performers.filter((p) => p.id !== performer.id)
-				// TODO: Show success notification
+				this.$toast.success('Deleted', `${performer.name} has been deleted`)
 			} catch (err) {
 				console.error('Failed to delete performer:', err)
-				// TODO: Show error notification
+				this.$toast.error('Delete Failed', 'Failed to delete performer')
 			}
 		},
 		clearFilters() {
@@ -636,14 +864,110 @@ export default {
 			const date = new Date(dateString)
 			return date.toLocaleDateString()
 		},
+		// Helper methods for tabbed metadata display
+		getAppearanceData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.appearance) {
+				return null
+			}
+			// Check if it's an empty object
+			if (Object.keys(adlData.appearance).length === 0) {
+				return null
+			}
+			// Convert to plain object to avoid reactivity issues with v-for
+			return { ...adlData.appearance }
+		},
+		getPerformancesData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.performances) return null
+			if (Object.keys(adlData.performances).length === 0) return null
+			return { ...adlData.performances }
+		},
+		getSocialMediaData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.social_media) return null
+			if (Object.keys(adlData.social_media).length === 0) return null
+			return { ...adlData.social_media }
+		},
+		getPlatformData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData) return null
+			// Combine platform_views, platform_video_counts, platform_profile_counts
+			const platformData = {}
+			if (adlData.platform_views) {
+				Object.entries(adlData.platform_views).forEach(([key, value]) => {
+					platformData[`${key}_views`] = value
+				})
+			}
+			if (adlData.platform_video_counts) {
+				Object.entries(adlData.platform_video_counts).forEach(([key, value]) => {
+					platformData[`${key}_videos`] = value
+				})
+			}
+			if (adlData.platform_profile_counts) {
+				Object.entries(adlData.platform_profile_counts).forEach(([key, value]) => {
+					platformData[`${key}_profiles`] = value
+				})
+			}
+			return Object.keys(platformData).length > 0 ? platformData : null
+		},
+		getTagsData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.tags) return []
+			// Tags might be an array of objects or strings
+			if (Array.isArray(adlData.tags)) {
+				return adlData.tags.map((tag) => (typeof tag === 'string' ? tag : tag.name || tag.tag || JSON.stringify(tag)))
+			}
+			return []
+		},
+		getBiosData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.bios) return null
+			if (Object.keys(adlData.bios).length === 0) return null
+			return { ...adlData.bios }
+		},
+		getExternalLinksData(performer) {
+			const adlData = performer.metadata?.adult_data_link_response
+			if (!adlData || !adlData.external_links) return []
+			// Return plain array
+			return [...adlData.external_links]
+		},
+		formatLabel(key) {
+			// Convert snake_case to Title Case
+			return key
+				.split('_')
+				.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+				.join(' ')
+		},
+		formatValue(value) {
+			if (value === null || value === undefined) return 'N/A'
+			if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+			if (typeof value === 'object') return JSON.stringify(value)
+			return String(value)
+		},
+		isURL(value) {
+			if (typeof value !== 'string') return false
+			return value.startsWith('http://') || value.startsWith('https://')
+		},
+		getLinkURL(link) {
+			if (typeof link === 'string') return link
+			return link.url || link.link || '#'
+		},
+		getLinkTitle(link) {
+			if (typeof link === 'string') return link
+			return link.title || link.name || link.platform || link.url || 'External Link'
+		},
 	},
 	mounted() {
 		this.loadPerformers()
 
-		// Close context menu on click outside
+		// Close context menus on click outside
 		document.addEventListener('click', () => {
 			if (this.contextMenu.visible) {
 				this.closeContextMenu()
+			}
+			if (this.carouselContextMenu.visible) {
+				this.closeCarouselContextMenu()
 			}
 		})
 	},
@@ -1176,6 +1500,110 @@ export default {
 	font-weight: 600;
 	color: #00d9ff;
 	margin-bottom: 1rem;
+}
+
+/* Bootstrap Tab Overrides */
+.nav-tabs {
+	border-bottom: 2px solid rgba(0, 217, 255, 0.2);
+}
+
+.nav-tabs .nav-link {
+	color: rgba(255, 255, 255, 0.6);
+	border: none;
+	border-bottom: 2px solid transparent;
+	background: transparent;
+}
+
+.nav-tabs .nav-link:hover {
+	color: #00d9ff;
+	border-bottom-color: rgba(0, 217, 255, 0.3);
+}
+
+.nav-tabs .nav-link.active {
+	color: #00d9ff;
+	background: transparent;
+	border-bottom-color: #00d9ff;
+	font-weight: 600;
+}
+
+.tab-content {
+	min-height: 200px;
+}
+
+.empty-tab {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 200px;
+	color: rgba(255, 255, 255, 0.4);
+	font-style: italic;
+}
+
+/* Tags Container */
+.tags-container {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+}
+
+.tag-badge {
+	background: rgba(0, 217, 255, 0.2);
+	color: #00d9ff;
+	padding: 0.25rem 0.75rem;
+	border-radius: 1rem;
+	font-size: 0.875rem;
+	border: 1px solid rgba(0, 217, 255, 0.3);
+}
+
+/* Bios Container */
+.bios-container {
+	display: flex;
+	flex-direction: column;
+	gap: 1.5rem;
+}
+
+.bio-item {
+	padding: 1rem;
+	background: rgba(0, 217, 255, 0.05);
+	border-radius: 0.5rem;
+	border-left: 3px solid #00d9ff;
+}
+
+.bio-source {
+	color: #00d9ff;
+	margin-bottom: 0.5rem;
+	font-size: 0.95rem;
+}
+
+.bio-text {
+	color: rgba(255, 255, 255, 0.8);
+	line-height: 1.6;
+	margin: 0;
+}
+
+/* Links Container */
+.links-container {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.external-link {
+	display: flex;
+	align-items: center;
+	padding: 0.75rem 1rem;
+	background: rgba(0, 217, 255, 0.05);
+	border-radius: 0.5rem;
+	color: #00d9ff;
+	text-decoration: none;
+	border: 1px solid rgba(0, 217, 255, 0.2);
+	transition: all 0.3s;
+}
+
+.external-link:hover {
+	background: rgba(0, 217, 255, 0.15);
+	border-color: #00d9ff;
+	transform: translateX(5px);
 }
 
 .metadata-grid {

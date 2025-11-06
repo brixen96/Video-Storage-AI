@@ -21,6 +21,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
 
+	// Add config to context for handlers
+	router.Use(func(c *gin.Context) {
+		c.Set("config", cfg)
+		c.Next()
+	})
+
 	// Serve static files (performer previews, thumbnails)
 	router.Static("/assets", cfg.Paths.AssetsBaseDir)
 
@@ -74,6 +80,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		{
 			performers.GET("", getPerformers)                      // List all performers
 			performers.GET("/:id", getPerformer)                   // Get single performer
+			performers.GET("/:id/previews", getPerformerPreviews)  // Get all preview videos
 			performers.POST("", createPerformer)                   // Create performer
 			performers.POST("/scan", scanPerformers)               // Scan performer folders
 			performers.PUT("/:id", updatePerformer)                // Update performer

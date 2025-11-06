@@ -65,7 +65,7 @@ func Load() (*Config, error) {
 		Server: ServerConfig{
 			Port:         getEnv("SERVER_PORT", "8080"),
 			Host:         getEnv("SERVER_HOST", "localhost"),
-			Mode:         getEnv("SERVER_MODE", "debug"),
+			Mode:         getEnv("SERVER_MODE", "error"),
 			ReadTimeout:  getEnvAsInt("SERVER_READ_TIMEOUT", 15),
 			WriteTimeout: getEnvAsInt("SERVER_WRITE_TIMEOUT", 15),
 		},
