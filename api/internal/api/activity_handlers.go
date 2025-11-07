@@ -90,6 +90,8 @@ func createActivity(c *gin.Context) {
 		return
 	}
 
+	svc.BroadcastUpdate(activity) // Broadcast activity update
+
 	c.JSON(http.StatusCreated, models.SuccessResponse(activity, "Activity created successfully"))
 }
 
@@ -124,6 +126,8 @@ func updateActivity(c *gin.Context) {
 		return
 	}
 
+	svc.BroadcastUpdate(activity) // Broadcast activity update
+
 	c.JSON(http.StatusOK, models.SuccessResponse(activity, "Activity updated successfully"))
 }
 
@@ -148,6 +152,8 @@ func deleteActivity(c *gin.Context) {
 		))
 		return
 	}
+
+	svc.BroadcastStatusUpdate() // Broadcast status update
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Activity deleted successfully"))
 }
@@ -201,6 +207,8 @@ func cleanOldActivities(c *gin.Context) {
 		))
 		return
 	}
+
+	svc.BroadcastStatusUpdate() // Broadcast status update
 
 	result := map[string]interface{}{
 		"deleted_count": count,

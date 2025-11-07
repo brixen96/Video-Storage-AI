@@ -143,8 +143,8 @@
 			</div>
 
 			<!-- Main Content Area -->
-			<div class="main-content" :class="{ 'full-width': !showFilters }">
-				<div class="container-fluid">
+			<div class="main-content p-0 m-0" :class="{ 'full-width': !showFilters }">
+				<div class="container-fluid px-0">
 					<!-- Loading State -->
 					<div v-if="loading" class="text-center py-5">
 						<div class="spinner-border text-primary" role="status">
@@ -153,14 +153,14 @@
 					</div>
 
 					<!-- Empty State -->
-					<div v-else-if="videos.length === 0" class="text-center py-5 text-muted">
+					<div v-else-if="videos.length === 0" class="text-center py-5">
 						<font-awesome-icon :icon="['fas', 'video']" size="3x" class="mb-3" />
 						<p>No videos found</p>
 						<button class="btn btn-primary" @click="scanVideos">Scan for Videos</button>
 					</div>
 
 					<!-- Grid View -->
-					<div v-else-if="viewMode === 'grid'" class="video-grid">
+					<div v-else-if="viewMode === 'grid'" class="video-grid p-3">
 						<VideoCard
 							v-for="video in videos"
 							:key="video.id"
@@ -179,7 +179,7 @@
 
 					<!-- List View -->
 					<div v-else class="video-list">
-						<table class="table table-hover">
+						<table class="table-dark table-hover text-bg-dark w-100">
 							<thead>
 								<tr>
 									<th style="width: 40px">
@@ -354,7 +354,7 @@
 		<!-- Bulk Actions Modal -->
 		<div v-if="showBulkActions" class="modal show d-block" tabindex="-1">
 			<div class="modal-dialog modal-dialog-centered">
-				<div class="modal-content">
+				<div class="modal-content text-bg-dark">
 					<div class="modal-header">
 						<h5 class="modal-title">Bulk Actions ({{ selectedVideos.length }} videos)</h5>
 						<button type="button" class="btn-close" @click="showBulkActions = false"></button>
@@ -556,12 +556,20 @@ export default {
 		},
 		async scanVideos() {
 			try {
-				await videosAPI.scan()
+				// Use selected library or primary library
+				let libraryId = this.selectedLibrary
+				if (!libraryId) {
+					// Get primary library
+					const primaryLib = await librariesAPI.getPrimary()
+					libraryId = primaryLib.data.id
+				}
+
+				await videosAPI.scan(libraryId)
 				this.$toast.success('Video scan started. Check Activity Monitor for progress.')
 				setTimeout(() => this.loadVideos(), 2000)
 			} catch (error) {
 				console.error('Failed to start scan:', error)
-				this.$toast.error('Failed to start video scan')
+				this.$toast.error('Failed to start video scan: ' + (error.response?.data?.error || error.message))
 			}
 		},
 		openVideoDetails(video) {

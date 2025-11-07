@@ -35,19 +35,18 @@ var SupportedVideoExtensions = []string{
 
 // GetAll retrieves all videos with optional filters
 func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, int, error) {
-	// Build base query
-	baseQuery := `
+	// Build base query parts
+	selectClause := `
 		SELECT DISTINCT v.id, v.title, v.file_path, v.file_size, v.duration, v.codec,
 		       v.resolution, v.bitrate, v.fps, v.thumbnail_path,
 		       v.created_at, v.updated_at, v.last_played_at, v.play_count
-		FROM videos v
-		WHERE 1=1
 	`
-
-	// Build WHERE conditions
+	fromClause := "FROM videos v"
+	var joinClauses []string
 	var conditions []string
 	var args []interface{}
 
+	// Build WHERE conditions
 	if query.Query != "" {
 		conditions = append(conditions, "v.title LIKE ?")
 		args = append(args, "%"+query.Query+"%")
@@ -70,25 +69,25 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 
 	// Add JOIN conditions for relationships
 	if query.PerformerID > 0 {
-		baseQuery += " INNER JOIN video_performers vp ON v.id = vp.video_id"
+		joinClauses = append(joinClauses, "INNER JOIN video_performers vp ON v.id = vp.video_id")
 		conditions = append(conditions, "vp.performer_id = ?")
 		args = append(args, query.PerformerID)
 	}
 
 	if query.StudioID > 0 {
-		baseQuery += " INNER JOIN video_studios vs ON v.id = vs.video_id"
+		joinClauses = append(joinClauses, "INNER JOIN video_studios vs ON v.id = vs.video_id")
 		conditions = append(conditions, "vs.studio_id = ?")
 		args = append(args, query.StudioID)
 	}
 
 	if query.GroupID > 0 {
-		baseQuery += " INNER JOIN video_groups vg ON v.id = vg.video_id"
+		joinClauses = append(joinClauses, "INNER JOIN video_groups vg ON v.id = vg.video_id")
 		conditions = append(conditions, "vg.group_id = ?")
 		args = append(args, query.GroupID)
 	}
 
 	if len(query.TagIDs) > 0 {
-		baseQuery += " INNER JOIN video_tags vt ON v.id = vt.video_id"
+		joinClauses = append(joinClauses, "INNER JOIN video_tags vt ON v.id = vt.video_id")
 		placeholders := make([]string, len(query.TagIDs))
 		for i, tagID := range query.TagIDs {
 			placeholders[i] = "?"
@@ -97,18 +96,33 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		conditions = append(conditions, fmt.Sprintf("vt.tag_id IN (%s)", strings.Join(placeholders, ",")))
 	}
 
-	// Add WHERE conditions to query
+	// Build WHERE clause
+	whereClause := "WHERE 1=1"
 	if len(conditions) > 0 {
-		baseQuery += " AND " + strings.Join(conditions, " AND ")
+		whereClause += " AND " + strings.Join(conditions, " AND ")
 	}
 
+	// Build complete count query
+	countQuery := "SELECT COUNT(DISTINCT v.id) " + fromClause
+	if len(joinClauses) > 0 {
+		countQuery += " " + strings.Join(joinClauses, " ")
+	}
+	countQuery += " " + whereClause
+
 	// Count total results
-	countQuery := strings.Replace(baseQuery, "SELECT DISTINCT v.id, v.title, v.file_path, v.file_size, v.duration, v.codec, v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.created_at, v.updated_at, v.last_played_at, v.play_count", "SELECT COUNT(DISTINCT v.id)", 1)
 	var total int
 	err := s.db.QueryRow(countQuery, args...).Scan(&total)
-	if err != nil {
+	if err != nil && err != sql.ErrNoRows {
 		return nil, 0, fmt.Errorf("failed to count videos: %w", err)
 	}
+	// If no rows, total will be 0 which is correct
+
+	// Build complete select query
+	selectQuery := selectClause + " " + fromClause
+	if len(joinClauses) > 0 {
+		selectQuery += " " + strings.Join(joinClauses, " ")
+	}
+	selectQuery += " " + whereClause
 
 	// Add sorting
 	sortBy := query.SortBy
@@ -119,7 +133,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	if sortOrder == "" {
 		sortOrder = "desc"
 	}
-	baseQuery += fmt.Sprintf(" ORDER BY v.%s %s", sortBy, strings.ToUpper(sortOrder))
+	selectQuery += fmt.Sprintf(" ORDER BY v.%s %s", sortBy, strings.ToUpper(sortOrder))
 
 	// Add pagination
 	limit := query.Limit
@@ -132,11 +146,11 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	}
 	offset := (page - 1) * limit
 
-	baseQuery += " LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	selectQuery += " LIMIT ? OFFSET ?"
+	paginationArgs := append(args, limit, offset)
 
 	// Execute query
-	rows, err := s.db.Query(baseQuery, args...)
+	rows, err := s.db.Query(selectQuery, paginationArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query videos: %w", err)
 	}

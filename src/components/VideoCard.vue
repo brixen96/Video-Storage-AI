@@ -77,7 +77,13 @@
 
 			<!-- Performers -->
 			<div v-if="video.performers && video.performers.length > 0" class="video-performers">
-				<div v-for="performer in video.performers.slice(0, 3)" :key="performer.id" class="performer-avatar" :title="performer.name" @click.stop="$emit('open-performer', performer)">
+				<div
+					v-for="performer in video.performers.slice(0, 3)"
+					:key="performer.id"
+					class="performer-avatar"
+					:title="performer.name"
+					@click.stop="$emit('open-performer', performer)"
+				>
 					<img v-if="performer.image_path" :src="getAssetURL(performer.image_path)" :alt="performer.name" />
 					<div v-else class="performer-initials">{{ getInitials(performer.name) }}</div>
 				</div>
@@ -222,8 +228,7 @@ export default {
 
 <style scoped>
 .video-card {
-	background: var(--bs-body-bg);
-	border: 1px solid var(--bs-border-color);
+	background-color: rgba(255, 255, 255, 0.05) !important;
 	border-radius: 0.5rem;
 	overflow: hidden;
 	cursor: pointer;
@@ -266,7 +271,7 @@ export default {
 .video-thumbnail {
 	position: relative;
 	aspect-ratio: 16 / 9;
-	background: var(--bs-secondary-bg);
+	background: var(--bs-dark-bg);
 	overflow: hidden;
 }
 
@@ -296,7 +301,7 @@ export default {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	color: var(--bs-secondary);
+	color: var(--bs-dark);
 }
 
 /* Hover Overlay */

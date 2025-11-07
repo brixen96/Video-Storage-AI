@@ -210,6 +210,7 @@
 
 <script>
 import { activityAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 export default {
 	name: 'ActivityPage',
@@ -230,10 +231,29 @@ export default {
 	async mounted() {
 		await this.loadStatus()
 		await this.loadActivities()
-		this.startAutoRefresh()
+
+		websocketService.connect()
+
+		this.unsubscribeStatus = websocketService.on('status_update', (status) => {
+			this.status = status
+		})
+
+		this.unsubscribeActivity = websocketService.on('activity_update', (activity) => {
+			const index = this.activities.findIndex((a) => a.id === activity.id)
+			if (index !== -1) {
+				this.activities.splice(index, 1, activity)
+			} else {
+				this.activities.unshift(activity)
+			}
+		})
 	},
 	beforeUnmount() {
-		this.stopAutoRefresh()
+		if (this.unsubscribeStatus) {
+			this.unsubscribeStatus()
+		}
+		if (this.unsubscribeActivity) {
+			this.unsubscribeActivity()
+		}
 	},
 	methods: {
 		async loadActivities() {
@@ -288,20 +308,7 @@ export default {
 			this.expandedDetails[id] = !this.expandedDetails[id]
 			this.$forceUpdate()
 		},
-		startAutoRefresh() {
-			// Refresh every 5 seconds
-			this.autoRefresh = setInterval(() => {
-				this.loadStatus()
-				if (this.filters.status === 'running' || this.filters.status === '') {
-					this.loadActivities()
-				}
-			}, 5000)
-		},
-		stopAutoRefresh() {
-			if (this.autoRefresh) {
-				clearInterval(this.autoRefresh)
-			}
-		},
+
 		getStatusIcon(status) {
 			const icons = {
 				running: ['fas', 'spinner'],

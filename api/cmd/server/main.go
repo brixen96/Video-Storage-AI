@@ -51,7 +51,8 @@ func main() {
 	router := api.SetupRouter(cfg)
 
 	// Initialize WebSocket hub
-	api.InitWebSocket()
+	hub := api.InitWebSocket()
+	services.SetWebSocketHub(hub)
 
 	// Create HTTP server
 	srv := &http.Server{

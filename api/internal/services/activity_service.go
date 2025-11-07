@@ -17,7 +17,7 @@ type ActivityService struct {
 
 // WebSocketHub interface for broadcasting updates
 type WebSocketHub interface {
-	BroadcastActivityUpdate(activity *models.ActivityLog)
+	BroadcastActivityUpdate(activity *models.Activity)
 	BroadcastStatusUpdate(status *models.ActivityStatus)
 }
 
@@ -48,7 +48,7 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 	}
 
 	query := `
-		INSERT INTO activity_logs (task_type, status, message, progress, details, created_at, updated_at)
+		INSERT INTO activity_logs (task_type, status, message, progress, details, started_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`
 
@@ -63,13 +63,15 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 		return nil, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
+	s.BroadcastStatusUpdate() // Broadcast status update
+
 	return s.GetByID(id)
 }
 
 // GetByID retrieves an activity log by ID
 func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 	query := `
-		SELECT id, task_type, status, message, progress, details, created_at, updated_at, completed_at
+		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at
 		FROM activity_logs
 		WHERE id = ?
 	`
@@ -226,6 +228,8 @@ func (s *ActivityService) Update(id int, update *models.ActivityLogUpdate) (*mod
 		return nil, fmt.Errorf("failed to update activity: %w", err)
 	}
 
+	s.BroadcastStatusUpdate() // Broadcast status update
+
     return s.GetByID(int64(id))
 }
 
@@ -246,42 +250,59 @@ func (s *ActivityService) Delete(id int64) error {
 		return fmt.Errorf("activity not found")
 	}
 
+	s.BroadcastStatusUpdate() // Broadcast status update
+
 	return nil
 }
 
 // GetStatus returns the current status of all activities
 func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
-	query := `
-		SELECT 
-			COUNT(*) as total,
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as running,
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as completed,
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as failed,
-			SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as pending
-		FROM activity_logs
-	`
+	status := &models.ActivityStatus{}
+	var err error
 
-	var status models.ActivityStatus
-	var total, running, completed, failed, pending int
-	err := s.db.QueryRow(query,
-		models.TaskStatusRunning,
-		models.TaskStatusCompleted,
-		models.TaskStatusFailed,
-		models.TaskStatusPending,
-	).Scan(&total, &running, &completed, &failed, &pending)
-
-	if err == nil {
-		status.RunningTasks = running
-		status.CompletedTasks = completed
-		status.FailedTasks = failed
-		status.PendingTasks = pending
+	// Count by status
+	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusRunning).Scan(&status.RunningTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get running tasks: %w", err)
 	}
 
+	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusPending).Scan(&status.PendingTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get pending tasks: %w", err)
+	}
+
+	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusCompleted).Scan(&status.CompletedTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get completed tasks: %w", err)
+	}
+
+	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusFailed).Scan(&status.FailedTasks)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to get failed tasks: %w", err)
+	}
+
+	// Get current running tasks
+	currentTasks, err := s.GetAll(models.TaskStatusRunning, "", 10)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get status: %w", err)
+		currentTasks = []models.Activity{}
 	}
 
-	return &status, nil
+	// This is a hack to convert []models.Activity to []models.ActivityLog
+	var activityLogs []models.ActivityLog
+	for _, activity := range currentTasks {
+		activityLogs = append(activityLogs, models.ActivityLog{
+			ID:          int64(activity.ID),
+			TaskType:    activity.TaskType,
+			Status:      activity.Status,
+			Message:     activity.Message,
+			Progress:    activity.Progress,
+			StartedAt:   activity.StartedAt,
+			CompletedAt: activity.CompletedAt,
+		})
+	}
+	status.CurrentTasks = activityLogs
+
+	return status, nil
 }
 
 // GetRecent retrieves the most recent activity logs
@@ -306,6 +327,8 @@ func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
+
+	s.BroadcastStatusUpdate() // Broadcast status update
 
 	return count, nil
 }
@@ -460,20 +483,9 @@ func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]
 
 // BroadcastUpdate sends a real-time update via WebSocket
 func (s *ActivityService) BroadcastUpdate(activity *models.Activity) error {
-	// Convert Activity to ActivityLog for broadcasting
-	activityLog := &models.ActivityLog{
-		ID:          int64(activity.ID),
-		TaskType:    activity.TaskType,
-		Status:      activity.Status,
-		Message:     activity.Message,
-		Progress:    activity.Progress,
-		StartedAt:   activity.StartedAt,
-		CompletedAt: activity.CompletedAt,
-	}
-	
 	hub := wsHub
 	if hub != nil {
-		hub.BroadcastActivityUpdate(activityLog)
+		hub.BroadcastActivityUpdate(activity)
 	}
 	return nil
 }
@@ -816,10 +828,36 @@ func intPtr(i int) *int {
 }
 
 // BroadcastUpdateLog sends a real-time update via WebSocket
-func (s *ActivityService) BroadcastUpdateLog(activity *models.ActivityLog) error {
+func (s *ActivityService) BroadcastUpdateLog(activityLog *models.ActivityLog) error {
+	// Convert ActivityLog to Activity for broadcasting
+	activity := &models.Activity{
+		ID:          int(activityLog.ID),
+		TaskType:    activityLog.TaskType,
+		Status:      activityLog.Status,
+		Message:     activityLog.Message,
+		Progress:    activityLog.Progress,
+		StartedAt:   activityLog.StartedAt,
+		CompletedAt: activityLog.CompletedAt,
+		UpdatedAt:   time.Now(),
+	}
+
 	hub := wsHub
 	if hub != nil {
 		hub.BroadcastActivityUpdate(activity)
+	}
+	return nil
+}
+
+// BroadcastStatusUpdate sends a real-time status update via WebSocket
+func (s *ActivityService) BroadcastStatusUpdate() error {
+	status, err := s.GetStatus()
+	if err != nil {
+		return err
+	}
+
+	hub := wsHub
+	if hub != nil {
+		hub.BroadcastStatusUpdate(status)
 	}
 	return nil
 }
