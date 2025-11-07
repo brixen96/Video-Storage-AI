@@ -20,6 +20,7 @@ type ActivityService struct {
 type WebSocketHub interface {
 	BroadcastActivityUpdate(activity *models.Activity)
 	BroadcastStatusUpdate(status *models.ActivityStatus)
+	BroadcastSystemEvent(event string)
 }
 
 // Global WebSocket hub reference (will be set by API layer)
@@ -410,19 +411,17 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 func (s *ActivityService) StartTask(taskType, message string, details map[string]interface{}) (*models.Activity, error) {
 	activity := &models.Activity{
 		TaskType:  taskType,
-		Status:    models.TaskStatusRunning,
+		Status:    models.TaskStatusPending,
 		Message:   message,
 		Progress:  0,
-		StartedAt: time.Now(),
-		UpdatedAt: time.Now(),
 	}
 
 	// Marshal details to JSON string
 	var detailsJSON string
-	if details != nil && len(details) > 0 {
+	if len(details) > 0 {
 		detailsBytes, err := json.Marshal(details)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal details: %w", err)
+			return nil, fmt.Errorf("failed to marshal task details: %w", err)
 		}
 		detailsJSON = string(detailsBytes)
 	} else {
@@ -431,19 +430,23 @@ func (s *ActivityService) StartTask(taskType, message string, details map[string
 	activity.Details = detailsJSON
 
 	query := `
-        INSERT INTO activity_logs (task_type, status, message, details, progress, started_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO activity_logs (task_type, status, message, details, progress, started_at, updated_at, completed_at, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `
+
+	now := time.Now()
+	activity.StartedAt = now
 
 	result, err := s.db.Exec(
 		query,
 		activity.TaskType,
 		activity.Status,
 		activity.Message,
-		activity.Details,
-		activity.Progress,
-		activity.StartedAt,
-		activity.UpdatedAt,
+		detailsJSON,
+		0, // progress
+		now,
+		now,
+		nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create activity: %w", err)
@@ -455,7 +458,13 @@ func (s *ActivityService) StartTask(taskType, message string, details map[string
 	}
 
 	activity.ID = int(id)
-	return activity, nil
+
+	// Broadcast update
+	if err := s.BroadcastUpdate(activity); err != nil {
+		log.Printf("failed to broadcast activity update: %v", err)
+	}
+
+	return s.GetByID(int64(id))
 }
 
 // CompleteTask is a helper to mark a task as completed
@@ -469,6 +478,9 @@ func (s *ActivityService) CompleteTask(id int64, message string) error {
 	}
 
 	_, err := s.Update(int(id), update)
+	if err == nil {
+		s.checkAndBroadcastIdle()
+	}
 	return err
 }
 
@@ -481,6 +493,9 @@ func (s *ActivityService) FailTask(id int, errorMsg string) error {
 	}
 
 	_, err := s.Update(id, update)
+	if err == nil {
+		s.checkAndBroadcastIdle()
+	}
 	return err
 }
 
@@ -493,6 +508,21 @@ func (s *ActivityService) UpdateProgress(id int, progress int, message string) e
 
 	_, err := s.Update(id, update)
 	return err
+}
+
+// checkAndBroadcastIdle checks if there are any active tasks and broadcasts an "idle" event if not.
+func (s *ActivityService) checkAndBroadcastIdle() {
+	status, err := s.GetStatus()
+	if err != nil {
+		log.Printf("Error getting status for idle check: %v", err)
+		return
+	}
+
+	if status.RunningTasks == 0 && status.PendingTasks == 0 {
+		if wsHub != nil {
+			wsHub.BroadcastSystemEvent("idle")
+		}
+	}
 }
 
 // GetTasksByStatus retrieves tasks filtered by status with pagination
@@ -671,7 +701,11 @@ func (s *ActivityService) GetAllLogs(status string, taskType string, limit int) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query activity logs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var activities []models.ActivityLog
 	for rows.Next() {
@@ -844,7 +878,11 @@ func (s *ActivityService) GetStatsByTypeLogs() (map[string]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	stats := make(map[string]int)
 	for rows.Next() {

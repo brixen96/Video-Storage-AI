@@ -717,11 +717,9 @@ export default {
 		async loadPerformerPreviews(performerId) {
 			// Skip if already in cache (check for existence, not just truthiness)
 			if (Object.prototype.hasOwnProperty.call(this.performerPreviews, performerId) && this.performerPreviews[performerId]) {
-				console.log(`Using cached previews for performer ${performerId}`)
 				return
 			}
 
-			console.log(`Fetching previews from API for performer ${performerId}`)
 			try {
 				const response = await performersAPI.getPreviews(performerId)
 				if (response.data && response.data.previews) {

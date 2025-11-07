@@ -59,6 +59,11 @@ func getPerformers(c *gin.Context) {
 		return
 	}
 
+	// Mark the first item on the first page as an LCP candidate
+	if page == 1 && len(performers) > 0 {
+		performers[0].IsLCPCandidate = true
+	}
+
 	totalPages := int((total + int64(limit) - 1) / int64(limit))
 
 	c.JSON(http.StatusOK, gin.H{

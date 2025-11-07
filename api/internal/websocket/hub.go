@@ -2,12 +2,11 @@ package websocket
 
 import (
 	"encoding/json"
-	"log"
 
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
-// Hub maintains the set of active clients and broadcasts messages to them
+// Hub maintains the set of active clients and broadcasts messages to the
 type Hub struct {
 	clients    map[*Client]bool
 	broadcast  chan []byte
@@ -15,31 +14,27 @@ type Hub struct {
 	unregister chan *Client
 }
 
-// NewHub creates a new WebSocket hub
+// NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte, 256),
+		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		clients:    make(map[*Client]bool),
 	}
 }
 
-// Run starts the hub's main loop
+// Run starts the hub's event loop.
 func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
 			h.clients[client] = true
-			log.Printf("Client connected. Total clients: %d", len(h.clients))
-
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
-				log.Printf("Client disconnected. Total clients: %d", len(h.clients))
 			}
-
 		case message := <-h.broadcast:
 			for client := range h.clients {
 				select {
@@ -53,70 +48,39 @@ func (h *Hub) Run() {
 	}
 }
 
-// Register registers a new client with the hub
-func (h *Hub) Register(client *Client) {
-	h.register <- client
-}
-
-// Unregister removes a client from the hub
-func (h *Hub) Unregister(client *Client) {
-	h.unregister <- client
-}
-
-// Broadcast sends a message to all connected clients
+// Broadcast broadcasts a message to all clients.
 func (h *Hub) Broadcast(message []byte) {
 	h.broadcast <- message
 }
 
-// BroadcastActivityUpdate broadcasts an activity update to all clients
+// BroadcastActivityUpdate broadcasts an activity update to all clients.
 func (h *Hub) BroadcastActivityUpdate(activity *models.Activity) {
-	message := map[string]interface{}{
-		"type": "activity_update",
-		"data": activity,
+	message, err := json.Marshal(activity)
+	if err == nil {
+		h.Broadcast(message)
 	}
-
-	data, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("Failed to marshal activity update: %v", err)
-		return
-	}
-
-	h.Broadcast(data)
 }
 
-// BroadcastStatusUpdate broadcasts a status update to all clients
+// BroadcastStatusUpdate broadcasts a status update to all clients.
 func (h *Hub) BroadcastStatusUpdate(status *models.ActivityStatus) {
-	message := map[string]interface{}{
-		"type": "status_update",
-		"data": status,
+	message, err := json.Marshal(status)
+	if err == nil {
+		h.Broadcast(message)
 	}
-
-	data, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("Failed to marshal status update: %v", err)
-		return
-	}
-
-	h.Broadcast(data)
 }
 
-// BroadcastMessage broadcasts a generic message to all clients
-func (h *Hub) BroadcastMessage(messageType string, data interface{}) {
-	message := map[string]interface{}{
-		"type": messageType,
-		"data": data,
+// BroadcastSystemEvent broadcasts a system event to all clients.
+func (h *Hub) BroadcastSystemEvent(event string) {
+	message, err := json.Marshal(SystemEvent{
+		Type:  "system",
+		Event: event,
+	})
+	if err == nil {
+		h.Broadcast(message)
 	}
-
-	jsonData, err := json.Marshal(message)
-	if err != nil {
-		log.Printf("Failed to marshal message: %v", err)
-		return
-	}
-
-	h.Broadcast(jsonData)
 }
 
-// GetClientCount returns the number of connected clients
-func (h *Hub) GetClientCount() int {
-	return len(h.clients)
+// Register registers a new client with the hub.
+func (h *Hub) Register(client *Client) {
+	h.register <- client
 }

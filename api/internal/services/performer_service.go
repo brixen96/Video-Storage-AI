@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -33,7 +34,11 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query performers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var performers []models.Performer
 	for rows.Next() {
@@ -244,7 +249,11 @@ func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search performers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var performers []models.Performer
 	for rows.Next() {
@@ -324,7 +333,11 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query performers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var performers []models.Performer
 	for rows.Next() {
@@ -377,7 +390,11 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query performers: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var performers []models.Performer
 	for rows.Next() {

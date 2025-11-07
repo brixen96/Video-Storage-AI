@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -35,7 +36,11 @@ func (s *LibraryService) GetAll() ([]models.Library, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query libraries: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var libraries []models.Library
 	for rows.Next() {

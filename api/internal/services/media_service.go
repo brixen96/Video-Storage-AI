@@ -91,7 +91,8 @@ func (s *MediaService) ExtractMetadata(filePath string) (*VideoMetadata, error) 
 
 	// Extract video and audio stream information
 	for _, stream := range probeOutput.Streams {
-		if stream.CodecType == "video" {
+		switch stream.CodecType {
+		case "video":
 			metadata.Width = stream.Width
 			metadata.Height = stream.Height
 			metadata.Codec = stream.CodecName
@@ -107,7 +108,7 @@ func (s *MediaService) ExtractMetadata(filePath string) (*VideoMetadata, error) 
 					}
 				}
 			}
-		} else if stream.CodecType == "audio" {
+		case "audio":
 			metadata.HasAudio = true
 			metadata.AudioCodec = stream.CodecName
 		}

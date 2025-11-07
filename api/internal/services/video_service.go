@@ -198,7 +198,11 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		log.Printf("Query execution failed: %v", err)
 		return nil, 0, fmt.Errorf("failed to query videos: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	// Initialize empty slice instead of nil
 	videos := make([]models.Video, 0)
@@ -270,7 +274,9 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	}
 
 	// Load relationships
-	s.loadVideoRelationships(&video)
+	if err := s.loadVideoRelationships(&video); err != nil {
+		log.Printf("Warning: Failed to load relationships for video %d: %v", video.ID, err)
+	}
 
 	return &video, nil
 }
@@ -382,12 +388,16 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	// Scan for video files
 	videoFiles, err := s.findVideoFiles(library.Path)
 	if err != nil {
-		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scan directory: %v", err))
+		if err := s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scan directory: %v", err)); err != nil {
+			log.Printf("Failed to fail task: %v", err)
+		}
 		return fmt.Errorf("failed to scan directory: %w", err)
 	}
 
 	total := len(videoFiles)
-	s.activityService.UpdateProgress(activity.ID, 0, fmt.Sprintf("Found %d video files", total))
+	if err := s.activityService.UpdateProgress(activity.ID, 0, fmt.Sprintf("Found %d video files", total)); err != nil {
+		log.Printf("Failed to update progress: %v", err)
+	}
 
 	// Process each video file
 	processed := 0
@@ -405,7 +415,9 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 		exists, err := s.videoExists(filePath)
 		if err == nil && exists {
 			skipped++
-			s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added))
+			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added)); err != nil {
+				log.Printf("Failed to update progress: %v", err)
+			}
 			continue
 		}
 
@@ -413,7 +425,9 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
 			skipped++
-			s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err))
+			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err)); err != nil {
+				log.Printf("Failed to update progress: %v", err)
+			}
 			continue
 		}
 
@@ -449,16 +463,20 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 		_, err = s.Create(create)
 		if err != nil {
 			skipped++
-			s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err))
+			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err)); err != nil {
+				log.Printf("Failed to update progress: %v", err)
+			}
 			continue
 		}
 
 		added++
-		s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added))
+		if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added)); err != nil {
+			log.Printf("Failed to update progress: %v", err)
+		}
 	}
 
 	// Complete activity
-	s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan complete: %d videos added, %d skipped", added, skipped))
+	_ = s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan complete: %d videos added, %d skipped", added, skipped))
 
 	return nil
 }
@@ -512,7 +530,11 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	`
 	performerRows, err := s.db.Query(performerQuery, video.ID)
 	if err == nil {
-		defer performerRows.Close()
+		defer func() {
+			if err := performerRows.Close(); err != nil {
+				log.Printf("failed to close performerRows: %v", err)
+			}
+		}()
 		for performerRows.Next() {
 			var performer models.Performer
 			var metadata sql.NullString
@@ -535,7 +557,11 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	`
 	tagRows, err := s.db.Query(tagQuery, video.ID)
 	if err == nil {
-		defer tagRows.Close()
+		defer func() {
+			if err := tagRows.Close(); err != nil {
+				log.Printf("failed to close tagRows: %v", err)
+			}
+		}()
 		for tagRows.Next() {
 			var tag models.Tag
 			err := tagRows.Scan(&tag.ID, &tag.Name, &tag.Color, &tag.Icon, &tag.CreatedAt, &tag.UpdatedAt)
@@ -554,7 +580,11 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	`
 	studioRows, err := s.db.Query(studioQuery, video.ID)
 	if err == nil {
-		defer studioRows.Close()
+		defer func() {
+			if err := studioRows.Close(); err != nil {
+				log.Printf("failed to close studioRows: %v", err)
+			}
+		}()
 		for studioRows.Next() {
 			var studio models.Studio
 			var metadata, foundedDate sql.NullString
@@ -580,7 +610,11 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	`
 	groupRows, err := s.db.Query(groupQuery, video.ID)
 	if err == nil {
-		defer groupRows.Close()
+		defer func() {
+			if err := groupRows.Close(); err != nil {
+				log.Printf("failed to close groupRows: %v", err)
+			}
+		}()
 		for groupRows.Next() {
 			var group models.Group
 			var metadata sql.NullString
