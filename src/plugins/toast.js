@@ -23,5 +23,5 @@ export default {
 
 		// Provide for composition API
 		app.provide('toast', app.config.globalProperties.$toast)
-	}
+	},
 }

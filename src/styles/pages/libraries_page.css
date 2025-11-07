@@ -1,0 +1,85 @@
+.libraries-page {
+	min-height: calc(100vh - 60px);
+	background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+	color: #fff;
+}
+
+.library-card {
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 1rem;
+	transition: all 0.3s ease;
+	backdrop-filter: blur(10px);
+}
+
+.library-card:hover {
+	background: rgba(255, 255, 255, 0.1);
+	border-color: #00d9ff;
+	transform: translateY(-5px);
+	box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+}
+
+.library-path {
+	word-break: break-all;
+	background: rgba(0, 0, 0, 0.2);
+	padding: 0.5rem;
+	border-radius: 0.5rem;
+}
+
+.library-stats {
+	display: flex;
+	gap: 1rem;
+}
+
+.stat-item {
+	display: flex;
+	align-items: center;
+	color: #00d9ff;
+}
+
+.empty-state {
+	background: rgba(255, 255, 255, 0.05);
+	border: 2px dashed rgba(255, 255, 255, 0.2);
+	border-radius: 1rem;
+	padding: 3rem;
+}
+
+.modal-content {
+	background: #1a1a2e;
+	color: #fff;
+	border: 1px solid rgba(0, 217, 255, 0.3);
+}
+
+.modal-header {
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-footer {
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.form-control {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	color: #fff;
+}
+
+.form-control:focus {
+	background: rgba(255, 255, 255, 0.15);
+	border-color: #00d9ff;
+	box-shadow: 0 0 0 0.2rem rgba(0, 217, 255, 0.25);
+	color: #fff;
+}
+
+.form-control::placeholder {
+	color: rgba(255, 255, 255, 0.5);
+}
+
+.btn-close {
+	filter: invert(1);
+}
+
+.card-footer {
+	background: rgba(0, 0, 0, 0.2);
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+}

@@ -37,41 +37,5 @@ export default {
 </script>
 
 <style scoped>
-.tag-badge {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.25rem;
-	padding: 0.375rem 0.75rem;
-	border-radius: 0.5rem;
-	color: #fff;
-	font-size: 0.875rem;
-	font-weight: 500;
-	white-space: nowrap;
-	transition: all 0.2s;
-	margin: 0.25rem;
-}
-
-.tag-badge.clickable {
-	cursor: pointer;
-}
-
-.tag-badge.clickable:hover {
-	transform: translateY(-2px);
-	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-
-.btn-remove {
-	background: none;
-	border: none;
-	color: #fff;
-	padding: 0;
-	margin-left: 0.25rem;
-	cursor: pointer;
-	opacity: 0.7;
-	transition: opacity 0.2s;
-}
-
-.btn-remove:hover {
-	opacity: 1;
-}
+@import '@/styles/components/tag_badge.css';
 </style>

@@ -1,61 +1,14 @@
 <template>
-  <div class="skeleton-card">
-    <div class="skeleton-image"></div>
-    <div class="skeleton-content">
-      <div class="skeleton-title"></div>
-      <div class="skeleton-text"></div>
-      <div class="skeleton-text short"></div>
-    </div>
-  </div>
+	<div class="skeleton-card">
+		<div class="skeleton-image"></div>
+		<div class="skeleton-content">
+			<div class="skeleton-title"></div>
+			<div class="skeleton-text"></div>
+			<div class="skeleton-text short"></div>
+		</div>
+	</div>
 </template>
 
 <style scoped>
-.skeleton-card {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 1rem;
-  overflow: hidden;
-}
-
-.skeleton-image {
-  width: 100%;
-  height: 200px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-}
-
-.skeleton-content {
-  padding: 1rem;
-}
-
-.skeleton-title {
-  height: 1.5rem;
-  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  margin-bottom: 0.75rem;
-  border-radius: 0.5rem;
-}
-
-.skeleton-text {
-  height: 1rem;
-  background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.05) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  margin-bottom: 0.5rem;
-  border-radius: 0.25rem;
-}
-
-.skeleton-text.short {
-  width: 75%;
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
+@import '@/styles/components/skeleton_card.css';
 </style>

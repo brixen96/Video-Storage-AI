@@ -18,9 +18,5 @@ export default {
 </script>
 
 <style scoped>
-.settings-page {
-	min-height: calc(100vh - 60px);
-	background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
-	color: #fff;
-}
+@import '@/styles/pages/settings_page.css';
 </style>
