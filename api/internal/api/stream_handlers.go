@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,7 +100,11 @@ func streamVideo(c *gin.Context) {
 		))
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("Failed to close file: %v", err)
+		}
+	}()
 
 	// Get file size
 	fileSize := fileInfo.Size()
@@ -118,7 +123,9 @@ func streamVideo(c *gin.Context) {
 		c.Header("Content-Length", fmt.Sprintf("%d", fileSize))
 		c.Header("Accept-Ranges", "bytes")
 		c.Status(http.StatusOK)
-		io.Copy(c.Writer, file)
+		if _, err := io.Copy(c.Writer, file); err != nil {
+			log.Printf("Failed to copy file to response: %v", err)
+		}
 	}
 }
 
@@ -180,7 +187,9 @@ func handleRangeRequest(c *gin.Context, file *os.File, fileSize int64, contentTy
 	c.Status(http.StatusPartialContent)
 
 	// Stream the requested range
-	io.CopyN(c.Writer, file, contentLength)
+	if _, err := io.CopyN(c.Writer, file, contentLength); err != nil {
+		log.Printf("Failed to copy file to response: %v", err)
+	}
 }
 
 // getContentType returns the MIME type for a video file extension

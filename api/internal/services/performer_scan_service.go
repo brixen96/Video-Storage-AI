@@ -119,7 +119,7 @@ func (s *PerformerScanService) findPrimaryPreview(folderPath string) string {
 
 	// If no "preview" file, find the first video file
 	var firstVideo string
-	filepath.WalkDir(folderPath, func(path string, d fs.DirEntry, err error) error {
+	if err := filepath.WalkDir(folderPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -135,7 +135,9 @@ func (s *PerformerScanService) findPrimaryPreview(folderPath string) string {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("Error walking directory %s: %v", folderPath, err)
+	}
 
 	return firstVideo
 }
@@ -183,7 +185,7 @@ func (ps *PerformerService) GetByName(name string) (*models.Performer, error) {
 
 	var performer models.Performer
 	err := database.DB.QueryRow(query, name).Scan(
-		&performer.ID, &performer.Name, &performer.PreviewPath, 
+		&performer.ID, &performer.Name, &performer.PreviewPath,
 		&performer.FolderPath, &performer.SceneCount, &performer.Zoo, &performer.Metadata,
 		&performer.CreatedAt, &performer.UpdatedAt,
 	)
@@ -205,35 +207,35 @@ func (ps *PerformerService) GetByName(name string) (*models.Performer, error) {
 
 // getPerformerByName retrieves a performer by name
 func (s *PerformerScanService) getPerformerByName(name string) (*models.Performer, error) {
-    query := `
+	query := `
         SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
         FROM performers
         WHERE name = ?
     `
 
-    var performer models.Performer
-    err := database.DB.QueryRow(query, name).Scan(
-        &performer.ID, 
-        &performer.Name, 
-        &performer.PreviewPath,
-        &performer.FolderPath, 
-        &performer.SceneCount, 
-        &performer.Metadata,
-        &performer.CreatedAt, 
-        &performer.UpdatedAt,
-    )
+	var performer models.Performer
+	err := database.DB.QueryRow(query, name).Scan(
+		&performer.ID,
+		&performer.Name,
+		&performer.PreviewPath,
+		&performer.FolderPath,
+		&performer.SceneCount,
+		&performer.Metadata,
+		&performer.CreatedAt,
+		&performer.UpdatedAt,
+	)
 
-    if err == sql.ErrNoRows {
-        return nil, nil // Not found, return nil without error
-    }
-    if err != nil {
-        return nil, fmt.Errorf("failed to query performer: %w", err)
-    }
+	if err == sql.ErrNoRows {
+		return nil, nil // Not found, return nil without error
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to query performer: %w", err)
+	}
 
-    // Parse metadata JSON if needed
-    if err := performer.UnmarshalMetadata(); err != nil {
-        return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-    }
+	// Parse metadata JSON if needed
+	if err := performer.UnmarshalMetadata(); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
 
-    return &performer, nil
+	return &performer, nil
 }

@@ -24,23 +24,23 @@ type Performer struct {
 // PerformerMetadata represents additional performer information from external APIs
 type PerformerMetadata struct {
 	// Commonly used flat fields for easy access
-	Bio         string   `json:"bio,omitempty"`
-	Birthdate   string   `json:"birthdate,omitempty"`
-	Birthplace  string   `json:"birthplace,omitempty"`
-	Height      string   `json:"height,omitempty"`
-	Weight      string   `json:"weight,omitempty"`
-	Ethnicity   string   `json:"ethnicity,omitempty"`
-	HairColor   string   `json:"hair_color,omitempty"`
-	EyeColor    string   `json:"eye_color,omitempty"`
-	Measurements string  `json:"measurements,omitempty"`
-	Tattoos     string   `json:"tattoos,omitempty"`
-	Piercings   string   `json:"piercings,omitempty"`
-	CareerStart int      `json:"career_start,omitempty"`
-	CareerEnd   int      `json:"career_end,omitempty"`
-	Aliases     []string `json:"aliases,omitempty"`
-	URLs        []string `json:"urls,omitempty"`
-	ImageURL    string   `json:"image_url,omitempty"`
-	ExternalID  string   `json:"external_id,omitempty"` // AdultDataLink ID
+	Bio          string   `json:"bio,omitempty"`
+	Birthdate    string   `json:"birthdate,omitempty"`
+	Birthplace   string   `json:"birthplace,omitempty"`
+	Height       string   `json:"height,omitempty"`
+	Weight       string   `json:"weight,omitempty"`
+	Ethnicity    string   `json:"ethnicity,omitempty"`
+	HairColor    string   `json:"hair_color,omitempty"`
+	EyeColor     string   `json:"eye_color,omitempty"`
+	Measurements string   `json:"measurements,omitempty"`
+	Tattoos      string   `json:"tattoos,omitempty"`
+	Piercings    string   `json:"piercings,omitempty"`
+	CareerStart  int      `json:"career_start,omitempty"`
+	CareerEnd    int      `json:"career_end,omitempty"`
+	Aliases      []string `json:"aliases,omitempty"`
+	URLs         []string `json:"urls,omitempty"`
+	ImageURL     string   `json:"image_url,omitempty"`
+	ExternalID   string   `json:"external_id,omitempty"` // AdultDataLink ID
 
 	// Full AdultDataLink response (stored for advanced use)
 	AdultDataLinkResponse map[string]interface{} `json:"adult_data_link_response,omitempty"`
@@ -48,19 +48,19 @@ type PerformerMetadata struct {
 
 // PerformerCreate represents the data needed to create a performer
 type PerformerCreate struct {
-	Name        string              `json:"name" binding:"required"`
-	PreviewPath string              `json:"preview_path"`
-	FolderPath  string              `json:"folder_path"`
-	Metadata    *PerformerMetadata  `json:"metadata,omitempty"`
+	Name        string             `json:"name" binding:"required"`
+	PreviewPath string             `json:"preview_path"`
+	FolderPath  string             `json:"folder_path"`
+	Metadata    *PerformerMetadata `json:"metadata,omitempty"`
 }
 
 // PerformerUpdate represents the data that can be updated
 type PerformerUpdate struct {
-	Name        *string             `json:"name,omitempty"`
-	PreviewPath *string             `json:"preview_path,omitempty"`
-	FolderPath  *string             `json:"folder_path,omitempty"`
-	SceneCount  *int                `json:"scene_count,omitempty"`
-	Metadata    *PerformerMetadata  `json:"metadata,omitempty"`
+	Name        *string            `json:"name,omitempty"`
+	PreviewPath *string            `json:"preview_path,omitempty"`
+	FolderPath  *string            `json:"folder_path,omitempty"`
+	SceneCount  *int               `json:"scene_count,omitempty"`
+	Metadata    *PerformerMetadata `json:"metadata,omitempty"`
 }
 
 // PerformerWithVideos includes the performer's videos

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -51,7 +52,11 @@ func (s *AdultDataLinkService) FetchPerformerData(performerName string) (*models
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch data from API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("failed to close response body: %v", err)
+		}
+	}()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
@@ -136,7 +141,9 @@ func (s *AdultDataLinkService) convertAPIResponseToMetadata(apiResponse map[stri
 	if careerStart, ok := apiResponse["career_start"].(string); ok {
 		// Try to parse as int
 		var year int
-		fmt.Sscanf(careerStart, "%d", &year)
+		if _, err := fmt.Sscanf(careerStart, "%d", &year); err != nil {
+			log.Printf("failed to parse career_start: %v", err)
+		}
 		if year > 0 {
 			metadata.CareerStart = year
 		}
@@ -144,7 +151,9 @@ func (s *AdultDataLinkService) convertAPIResponseToMetadata(apiResponse map[stri
 
 	if careerEnd, ok := apiResponse["career_end"].(string); ok {
 		var year int
-		fmt.Sscanf(careerEnd, "%d", &year)
+		if _, err := fmt.Sscanf(careerEnd, "%d", &year); err != nil {
+			log.Printf("failed to parse career_end: %v", err)
+		}
 		if year > 0 {
 			metadata.CareerEnd = year
 		}

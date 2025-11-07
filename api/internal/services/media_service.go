@@ -37,10 +37,10 @@ type FFProbeOutput struct {
 		BitRate  string `json:"bit_rate"`
 	} `json:"format"`
 	Streams []struct {
-		CodecType string `json:"codec_type"`
-		CodecName string `json:"codec_name"`
-		Width     int    `json:"width"`
-		Height    int    `json:"height"`
+		CodecType  string `json:"codec_type"`
+		CodecName  string `json:"codec_name"`
+		Width      int    `json:"width"`
+		Height     int    `json:"height"`
 		RFrameRate string `json:"r_frame_rate"`
 	} `json:"streams"`
 }

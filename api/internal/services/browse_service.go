@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,13 +101,13 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 						var thumbnailDir = os.Getenv("THUMBNAIL_DIR")
 						// Build thumbnail directory path with library ID
 						libraryThumbnailDir := filepath.Join(thumbnailDir, fmt.Sprintf("%d", libraryID))
-                        // Build thumbnail directory path with library ID and relative path
-                        if relativePath != "" {
-                            libraryThumbnailDir = filepath.Join(libraryThumbnailDir, relativePath)
-                        }
-                        // Build full thumbnail path with library ID and relative path
-                        thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
-                        
+						// Build thumbnail directory path with library ID and relative path
+						if relativePath != "" {
+							libraryThumbnailDir = filepath.Join(libraryThumbnailDir, relativePath)
+						}
+						// Build full thumbnail path with library ID and relative path
+						thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
+
 						// Create thumbnail directory if it doesn't exist
 						if err := os.MkdirAll(libraryThumbnailDir, 0755); err == nil {
 							// Check if thumbnail exists
@@ -125,13 +126,13 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 										"thumbnail_generation",
 										fmt.Sprintf("Generating thumbnail for %s", videoName),
 										map[string]interface{}{
-											"video_name":  videoName,
-											"library_id":  libraryID,
-											"path":        thumbPath,
+											"video_name": videoName,
+											"library_id": libraryID,
+											"path":       thumbPath,
 										},
 									)
 									if actErr != nil {
-										fmt.Printf("Failed to create thumbnail activity: %v\n", actErr)
+										log.Printf("Failed to create thumbnail activity: %v\n", actErr)
 									}
 
 									// Generate thumbnail at 10% of duration or 5 seconds
@@ -143,12 +144,16 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 									if err := s.mediaService.GenerateThumbnail(videoPath, thumbPath, timestamp); err == nil {
 										// Mark activity as completed
 										if activity != nil {
-											s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", videoName))
+											if err := s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", videoName)); err != nil {
+												log.Printf("Failed to complete task: %v", err)
+											}
 										}
 									} else {
 										// Mark activity as failed
 										if activity != nil {
-											s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to generate thumbnail: %v", err))
+											if err := s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to generate thumbnail: %v", err)); err != nil {
+												log.Printf("Failed to fail task: %v", err)
+											}
 										}
 									}
 								}(itemFullPath, thumbnailFullPath, entry.Name(), metadata.Duration)
@@ -176,15 +181,15 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 	sortBrowseItems(items)
 
 	response := &models.BrowseResponse{
-		LibraryID:    libraryID,
-		LibraryName:  library.Name,
-		CurrentPath:  relativePath,
-		FullPath:     fullPath,
-		Items:        items,
-		TotalItems:   len(items),
-		FolderCount:  countByType(items, "folder"),
-		VideoCount:   countByType(items, "video"),
-		FileCount:    countByType(items, "file"),
+		LibraryID:   libraryID,
+		LibraryName: library.Name,
+		CurrentPath: relativePath,
+		FullPath:    fullPath,
+		Items:       items,
+		TotalItems:  len(items),
+		FolderCount: countByType(items, "folder"),
+		VideoCount:  countByType(items, "video"),
+		FileCount:   countByType(items, "file"),
 	}
 
 	return response, nil

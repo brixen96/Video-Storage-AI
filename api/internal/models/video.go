@@ -1,25 +1,24 @@
-
 package models
 
 import "time"
 
 // Video represents a video file with its metadata
 type Video struct {
-	ID           int64     `json:"id" db:"id"`
-	LibraryID    int64     `json:"library_id" db:"library_id"`
-	Title        string    `json:"title" db:"title" binding:"required"`
-	FilePath     string    `json:"file_path" db:"file_path" binding:"required"`
-	FileSize     int64     `json:"file_size" db:"file_size"`
-	Duration     float64   `json:"duration" db:"duration"`
-	Codec        string    `json:"codec" db:"codec"`
-	Resolution   string    `json:"resolution" db:"resolution"`
-	Bitrate      int64     `json:"bitrate" db:"bitrate"`
-	FPS          float64   `json:"fps" db:"fps"`
-	ThumbnailPath string   `json:"thumbnail_path" db:"thumbnail_path"`
-	CreatedAt    time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
-	LastPlayedAt *time.Time `json:"last_played_at,omitempty" db:"last_played_at"`
-	PlayCount    int       `json:"play_count" db:"play_count"`
+	ID            int64      `json:"id" db:"id"`
+	LibraryID     int64      `json:"library_id" db:"library_id"`
+	Title         string     `json:"title" db:"title" binding:"required"`
+	FilePath      string     `json:"file_path" db:"file_path" binding:"required"`
+	FileSize      int64      `json:"file_size" db:"file_size"`
+	Duration      float64    `json:"duration" db:"duration"`
+	Codec         string     `json:"codec" db:"codec"`
+	Resolution    string     `json:"resolution" db:"resolution"`
+	Bitrate       int64      `json:"bitrate" db:"bitrate"`
+	FPS           float64    `json:"fps" db:"fps"`
+	ThumbnailPath string     `json:"thumbnail_path" db:"thumbnail_path"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
+	LastPlayedAt  *time.Time `json:"last_played_at,omitempty" db:"last_played_at"`
+	PlayCount     int        `json:"play_count" db:"play_count"`
 
 	// Relationships (loaded separately)
 	Performers []Performer `json:"performers,omitempty"`
@@ -51,23 +50,23 @@ type VideoUpdate struct {
 
 // VideoSearchQuery represents search parameters
 type VideoSearchQuery struct {
-	Query       string   `json:"query" form:"query"`
-	LibraryID   int64    `json:"library_id" form:"library_id"`
-	PerformerID int64    `json:"performer_id" form:"performer_id"`
-	StudioID    int64    `json:"studio_id" form:"studio_id"`
-	GroupID     int64    `json:"group_id" form:"group_id"`
-	TagIDs      []int64  `json:"tag_ids" form:"tag_ids"`
-	Resolution  string   `json:"resolution" form:"resolution"`
-	MinDuration float64  `json:"min_duration" form:"min_duration"`
-	MaxDuration float64  `json:"max_duration" form:"max_duration"`
-	MinSize     int64    `json:"min_size" form:"min_size"`
-	MaxSize     int64    `json:"max_size" form:"max_size"`
-	DateFrom    string   `json:"date_from" form:"date_from"`
-	DateTo      string   `json:"date_to" form:"date_to"`
-	HasPreview  *bool    `json:"has_preview" form:"has_preview"`
-	MissingMeta *bool    `json:"missing_metadata" form:"missing_metadata"`
-	SortBy      string   `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
-	SortOrder   string   `json:"sort_order" form:"sort_order"` // asc, desc
-	Page        int      `json:"page" form:"page"`
-	Limit       int      `json:"limit" form:"limit"`
+	Query       string  `json:"query" form:"query"`
+	LibraryID   int64   `json:"library_id" form:"library_id"`
+	PerformerID int64   `json:"performer_id" form:"performer_id"`
+	StudioID    int64   `json:"studio_id" form:"studio_id"`
+	GroupID     int64   `json:"group_id" form:"group_id"`
+	TagIDs      []int64 `json:"tag_ids" form:"tag_ids"`
+	Resolution  string  `json:"resolution" form:"resolution"`
+	MinDuration float64 `json:"min_duration" form:"min_duration"`
+	MaxDuration float64 `json:"max_duration" form:"max_duration"`
+	MinSize     int64   `json:"min_size" form:"min_size"`
+	MaxSize     int64   `json:"max_size" form:"max_size"`
+	DateFrom    string  `json:"date_from" form:"date_from"`
+	DateTo      string  `json:"date_to" form:"date_to"`
+	HasPreview  *bool   `json:"has_preview" form:"has_preview"`
+	MissingMeta *bool   `json:"missing_metadata" form:"missing_metadata"`
+	SortBy      string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
+	SortOrder   string  `json:"sort_order" form:"sort_order"` // asc, desc
+	Page        int     `json:"page" form:"page"`
+	Limit       int     `json:"limit" form:"limit"`
 }

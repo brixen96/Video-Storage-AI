@@ -15,12 +15,12 @@ const (
 
 // Task type constants
 const (
-	TaskTypeScanning    = "scanning"
-	TaskTypeIndexing    = "indexing"
-	TaskTypeAITagging   = "ai_tagging"
-	TaskTypeMetadata    = "metadata"
-	TaskTypeThumbnail   = "thumbnail"
-	TaskTypeTranscode   = "transcode"
+	TaskTypeScanning  = "scanning"
+	TaskTypeIndexing  = "indexing"
+	TaskTypeAITagging = "ai_tagging"
+	TaskTypeMetadata  = "metadata"
+	TaskTypeThumbnail = "thumbnail"
+	TaskTypeTranscode = "transcode"
 )
 
 // Activity represents a background task or operation (new schema)
@@ -95,10 +95,10 @@ type ActivityLogUpdate struct {
 
 // ActivityStatus represents the current status of all activities
 type ActivityStatus struct {
-	RunningTasks   int         `json:"running_tasks"`
-	PendingTasks   int         `json:"pending_tasks"`
-	CompletedTasks int         `json:"completed_tasks"`
-	FailedTasks    int         `json:"failed_tasks"`
+	RunningTasks   int           `json:"running_tasks"`
+	PendingTasks   int           `json:"pending_tasks"`
+	CompletedTasks int           `json:"completed_tasks"`
+	FailedTasks    int           `json:"failed_tasks"`
 	CurrentTasks   []ActivityLog `json:"current_tasks"`
 }
 

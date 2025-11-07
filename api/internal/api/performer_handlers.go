@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -25,11 +26,11 @@ func ensurePerformerService() *services.PerformerService {
 func getPerformers(c *gin.Context) {
 	svc := ensurePerformerService()
 	searchTerm := c.Query("search")
-	
+
 	// Pagination parameters
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	
+
 	// Ensure valid pagination values
 	if page < 1 {
 		page = 1
@@ -37,7 +38,7 @@ func getPerformers(c *gin.Context) {
 	if limit < 1 || limit > 200 {
 		limit = 50
 	}
-	
+
 	offset := (page - 1) * limit
 
 	var performers []models.Performer
@@ -191,13 +192,15 @@ func deletePerformer(c *gin.Context) {
 		},
 	)
 	if err != nil {
-		fmt.Printf("Failed to create activity log: %v\n", err)
+		log.Printf("Failed to create activity log: %v\n", err)
 	}
 
 	err = svc.Delete(id)
 	if err != nil {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, fmt.Sprintf("Delete failed: %v", err))
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Delete failed: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to delete performer",
@@ -208,7 +211,9 @@ func deletePerformer(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully deleted %s", performer.Name))
+		if err := activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully deleted %s", performer.Name)); err != nil {
+			log.Printf("Failed to complete task: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Performer deleted successfully"))
@@ -250,14 +255,16 @@ func fetchMetadata(c *gin.Context) {
 	)
 	if err != nil {
 		// Log error but continue with the operation
-		fmt.Printf("Failed to create activity log: %v\n", err)
+		log.Printf("Failed to create activity log: %v\n", err)
 	}
 
 	// Get config from context (set by router)
 	cfg, exists := c.Get("config")
 	if !exists {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, "Configuration not available")
+			if err := activitySvc.FailTask(activity.ID, "Configuration not available"); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Configuration not available",
@@ -271,7 +278,9 @@ func fetchMetadata(c *gin.Context) {
 	metadata, err := adlService.FetchPerformerData(performer.Name)
 	if err != nil {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, fmt.Sprintf("Failed to fetch from AdultDataLink: %v", err))
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Failed to fetch from AdultDataLink: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to fetch metadata from AdultDataLink",
@@ -287,7 +296,9 @@ func fetchMetadata(c *gin.Context) {
 	updatedPerformer, err := svc.Update(id, updateData)
 	if err != nil {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, fmt.Sprintf("Failed to update performer: %v", err))
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Failed to update performer: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to update performer with fetched metadata",
@@ -298,7 +309,9 @@ func fetchMetadata(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully fetched metadata for %s", performer.Name))
+		if err := activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully fetched metadata for %s", performer.Name)); err != nil {
+			log.Printf("Failed to complete task: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(
@@ -342,13 +355,15 @@ func resetMetadata(c *gin.Context) {
 		},
 	)
 	if err != nil {
-		fmt.Printf("Failed to create activity log: %v\n", err)
+		log.Printf("Failed to create activity log: %v\n", err)
 	}
 
 	err = svc.ResetMetadata(id)
 	if err != nil {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, fmt.Sprintf("Reset failed: %v", err))
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Reset failed: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to reset metadata",
@@ -359,7 +374,9 @@ func resetMetadata(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully reset metadata for %s", performer.Name))
+		if err := activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully reset metadata for %s", performer.Name)); err != nil {
+			log.Printf("Failed to complete task: %v", err)
+		}
 	}
 
 	performer, _ = svc.GetByID(id)
@@ -409,13 +426,15 @@ func scanPerformers(c *gin.Context) {
 		},
 	)
 	if err != nil {
-		fmt.Printf("Failed to create activity log: %v\n", err)
+		log.Printf("Failed to create activity log: %v\n", err)
 	}
 
 	result, err := scanService.ScanPerformerFolders()
 	if err != nil {
 		if activity != nil {
-			activitySvc.FailTask(activity.ID, fmt.Sprintf("Scan failed: %v", err))
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Scan failed: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
 		}
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to scan performer folders",
@@ -426,8 +445,10 @@ func scanPerformers(c *gin.Context) {
 
 	// Mark task as completed
 	if activity != nil {
-		activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan completed: %d new, %d existing, %d errors",
-			result.NewCreated, result.Existing, len(result.Errors)))
+		if err := activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan completed: %d new, %d existing, %d errors",
+			result.NewCreated, result.Existing, len(result.Errors))); err != nil {
+			log.Printf("Failed to complete task: %v", err)
+		}
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(

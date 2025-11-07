@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -63,7 +64,9 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 		return nil, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
-	s.BroadcastStatusUpdate() // Broadcast status update
+	if err := s.BroadcastStatusUpdate(); err != nil {
+		log.Printf("failed to broadcast status update: %v", err)
+	}
 
 	return s.GetByID(id)
 }
@@ -141,7 +144,11 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 	if err != nil {
 		return nil, fmt.Errorf("failed to query activities: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var activities []models.Activity
 	for rows.Next() {
@@ -175,7 +182,9 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 		}
 
 		if len(detailsJSON) > 0 {
-			json.Unmarshal(detailsJSON, &activity.Details)
+			if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
+				log.Printf("failed to unmarshal details: %v", err)
+			}
 		}
 
 		activities = append(activities, activity)
@@ -228,9 +237,11 @@ func (s *ActivityService) Update(id int, update *models.ActivityLogUpdate) (*mod
 		return nil, fmt.Errorf("failed to update activity: %w", err)
 	}
 
-	s.BroadcastStatusUpdate() // Broadcast status update
+	if err := s.BroadcastStatusUpdate(); err != nil {
+		log.Printf("failed to broadcast status update: %v", err)
+	}
 
-    return s.GetByID(int64(id))
+	return s.GetByID(int64(id))
 }
 
 // Delete deletes an activity log
@@ -250,17 +261,19 @@ func (s *ActivityService) Delete(id int64) error {
 		return fmt.Errorf("activity not found")
 	}
 
-	s.BroadcastStatusUpdate() // Broadcast status update
+	if err := s.BroadcastStatusUpdate(); err != nil {
+		log.Printf("failed to broadcast status update: %v", err)
+	}
 
 	return nil
 }
 
 // GetStatus returns the current status of all activities
 func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
-    status := &models.ActivityStatus{}
+	status := &models.ActivityStatus{}
 
-    // Count tasks by status
-    query := `
+	// Count tasks by status
+	query := `
         SELECT 
             COUNT(CASE WHEN status = ? THEN 1 END) as running,
             COUNT(CASE WHEN status = ? THEN 1 END) as pending,
@@ -269,19 +282,19 @@ func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
         FROM activity_logs
     `
 
-    err := s.db.QueryRow(query, 
-        models.TaskStatusRunning,
-        models.TaskStatusPending,
-        models.TaskStatusCompleted,
-        models.TaskStatusFailed,
-    ).Scan(&status.RunningTasks, &status.PendingTasks, &status.CompletedTasks, &status.FailedTasks)
+	err := s.db.QueryRow(query,
+		models.TaskStatusRunning,
+		models.TaskStatusPending,
+		models.TaskStatusCompleted,
+		models.TaskStatusFailed,
+	).Scan(&status.RunningTasks, &status.PendingTasks, &status.CompletedTasks, &status.FailedTasks)
 
-    if err != nil {
-        return nil, fmt.Errorf("failed to get activity status: %w", err)
-    }
+	if err != nil {
+		return nil, fmt.Errorf("failed to get activity status: %w", err)
+	}
 
-    // Get current running tasks
-    currentQuery := `
+	// Get current running tasks
+	currentQuery := `
         SELECT id, task_type, status, message, progress, started_at, completed_at, details
         FROM activity_logs
         WHERE status = ?
@@ -289,41 +302,47 @@ func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
         LIMIT 10
     `
 
-    rows, err := s.db.Query(currentQuery, models.TaskStatusRunning)
-    if err != nil {
-        return status, nil // Return status even if current tasks query fails
-    }
-    defer rows.Close()
+	rows, err := s.db.Query(currentQuery, models.TaskStatusRunning)
+	if err != nil {
+		return status, nil // Return status even if current tasks query fails
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
-    status.CurrentTasks = make([]models.ActivityLog, 0)
-    for rows.Next() {
-        var activity models.ActivityLog
-        var completedAt sql.NullTime
-        err := rows.Scan(
-            &activity.ID,
-            &activity.TaskType,
-            &activity.Status,
-            &activity.Message,
-            &activity.Progress,
-            &activity.StartedAt,
-            &completedAt,
-            &activity.Details,
-        )
-        if err != nil {
-            continue
-        }
+	status.CurrentTasks = make([]models.ActivityLog, 0)
+	for rows.Next() {
+		var activity models.ActivityLog
+		var completedAt sql.NullTime
+		err := rows.Scan(
+			&activity.ID,
+			&activity.TaskType,
+			&activity.Status,
+			&activity.Message,
+			&activity.Progress,
+			&activity.StartedAt,
+			&completedAt,
+			&activity.Details,
+		)
+		if err != nil {
+			continue
+		}
 
-        if completedAt.Valid {
-            activity.CompletedAt = &completedAt.Time
-        }
+		if completedAt.Valid {
+			activity.CompletedAt = &completedAt.Time
+		}
 
-        // Unmarshal details
-        activity.UnmarshalDetails()
+		// Unmarshal details
+		if err := activity.UnmarshalDetails(); err != nil {
+			log.Printf("failed to unmarshal details: %v", err)
+		}
 
-        status.CurrentTasks = append(status.CurrentTasks, activity)
-    }
+		status.CurrentTasks = append(status.CurrentTasks, activity)
+	}
 
-    return status, nil
+	return status, nil
 }
 
 // GetRecent retrieves the most recent activity logs
@@ -349,7 +368,9 @@ func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
 		return 0, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
-	s.BroadcastStatusUpdate() // Broadcast status update
+	if err := s.BroadcastStatusUpdate(); err != nil {
+		log.Printf("failed to broadcast status update: %v", err)
+	}
 
 	return count, nil
 }
@@ -366,7 +387,11 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query stats: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	stats := make(map[string]int)
 	for rows.Next() {
@@ -383,54 +408,54 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 
 // StartTask is a helper to create and start a new task
 func (s *ActivityService) StartTask(taskType, message string, details map[string]interface{}) (*models.Activity, error) {
-    activity := &models.Activity{
-        TaskType:  taskType,
-        Status:    models.TaskStatusRunning,
-        Message:   message,
-        Progress:  0,
-        StartedAt: time.Now(),
-        UpdatedAt: time.Now(),
-    }
+	activity := &models.Activity{
+		TaskType:  taskType,
+		Status:    models.TaskStatusRunning,
+		Message:   message,
+		Progress:  0,
+		StartedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
 
-    // Marshal details to JSON string
-    var detailsJSON string
-    if details != nil && len(details) > 0 {
-        detailsBytes, err := json.Marshal(details)
-        if err != nil {
-            return nil, fmt.Errorf("failed to marshal details: %w", err)
-        }
-        detailsJSON = string(detailsBytes)
-    } else {
-        detailsJSON = "{}" // Empty JSON object
-    }
-    activity.Details = detailsJSON
+	// Marshal details to JSON string
+	var detailsJSON string
+	if details != nil && len(details) > 0 {
+		detailsBytes, err := json.Marshal(details)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal details: %w", err)
+		}
+		detailsJSON = string(detailsBytes)
+	} else {
+		detailsJSON = "{}" // Empty JSON object
+	}
+	activity.Details = detailsJSON
 
-    query := `
+	query := `
         INSERT INTO activity_logs (task_type, status, message, details, progress, started_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     `
 
-    result, err := s.db.Exec(
-        query,
-        activity.TaskType,
-        activity.Status,
-        activity.Message,
-        activity.Details,
-        activity.Progress,
-        activity.StartedAt,
-        activity.UpdatedAt,
-    )
-    if err != nil {
-        return nil, fmt.Errorf("failed to create activity: %w", err)
-    }
+	result, err := s.db.Exec(
+		query,
+		activity.TaskType,
+		activity.Status,
+		activity.Message,
+		activity.Details,
+		activity.Progress,
+		activity.StartedAt,
+		activity.UpdatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create activity: %w", err)
+	}
 
-    id, err := result.LastInsertId()
-    if err != nil {
-        return nil, fmt.Errorf("failed to get activity ID: %w", err)
-    }
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get activity ID: %w", err)
+	}
 
-    activity.ID = int(id)
-    return activity, nil
+	activity.ID = int(id)
+	return activity, nil
 }
 
 // CompleteTask is a helper to mark a task as completed
@@ -493,7 +518,11 @@ func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			log.Printf("failed to close rows: %v", err)
+		}
+	}()
 
 	var activities []models.Activity
 	for rows.Next() {
@@ -527,7 +556,9 @@ func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]
 		}
 
 		if len(detailsJSON) > 0 {
-			json.Unmarshal(detailsJSON, &activity.Details)
+			if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
+				log.Printf("failed to unmarshal details: %v", err)
+			}
 		}
 
 		activities = append(activities, activity)

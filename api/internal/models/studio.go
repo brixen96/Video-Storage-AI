@@ -23,11 +23,11 @@ type Studio struct {
 
 // StudioMetadata represents additional studio information
 type StudioMetadata struct {
-	Website     string   `json:"website,omitempty"`
-	ParentStudio string  `json:"parent_studio,omitempty"`
+	Website      string   `json:"website,omitempty"`
+	ParentStudio string   `json:"parent_studio,omitempty"`
 	Subsidiaries []string `json:"subsidiaries,omitempty"`
-	Genres      []string `json:"genres,omitempty"`
-	ExternalID  string   `json:"external_id,omitempty"`
+	Genres       []string `json:"genres,omitempty"`
+	ExternalID   string   `json:"external_id,omitempty"`
 }
 
 // StudioCreate represents the data needed to create a studio

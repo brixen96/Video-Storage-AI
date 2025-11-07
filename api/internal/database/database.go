@@ -260,7 +260,7 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_activities_status ON activities(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_activities_task_type ON activities(task_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_activities_started_at ON activities(started_at)`,
-		
+
 		`CREATE TABLE IF NOT EXISTS activity_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             task_type TEXT NOT NULL,

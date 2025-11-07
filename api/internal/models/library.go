@@ -33,7 +33,7 @@ type LibraryUpdate struct {
 // LibraryWithStats includes library statistics
 type LibraryWithStats struct {
 	Library
-	TotalSize      int64 `json:"total_size"`
+	TotalSize      int64      `json:"total_size"`
 	LastScanned    *time.Time `json:"last_scanned,omitempty"`
-	ScanInProgress bool  `json:"scan_in_progress"`
+	ScanInProgress bool       `json:"scan_in_progress"`
 }

@@ -161,7 +161,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	if sortOrder == "" {
 		sortOrder = "desc"
 	}
-	
+
 	// Validate sort column to prevent SQL injection
 	validSortColumns := map[string]bool{
 		"id": true, "created_at": true, "updated_at": true, "title": true,
@@ -170,12 +170,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	if !validSortColumns[sortBy] {
 		sortBy = "created_at"
 	}
-	
+
 	// Validate sort order
 	if sortOrder != "asc" && sortOrder != "desc" {
 		sortOrder = "desc"
 	}
-	
+
 	mainQuery += fmt.Sprintf(" ORDER BY v.%s %s", sortBy, strings.ToUpper(sortOrder))
 
 	// Add pagination
@@ -202,7 +202,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 
 	// Initialize empty slice instead of nil
 	videos := make([]models.Video, 0)
-	
+
 	for rows.Next() {
 		var video models.Video
 		var lastPlayedAt sql.NullTime
@@ -593,6 +593,6 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 			}
 		}
 	}
-	
+
 	return nil
 }

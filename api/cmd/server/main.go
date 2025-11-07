@@ -16,6 +16,9 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/services"
 )
 
+// main is the entry point of the application. It initializes the configuration,
+// database, and services, then starts the HTTP server. It also handles
+// graceful shutdown on interrupt signals.
 func main() {
 	// Load configuration
 	cfg, err := config.Load()
@@ -27,7 +30,11 @@ func main() {
 	if err := database.Initialize(cfg); err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			log.Printf("Failed to close database: %v", err)
+		}
+	}()
 
 	log.Println("Database initialized successfully")
 
