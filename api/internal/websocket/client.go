@@ -1,12 +1,11 @@
-
 package websocket
 
 import (
-    "encoding/json"
-    "log"
-    "time"
+	"encoding/json"
+	"log"
+	"time"
 
-    "github.com/gorilla/websocket"
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -60,8 +59,6 @@ func (c *Client) readPump() {
             }
             break
         }
-
-        // Handle incoming messages if needed
         log.Printf("Received message: %s", message)
     }
 }

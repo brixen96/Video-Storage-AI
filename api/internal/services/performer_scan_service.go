@@ -47,7 +47,6 @@ func (s *PerformerScanService) ScanPerformerFolders() (*PerformerScanResult, err
 		if err := os.MkdirAll(s.assetsPath, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create performers directory: %w", err)
 		}
-		log.Printf("Created performers directory: %s", s.assetsPath)
 		return result, nil
 	}
 

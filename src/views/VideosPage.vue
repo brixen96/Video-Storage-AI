@@ -484,6 +484,7 @@ export default {
 				}
 
 				const response = await videosAPI.search(params)
+
 				this.videos = response.data || []
 				this.totalVideos = response.total || this.videos.length
 			} catch (error) {

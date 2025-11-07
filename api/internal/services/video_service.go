@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,18 +36,25 @@ var SupportedVideoExtensions = []string{
 
 // GetAll retrieves all videos with optional filters
 func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, int, error) {
-	// Build base query parts
-	selectClause := `
-		SELECT DISTINCT v.id, v.title, v.file_path, v.file_size, v.duration, v.codec,
+	// Build base query - include library_id in SELECT
+	baseQuery := `
+		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec,
 		       v.resolution, v.bitrate, v.fps, v.thumbnail_path,
 		       v.created_at, v.updated_at, v.last_played_at, v.play_count
+		FROM videos v
 	`
-	fromClause := "FROM videos v"
-	var joinClauses []string
-	var conditions []string
-	var args []interface{}
 
 	// Build WHERE conditions
+	var conditions []string
+	var args []interface{}
+	var joins []string
+
+	// Add library filter if specified
+	if query.LibraryID > 0 {
+		conditions = append(conditions, "v.library_id = ?")
+		args = append(args, query.LibraryID)
+	}
+
 	if query.Query != "" {
 		conditions = append(conditions, "v.title LIKE ?")
 		args = append(args, "%"+query.Query+"%")
@@ -67,27 +75,47 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		args = append(args, query.MaxDuration)
 	}
 
+	if query.MinSize > 0 {
+		conditions = append(conditions, "v.file_size >= ?")
+		args = append(args, query.MinSize)
+	}
+
+	if query.MaxSize > 0 {
+		conditions = append(conditions, "v.file_size <= ?")
+		args = append(args, query.MaxSize)
+	}
+
+	if query.DateFrom != "" {
+		conditions = append(conditions, "v.created_at >= ?")
+		args = append(args, query.DateFrom)
+	}
+
+	if query.DateTo != "" {
+		conditions = append(conditions, "v.created_at <= ?")
+		args = append(args, query.DateTo)
+	}
+
 	// Add JOIN conditions for relationships
 	if query.PerformerID > 0 {
-		joinClauses = append(joinClauses, "INNER JOIN video_performers vp ON v.id = vp.video_id")
+		joins = append(joins, "INNER JOIN video_performers vp ON v.id = vp.video_id")
 		conditions = append(conditions, "vp.performer_id = ?")
 		args = append(args, query.PerformerID)
 	}
 
 	if query.StudioID > 0 {
-		joinClauses = append(joinClauses, "INNER JOIN video_studios vs ON v.id = vs.video_id")
+		joins = append(joins, "INNER JOIN video_studios vs ON v.id = vs.video_id")
 		conditions = append(conditions, "vs.studio_id = ?")
 		args = append(args, query.StudioID)
 	}
 
 	if query.GroupID > 0 {
-		joinClauses = append(joinClauses, "INNER JOIN video_groups vg ON v.id = vg.video_id")
+		joins = append(joins, "INNER JOIN video_groups vg ON v.id = vg.video_id")
 		conditions = append(conditions, "vg.group_id = ?")
 		args = append(args, query.GroupID)
 	}
 
 	if len(query.TagIDs) > 0 {
-		joinClauses = append(joinClauses, "INNER JOIN video_tags vt ON v.id = vt.video_id")
+		joins = append(joins, "INNER JOIN video_tags vt ON v.id = vt.video_id")
 		placeholders := make([]string, len(query.TagIDs))
 		for i, tagID := range query.TagIDs {
 			placeholders[i] = "?"
@@ -96,33 +124,33 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		conditions = append(conditions, fmt.Sprintf("vt.tag_id IN (%s)", strings.Join(placeholders, ",")))
 	}
 
-	// Build WHERE clause
-	whereClause := "WHERE 1=1"
+	// Build the WHERE clause
+	whereClause := ""
 	if len(conditions) > 0 {
-		whereClause += " AND " + strings.Join(conditions, " AND ")
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Build complete count query
-	countQuery := "SELECT COUNT(DISTINCT v.id) " + fromClause
-	if len(joinClauses) > 0 {
-		countQuery += " " + strings.Join(joinClauses, " ")
+	// Build count query separately
+	countQuery := "SELECT COUNT(DISTINCT v.id) FROM videos v"
+	if len(joins) > 0 {
+		countQuery += " " + strings.Join(joins, " ")
 	}
-	countQuery += " " + whereClause
+	countQuery += whereClause
 
 	// Count total results
 	var total int
 	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Count query failed: %v", err)
 		return nil, 0, fmt.Errorf("failed to count videos: %w", err)
 	}
-	// If no rows, total will be 0 which is correct
 
-	// Build complete select query
-	selectQuery := selectClause + " " + fromClause
-	if len(joinClauses) > 0 {
-		selectQuery += " " + strings.Join(joinClauses, " ")
+	// Build the main query
+	mainQuery := baseQuery
+	if len(joins) > 0 {
+		mainQuery += " " + strings.Join(joins, " ")
 	}
-	selectQuery += " " + whereClause
+	mainQuery += whereClause
 
 	// Add sorting
 	sortBy := query.SortBy
@@ -133,7 +161,22 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	if sortOrder == "" {
 		sortOrder = "desc"
 	}
-	selectQuery += fmt.Sprintf(" ORDER BY v.%s %s", sortBy, strings.ToUpper(sortOrder))
+	
+	// Validate sort column to prevent SQL injection
+	validSortColumns := map[string]bool{
+		"id": true, "created_at": true, "updated_at": true, "title": true,
+		"duration": true, "file_size": true, "play_count": true,
+	}
+	if !validSortColumns[sortBy] {
+		sortBy = "created_at"
+	}
+	
+	// Validate sort order
+	if sortOrder != "asc" && sortOrder != "desc" {
+		sortOrder = "desc"
+	}
+	
+	mainQuery += fmt.Sprintf(" ORDER BY v.%s %s", sortBy, strings.ToUpper(sortOrder))
 
 	// Add pagination
 	limit := query.Limit
@@ -146,26 +189,30 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	}
 	offset := (page - 1) * limit
 
-	selectQuery += " LIMIT ? OFFSET ?"
-	paginationArgs := append(args, limit, offset)
+	mainQuery += " LIMIT ? OFFSET ?"
+	queryArgs := append(args, limit, offset)
 
 	// Execute query
-	rows, err := s.db.Query(selectQuery, paginationArgs...)
+	rows, err := s.db.Query(mainQuery, queryArgs...)
 	if err != nil {
+		log.Printf("Query execution failed: %v", err)
 		return nil, 0, fmt.Errorf("failed to query videos: %w", err)
 	}
 	defer rows.Close()
 
-	var videos []models.Video
+	// Initialize empty slice instead of nil
+	videos := make([]models.Video, 0)
+	
 	for rows.Next() {
 		var video models.Video
 		var lastPlayedAt sql.NullTime
 		err := rows.Scan(
-			&video.ID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
+			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 		)
 		if err != nil {
+			log.Printf("Failed to scan video row: %v", err)
 			return nil, 0, fmt.Errorf("failed to scan video: %w", err)
 		}
 
@@ -176,9 +223,18 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		videos = append(videos, video)
 	}
 
+	// Check for errors from iterating over rows
+	if err = rows.Err(); err != nil {
+		log.Printf("Row iteration error: %v", err)
+		return nil, 0, fmt.Errorf("error iterating videos: %w", err)
+	}
+
 	// Load relationships for each video
 	for i := range videos {
-		s.loadVideoRelationships(&videos[i])
+		if err := s.loadVideoRelationships(&videos[i]); err != nil {
+			log.Printf("Warning: Failed to load relationships for video %d: %v", videos[i].ID, err)
+			// Don't fail the entire request, just log the warning
+		}
 	}
 
 	return videos, total, nil
@@ -186,17 +242,18 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 
 // GetByID retrieves a video by ID
 func (s *VideoService) GetByID(id int64) (*models.Video, error) {
+	var video models.Video
+	var lastPlayedAt sql.NullTime
+
 	query := `
-		SELECT id, title, file_path, file_size, duration, codec, resolution, bitrate, fps,
-		       thumbnail_path, created_at, updated_at, last_played_at, play_count
+		SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
+		       bitrate, fps, thumbnail_path, created_at, updated_at, last_played_at, play_count
 		FROM videos
 		WHERE id = ?
 	`
 
-	var video models.Video
-	var lastPlayedAt sql.NullTime
 	err := s.db.QueryRow(query, id).Scan(
-		&video.ID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
+		&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 		&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 	)
@@ -205,7 +262,7 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 		return nil, fmt.Errorf("video not found")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to query video: %w", err)
+		return nil, fmt.Errorf("failed to get video: %w", err)
 	}
 
 	if lastPlayedAt.Valid {
@@ -221,6 +278,7 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 // Create creates a new video
 func (s *VideoService) Create(create *models.VideoCreate) (*models.Video, error) {
 	video := &models.Video{
+		LibraryID:     create.LibraryID,
 		Title:         create.Title,
 		FilePath:      create.FilePath,
 		FileSize:      create.FileSize,
@@ -235,12 +293,12 @@ func (s *VideoService) Create(create *models.VideoCreate) (*models.Video, error)
 	}
 
 	query := `
-		INSERT INTO videos (title, file_path, file_size, duration, codec, resolution, bitrate, fps, thumbnail_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO videos (library_id, title, file_path, file_size, duration, codec, resolution, bitrate, fps, thumbnail_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := s.db.Exec(query,
-		video.Title, video.FilePath, video.FileSize, video.Duration, video.Codec,
+		video.LibraryID, video.Title, video.FilePath, video.FileSize, video.Duration, video.Codec,
 		video.Resolution, video.Bitrate, video.FPS, video.ThumbnailPath, video.CreatedAt, video.UpdatedAt,
 	)
 	if err != nil {
@@ -308,7 +366,15 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	}
 
 	// Create activity log
-	activity, err := s.activityService.StartTask("video_scan", fmt.Sprintf("Scanning library: %s", library.Name))
+	activity, err := s.activityService.StartTask(
+		"video_scan",
+		fmt.Sprintf("Scanning library: %s", library.Name),
+		map[string]interface{}{
+			"library_id":   libraryID,
+			"library_name": library.Name,
+			"library_path": library.Path,
+		},
+	)
 	if err != nil {
 		return fmt.Errorf("failed to create activity log: %w", err)
 	}
@@ -367,8 +433,9 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 			resolution = fmt.Sprintf("%dx%d", metadata.Width, metadata.Height)
 		}
 
-		// Create video record
+		// Create video record with library ID
 		create := &models.VideoCreate{
+			LibraryID:  libraryID,
 			Title:      filepath.Base(filePath),
 			FilePath:   filePath,
 			FileSize:   metadata.Size,
@@ -435,7 +502,7 @@ func (s *VideoService) videoExists(filePath string) (bool, error) {
 }
 
 // loadVideoRelationships loads related data for a video
-func (s *VideoService) loadVideoRelationships(video *models.Video) {
+func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	// Load performers
 	performerQuery := `
 		SELECT p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.metadata, p.created_at, p.updated_at
@@ -526,4 +593,6 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) {
 			}
 		}
 	}
+	
+	return nil
 }

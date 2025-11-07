@@ -143,7 +143,8 @@ func searchVideos(c *gin.Context) {
 	// Parse query parameters
 	var query models.VideoSearchQuery
 	if err := c.ShouldBindQuery(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		log.Printf("Failed to bind query parameters: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid query parameters: %v", err)})
 		return
 	}
 
@@ -151,7 +152,7 @@ func searchVideos(c *gin.Context) {
 	videos, total, err := svc.GetAll(&query)
 	if err != nil {
 		log.Printf("Failed to search videos: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search videos"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to search videos: %v", err)})
 		return
 	}
 

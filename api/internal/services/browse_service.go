@@ -106,50 +106,52 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
                         }
                         // Build full thumbnail path with library ID and relative path
                         thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
-                        fmt.Printf("Generating thumbnail for %s at %s\n", entry.Name(), thumbnailFullPath)
-						
+                        
 						// Create thumbnail directory if it doesn't exist
 						if err := os.MkdirAll(libraryThumbnailDir, 0755); err == nil {
 							// Check if thumbnail exists
 							if _, err := os.Stat(thumbnailFullPath); os.IsNotExist(err) {
-								// Create activity log for thumbnail generation
-								activity, actErr := s.activityService.StartTask(
-									"generate_thumbnail",
-									fmt.Sprintf("Generating thumbnail for %s", entry.Name()),
-									map[string]interface{}{
-										"video_name":  entry.Name(),
-										"library_id":  libraryID,
-										"path":        thumbnailFullPath,
-									},
-								)
-								if actErr != nil {
-									fmt.Printf("Failed to create thumbnail activity: %v\n", actErr)
-								}
-
-								// Generate thumbnail at 10% of duration or 5 seconds
-								timestamp := metadata.Duration * 0.1
-								if timestamp > 5 {
-									timestamp = 5
-								}
-
-								if err := s.mediaService.GenerateThumbnail(itemFullPath, thumbnailFullPath, timestamp); err == nil {
-									// Store relative path for API access
-									if relativePath == "" {
-										item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
-									} else {
-										item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
-									}
-
-									// Mark activity as completed
-									if activity != nil {
-										s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", entry.Name()))
-									}
+								// Set thumbnail path immediately (will show placeholder until generated)
+								if relativePath == "" {
+									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
 								} else {
-									// Mark activity as failed
-									if activity != nil {
-										s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to generate thumbnail: %v", err))
-									}
+									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
 								}
+
+								// Generate thumbnail asynchronously
+								go func(videoPath, thumbPath, videoName string, duration float64) {
+									// Create activity log for thumbnail generation
+									activity, actErr := s.activityService.StartTask(
+										"thumbnail_generation",
+										fmt.Sprintf("Generating thumbnail for %s", videoName),
+										map[string]interface{}{
+											"video_name":  videoName,
+											"library_id":  libraryID,
+											"path":        thumbPath,
+										},
+									)
+									if actErr != nil {
+										fmt.Printf("Failed to create thumbnail activity: %v\n", actErr)
+									}
+
+									// Generate thumbnail at 10% of duration or 5 seconds
+									timestamp := duration * 0.1
+									if timestamp > 5 {
+										timestamp = 5
+									}
+
+									if err := s.mediaService.GenerateThumbnail(videoPath, thumbPath, timestamp); err == nil {
+										// Mark activity as completed
+										if activity != nil {
+											s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", videoName))
+										}
+									} else {
+										// Mark activity as failed
+										if activity != nil {
+											s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to generate thumbnail: %v", err))
+										}
+									}
+								}(itemFullPath, thumbnailFullPath, entry.Name(), metadata.Duration)
 							} else {
 								// Thumbnail already exists
 								if relativePath == "" {

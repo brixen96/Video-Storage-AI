@@ -1,11 +1,10 @@
-
 package websocket
 
 import (
-    "encoding/json"
-    "log"
+	"encoding/json"
+	"log"
 
-    "github.com/brixen96/video-storage-ai/internal/models"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // Hub maintains the set of active clients and broadcasts messages to them

@@ -257,52 +257,73 @@ func (s *ActivityService) Delete(id int64) error {
 
 // GetStatus returns the current status of all activities
 func (s *ActivityService) GetStatus() (*models.ActivityStatus, error) {
-	status := &models.ActivityStatus{}
-	var err error
+    status := &models.ActivityStatus{}
 
-	// Count by status
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusRunning).Scan(&status.RunningTasks)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get running tasks: %w", err)
-	}
+    // Count tasks by status
+    query := `
+        SELECT 
+            COUNT(CASE WHEN status = ? THEN 1 END) as running,
+            COUNT(CASE WHEN status = ? THEN 1 END) as pending,
+            COUNT(CASE WHEN status = ? THEN 1 END) as completed,
+            COUNT(CASE WHEN status = ? THEN 1 END) as failed
+        FROM activity_logs
+    `
 
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusPending).Scan(&status.PendingTasks)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get pending tasks: %w", err)
-	}
+    err := s.db.QueryRow(query, 
+        models.TaskStatusRunning,
+        models.TaskStatusPending,
+        models.TaskStatusCompleted,
+        models.TaskStatusFailed,
+    ).Scan(&status.RunningTasks, &status.PendingTasks, &status.CompletedTasks, &status.FailedTasks)
 
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusCompleted).Scan(&status.CompletedTasks)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get completed tasks: %w", err)
-	}
+    if err != nil {
+        return nil, fmt.Errorf("failed to get activity status: %w", err)
+    }
 
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusFailed).Scan(&status.FailedTasks)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to get failed tasks: %w", err)
-	}
+    // Get current running tasks
+    currentQuery := `
+        SELECT id, task_type, status, message, progress, started_at, completed_at, details
+        FROM activity_logs
+        WHERE status = ?
+        ORDER BY started_at DESC
+        LIMIT 10
+    `
 
-	// Get current running tasks
-	currentTasks, err := s.GetAll(models.TaskStatusRunning, "", 10)
-	if err != nil {
-		currentTasks = []models.Activity{}
-	}
+    rows, err := s.db.Query(currentQuery, models.TaskStatusRunning)
+    if err != nil {
+        return status, nil // Return status even if current tasks query fails
+    }
+    defer rows.Close()
 
-	// This is a hack to convert []models.Activity to []models.ActivityLog
-	var activityLogs []models.ActivityLog
-	for _, activity := range currentTasks {
-		activityLogs = append(activityLogs, models.ActivityLog{
-			ID:          int64(activity.ID),
-			TaskType:    activity.TaskType,
-			Status:      activity.Status,
-			Message:     activity.Message,
-			Progress:    activity.Progress,
-			StartedAt:   activity.StartedAt,
-			CompletedAt: activity.CompletedAt,
-		})
-	}
-	status.CurrentTasks = activityLogs
+    status.CurrentTasks = make([]models.ActivityLog, 0)
+    for rows.Next() {
+        var activity models.ActivityLog
+        var completedAt sql.NullTime
+        err := rows.Scan(
+            &activity.ID,
+            &activity.TaskType,
+            &activity.Status,
+            &activity.Message,
+            &activity.Progress,
+            &activity.StartedAt,
+            &completedAt,
+            &activity.Details,
+        )
+        if err != nil {
+            continue
+        }
 
-	return status, nil
+        if completedAt.Valid {
+            activity.CompletedAt = &completedAt.Time
+        }
+
+        // Unmarshal details
+        activity.UnmarshalDetails()
+
+        status.CurrentTasks = append(status.CurrentTasks, activity)
+    }
+
+    return status, nil
 }
 
 // GetRecent retrieves the most recent activity logs
@@ -361,21 +382,55 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 }
 
 // StartTask is a helper to create and start a new task
-func (s *ActivityService) StartTask(taskType, message string, details ...map[string]interface{}) (*models.Activity, error) {
-	var detailsMap map[string]interface{}
-	if len(details) > 0 {
-		detailsMap = details[0]
-	}
+func (s *ActivityService) StartTask(taskType, message string, details map[string]interface{}) (*models.Activity, error) {
+    activity := &models.Activity{
+        TaskType:  taskType,
+        Status:    models.TaskStatusRunning,
+        Message:   message,
+        Progress:  0,
+        StartedAt: time.Now(),
+        UpdatedAt: time.Now(),
+    }
 
-	create := &models.ActivityLogCreate{
-		TaskType: taskType,
-		Status:   models.TaskStatusRunning,
-		Message:  message,
-		Progress: 0,
-		Details:  detailsMap,
-	}
+    // Marshal details to JSON string
+    var detailsJSON string
+    if details != nil && len(details) > 0 {
+        detailsBytes, err := json.Marshal(details)
+        if err != nil {
+            return nil, fmt.Errorf("failed to marshal details: %w", err)
+        }
+        detailsJSON = string(detailsBytes)
+    } else {
+        detailsJSON = "{}" // Empty JSON object
+    }
+    activity.Details = detailsJSON
 
-	return s.Create(create)
+    query := `
+        INSERT INTO activity_logs (task_type, status, message, details, progress, started_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    `
+
+    result, err := s.db.Exec(
+        query,
+        activity.TaskType,
+        activity.Status,
+        activity.Message,
+        activity.Details,
+        activity.Progress,
+        activity.StartedAt,
+        activity.UpdatedAt,
+    )
+    if err != nil {
+        return nil, fmt.Errorf("failed to create activity: %w", err)
+    }
+
+    id, err := result.LastInsertId()
+    if err != nil {
+        return nil, fmt.Errorf("failed to get activity ID: %w", err)
+    }
+
+    activity.ID = int(id)
+    return activity, nil
 }
 
 // CompleteTask is a helper to mark a task as completed
