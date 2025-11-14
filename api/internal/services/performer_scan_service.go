@@ -17,13 +17,22 @@ import (
 type PerformerScanService struct {
 	performerService *PerformerService
 	assetsPath       string
+	assetsBaseDir    string // Full path to assets directory
 }
 
 // NewPerformerScanService creates a new performer scan service
 func NewPerformerScanService() *PerformerScanService {
+	// Get absolute path to assets directory (api/assets since server runs from api folder)
+	assetsBase, err := filepath.Abs("./assets")
+	if err != nil {
+		// Fallback to relative path
+		assetsBase = "./assets"
+	}
+
 	return &PerformerScanService{
 		performerService: NewPerformerService(),
 		assetsPath:       "assets/performers",
+		assetsBaseDir:    assetsBase,
 	}
 }
 
@@ -111,9 +120,20 @@ func (s *PerformerScanService) findPrimaryPreview(folderPath string) string {
 	for _, ext := range videoExts {
 		previewPath := filepath.Join(folderPath, "preview"+ext)
 		if _, err := os.Stat(previewPath); err == nil {
-			// Return relative path from api root
-			relPath, _ := filepath.Rel("api", previewPath)
-			return "/" + filepath.ToSlash(relPath)
+			// Convert to absolute path first
+			absPath, err := filepath.Abs(previewPath)
+			if err != nil {
+				absPath = previewPath
+			}
+
+			// Use the configured assets base directory
+			relPath, err := filepath.Rel(s.assetsBaseDir, absPath)
+			if err != nil {
+				// Fallback to just the filename if we can't get relative path
+				relPath = filepath.Base(previewPath)
+			}
+			// Prepend /assets/ to create the URL path
+			return "/assets/" + filepath.ToSlash(relPath)
 		}
 	}
 
@@ -128,8 +148,20 @@ func (s *PerformerScanService) findPrimaryPreview(folderPath string) string {
 		for _, videoExt := range videoExts {
 			if ext == videoExt {
 				if firstVideo == "" {
-					relPath, _ := filepath.Rel("api", path)
-					firstVideo = "/" + filepath.ToSlash(relPath)
+					// Convert to absolute path first
+					absPath, err := filepath.Abs(path)
+					if err != nil {
+						absPath = path
+					}
+
+					// Use the configured assets base directory
+					relPath, err := filepath.Rel(s.assetsBaseDir, absPath)
+					if err != nil {
+						// Fallback to just the filename if we can't get relative path
+						relPath = filepath.Base(path)
+					}
+					// Prepend /assets/ to create the URL path
+					firstVideo = "/assets/" + filepath.ToSlash(relPath)
 				}
 				return filepath.SkipDir // Stop walking
 			}
@@ -160,8 +192,20 @@ func (s *PerformerScanService) GetPerformerPreviews(performer *models.Performer)
 		ext := strings.ToLower(filepath.Ext(path))
 		for _, videoExt := range videoExts {
 			if ext == videoExt {
-				relPath, _ := filepath.Rel("api", path)
-				previews = append(previews, "/"+filepath.ToSlash(relPath))
+				// Convert to absolute path first to handle relative paths
+				absPath, err := filepath.Abs(path)
+				if err != nil {
+					absPath = path
+				}
+
+				// Use the configured assets base directory
+				relPath, err := filepath.Rel(s.assetsBaseDir, absPath)
+				if err != nil {
+					// Fallback to just the filename if we can't get relative path
+					relPath = filepath.Base(path)
+				}
+				// Prepend /assets/ to create the URL path
+				previews = append(previews, "/assets/"+filepath.ToSlash(relPath))
 				break
 			}
 		}

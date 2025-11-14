@@ -2,9 +2,9 @@
 	<div id="app">
 		<NavBar />
 		<router-view v-slot="{ Component }">
-			<transition name="fade" mode="out-in">
+			<keep-alive>
 				<component :is="Component" />
-			</transition>
+			</keep-alive>
 		</router-view>
 	</div>
 </template>
@@ -37,17 +37,6 @@ body {
 
 #app {
 	min-height: 100vh;
-}
-
-/* Transition animations */
-.fade-enter-active,
-.fade-leave-active {
-	transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-	opacity: 0;
 }
 
 /* Scrollbar styling */

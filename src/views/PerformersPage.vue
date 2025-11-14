@@ -147,13 +147,16 @@
 					<div class="card-preview">
 						<video
 							v-if="performer.preview_path"
+							:key="`preview-${performer.id}-${videoRefreshKey}`"
 							class="preview-video"
 							:src="getPreviewUrl(performer.preview_path)"
 							loop
 							muted
 							playsinline
+							preload="auto"
 							@mouseenter="playPreview"
 							@mouseleave="pausePreview"
+							@error="handleVideoError"
 						></video>
 						<div v-else class="no-preview">
 							<font-awesome-icon :icon="['fas', 'user']" size="3x" />
@@ -196,7 +199,18 @@
 					@contextmenu.prevent="openContextMenu($event, performer)"
 				>
 					<div class="list-preview">
-						<video v-if="performer.preview_path" class="preview-video-small" :src="getPreviewUrl(performer.preview_path)" loop muted playsinline></video>
+						<video
+							v-if="performer.preview_path"
+							:key="`preview-${performer.id}-${videoRefreshKey}`"
+							class="preview-video-small"
+							:src="getPreviewUrl(performer.preview_path)"
+							loop
+							muted
+							playsinline
+							preload="auto"
+							@loadedmetadata="onVideoLoaded"
+							@error="handleVideoError"
+						></video>
 						<div v-else class="no-preview-small">
 							<font-awesome-icon :icon="['fas', 'user']" />
 						</div>
@@ -507,10 +521,56 @@ export default {
 		try {
 			const stored = localStorage.getItem('performerPreviews')
 			if (stored) {
-				cachedPreviews = JSON.parse(stored)
+				const parsed = JSON.parse(stored)
+				// Validate and clean cache - ensure all paths are relative and properly formatted
+				let needsUpdate = false
+				for (const [performerId, paths] of Object.entries(parsed)) {
+					if (Array.isArray(paths)) {
+						const cleanedPaths = paths
+							.map((path) => {
+								if (!path || typeof path !== 'string') return null
+
+								// If path is a full URL, extract just the pathname
+								if (path.startsWith('http://') || path.startsWith('https://')) {
+									try {
+										return new URL(path).pathname
+									} catch {
+										return null
+									}
+								}
+
+								// Fix paths with /../ at the start (old bug)
+								if (path.startsWith('/../')) {
+									needsUpdate = true
+									return null // Will be reloaded from API
+								}
+
+								return path
+							})
+							.filter((path) => path !== null)
+
+						// Only keep this performer's cache if we have valid paths
+						if (cleanedPaths.length > 0) {
+							cachedPreviews[performerId] = cleanedPaths
+						} else {
+							needsUpdate = true // Need to reload this performer's previews
+						}
+					}
+				}
+
+				// If we found invalid paths, save the cleaned cache
+				if (needsUpdate) {
+					try {
+						localStorage.setItem('performerPreviews', JSON.stringify(cachedPreviews))
+					} catch (e) {
+						console.error('Failed to save cleaned cache:', e)
+					}
+				}
 			}
 		} catch (e) {
 			console.error('Failed to load preview cache:', e)
+			// Clear corrupted cache
+			localStorage.removeItem('performerPreviews')
 		}
 
 		return {
@@ -547,6 +607,7 @@ export default {
 				performer: null,
 			},
 			performerPreviews: cachedPreviews, // Cache for performer previews: { performerId: [urls] }
+			videoRefreshKey: 0, // Key to force video elements to recreate
 			carouselContextMenu: {
 				visible: false,
 				x: 0,
@@ -687,6 +748,7 @@ export default {
 					this.performers = []
 				}
 
+	
 				// Preload previews for all performers in background (non-blocking)
 				if (this.performers.length > 0) {
 					this.preloadAllPreviews()
@@ -701,12 +763,26 @@ export default {
 		},
 
 		getPreviewUrl(path) {
-			return `http://localhost:8080${path}`
+			if (!path) {
+				console.warn('getPreviewUrl called with empty path')
+				return ''
+			}
+			// If path already includes the full URL, return as-is
+			if (path.startsWith('http://') || path.startsWith('https://')) {
+				return path
+			}
+			// Split path into segments and encode each segment (to handle spaces and special chars)
+			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
+			const encodedPath = pathParts.join('/')
+			// Otherwise, add the base URL
+			const url = `http://localhost:8080${encodedPath}`
+			return url
 		},
 		getPerformerPreviews(performer) {
 			// Return cached preview URLs or fallback to primary preview
 			if (this.performerPreviews[performer.id]) {
-				return this.performerPreviews[performer.id]
+				// Convert relative paths to full URLs
+				return this.performerPreviews[performer.id].map((path) => this.getPreviewUrl(path))
 			}
 			// Fallback to primary preview while loading
 			if (performer.preview_path) {
@@ -723,9 +799,16 @@ export default {
 			try {
 				const response = await performersAPI.getPreviews(performerId)
 				if (response.data && response.data.previews) {
-					// Convert relative paths to full URLs
-					const previewUrls = response.data.previews.map((path) => this.getPreviewUrl(path))
-					this.performerPreviews[performerId] = previewUrls
+					// Store relative paths (not full URLs) to avoid caching issues
+					const previewPaths = response.data.previews.map((path) => {
+						// Ensure we store clean relative paths
+						if (path.startsWith('http://') || path.startsWith('https://')) {
+							// Extract path from full URL if accidentally passed
+							return new URL(path).pathname
+						}
+						return path
+					})
+					this.performerPreviews[performerId] = previewPaths
 
 					// Save to localStorage
 					this.savePreviewCache()
@@ -764,6 +847,15 @@ export default {
 		pausePreview(event) {
 			const video = event.target
 			video.pause()
+		},
+		handleVideoError(event) {
+			const video = event.target
+			console.error('Video failed to load:', {
+				src: video.src,
+				error: video.error,
+				networkState: video.networkState,
+				readyState: video.readyState,
+			})
 		},
 		async openDetails(performer) {
 			this.detailsPanel.visible = true
@@ -1003,6 +1095,42 @@ export default {
 				this.closeCarouselContextMenu()
 			}
 		})
+	},
+	activated() {
+		// Called when component is activated (navigated to) in keep-alive
+		// Wait for performers to be loaded, then reload videos
+		let unwatch = null
+		unwatch = this.$watch(
+			'performers',
+			(newVal) => {
+				if (newVal && newVal.length > 0) {
+					// Wait for DOM to update with the performer data
+					this.$nextTick(() => {
+						const videos = this.$el.querySelectorAll('video')
+						videos.forEach((video) => {
+							if (video.src) {
+								// Force browser to reload the video by resetting src
+								const currentSrc = video.src
+								video.src = ''
+								video.load()
+								video.src = currentSrc
+								video.load()
+
+								// Force opacity and position inline styles to fix transition issue
+								video.style.opacity = '1'
+								video.style.position = 'static'
+							}
+						})
+					})
+					// Stop watching after first trigger
+					if (unwatch) unwatch()
+				}
+			},
+			{ immediate: true }
+		)
+	},
+	beforeUnmount() {
+		// Cleanup if needed
 	},
 }
 </script>
