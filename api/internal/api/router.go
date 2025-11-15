@@ -68,13 +68,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// Videos endpoints
 		videos := v1.Group("/videos")
 		{
-			videos.GET("", getVideos)           // List all videos
-			videos.GET("/:id", getVideo)        // Get single video
-			videos.POST("", createVideo)        // Create video entry
-			videos.PUT("/:id", updateVideo)     // Update video
-			videos.DELETE("/:id", deleteVideo)  // Delete video
-			videos.GET("/search", searchVideos) // Search videos
-			videos.POST("/scan", scanVideos)    // Scan library for videos
+			videos.GET("", getVideos)                              // List all videos
+			videos.GET("/:id", getVideo)                           // Get single video
+			videos.POST("", createVideo)                           // Create video entry
+			videos.PUT("/:id", updateVideo)                        // Update video
+			videos.DELETE("/:id", deleteVideo)                     // Delete video
+			videos.GET("/search", searchVideos)                    // Search videos
+			videos.POST("/scan", scanVideos)                       // Scan library for videos
+			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
+			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
+			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
 		}
 
 		// Performers endpoints

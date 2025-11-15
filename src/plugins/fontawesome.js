@@ -67,10 +67,18 @@ import {
 	faMapMarkerAlt,
 	faGlobe,
 	faCalendar,
+	faThumbtack,
+	faSave,
+	faUserPlus,
+	faCloudUploadAlt,
+	faSignal,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
 import { faHeart as farHeart, faStar as farStar } from '@fortawesome/free-regular-svg-icons'
+
+// Import brand icons
+import { faTwitter, faInstagram } from '@fortawesome/free-brands-svg-icons'
 
 // Add icons to library
 library.add(
@@ -139,7 +147,14 @@ library.add(
 	faPlayCircle,
 	faMapMarkerAlt,
 	faGlobe,
-	faCalendar
+	faCalendar,
+	faThumbtack,
+	faSave,
+	faUserPlus,
+	faCloudUploadAlt,
+	faSignal,
+	faTwitter,
+	faInstagram
 )
 
 export default FontAwesomeIcon

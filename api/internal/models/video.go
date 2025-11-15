@@ -15,6 +15,13 @@ type Video struct {
 	Bitrate       int64      `json:"bitrate" db:"bitrate"`
 	FPS           float64    `json:"fps" db:"fps"`
 	ThumbnailPath string     `json:"thumbnail_path" db:"thumbnail_path"`
+	Date          string     `json:"date" db:"date"`
+	Rating        int        `json:"rating" db:"rating"`
+	Description   string     `json:"description" db:"description"`
+	IsFavorite    bool       `json:"is_favorite" db:"is_favorite"`
+	IsPinned      bool       `json:"is_pinned" db:"is_pinned"`
+	NotInterested bool       `json:"not_interested" db:"not_interested"`
+	InEditList    bool       `json:"in_edit_list" db:"in_edit_list"`
 	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 	LastPlayedAt  *time.Time `json:"last_played_at,omitempty" db:"last_played_at"`
@@ -43,30 +50,41 @@ type VideoCreate struct {
 
 // VideoUpdate represents the data that can be updated
 type VideoUpdate struct {
-	Title         *string `json:"title,omitempty"`
-	ThumbnailPath *string `json:"thumbnail_path,omitempty"`
-	PlayCount     *int    `json:"play_count,omitempty"`
+	Title         *string  `json:"title,omitempty"`
+	StudioID      *int64   `json:"studio_id,omitempty"`
+	PerformerIDs  []int64  `json:"performer_ids,omitempty"`
+	TagIDs        []int64  `json:"tag_ids,omitempty"`
+	Date          *string  `json:"date,omitempty"`
+	Rating        *int     `json:"rating,omitempty"`
+	Description   *string  `json:"description,omitempty"`
+	IsFavorite    *bool    `json:"is_favorite,omitempty"`
+	IsPinned      *bool    `json:"is_pinned,omitempty"`
+	PlayCount     *int     `json:"play_count,omitempty"`
+	NotInterested *bool    `json:"not_interested,omitempty"`
+	InEditList    *bool    `json:"in_edit_list,omitempty"`
 }
 
 // VideoSearchQuery represents search parameters
 type VideoSearchQuery struct {
-	Query       string  `json:"query" form:"query"`
-	LibraryID   int64   `json:"library_id" form:"library_id"`
-	PerformerID int64   `json:"performer_id" form:"performer_id"`
-	StudioID    int64   `json:"studio_id" form:"studio_id"`
-	GroupID     int64   `json:"group_id" form:"group_id"`
-	TagIDs      []int64 `json:"tag_ids" form:"tag_ids"`
-	Resolution  string  `json:"resolution" form:"resolution"`
-	MinDuration float64 `json:"min_duration" form:"min_duration"`
-	MaxDuration float64 `json:"max_duration" form:"max_duration"`
-	MinSize     int64   `json:"min_size" form:"min_size"`
-	MaxSize     int64   `json:"max_size" form:"max_size"`
-	DateFrom    string  `json:"date_from" form:"date_from"`
-	DateTo      string  `json:"date_to" form:"date_to"`
-	HasPreview  *bool   `json:"has_preview" form:"has_preview"`
-	MissingMeta *bool   `json:"missing_metadata" form:"missing_metadata"`
-	SortBy      string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
-	SortOrder   string  `json:"sort_order" form:"sort_order"` // asc, desc
-	Page        int     `json:"page" form:"page"`
-	Limit       int     `json:"limit" form:"limit"`
+	Query         string  `json:"query" form:"query"`
+	LibraryID     int64   `json:"library_id" form:"library_id"`
+	PerformerID   int64   `json:"performer_id" form:"performer_id"`
+	StudioID      int64   `json:"studio_id" form:"studio_id"`
+	GroupID       int64   `json:"group_id" form:"group_id"`
+	TagIDs        []int64 `json:"tag_ids" form:"tag_ids"`
+	Resolution    string  `json:"resolution" form:"resolution"`
+	MinDuration   float64 `json:"min_duration" form:"min_duration"`
+	MaxDuration   float64 `json:"max_duration" form:"max_duration"`
+	MinSize       int64   `json:"min_size" form:"min_size"`
+	MaxSize       int64   `json:"max_size" form:"max_size"`
+	DateFrom      string  `json:"date_from" form:"date_from"`
+	DateTo        string  `json:"date_to" form:"date_to"`
+	HasPreview    *bool   `json:"has_preview" form:"has_preview"`
+	MissingMeta   *bool   `json:"missing_metadata" form:"missing_metadata"`
+	NotInterested *bool   `json:"not_interested" form:"not_interested"`
+	InEditList    *bool   `json:"in_edit_list" form:"in_edit_list"`
+	SortBy        string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
+	SortOrder     string  `json:"sort_order" form:"sort_order"` // asc, desc
+	Page          int     `json:"page" form:"page"`
+	Limit         int     `json:"limit" form:"limit"`
 }

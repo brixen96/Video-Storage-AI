@@ -192,6 +192,89 @@ func handleRangeRequest(c *gin.Context, file *os.File, fileSize int64, contentTy
 	}
 }
 
+// streamVideoByID streams a video file by video ID
+func streamVideoByID(c *gin.Context) {
+	videoSvc := ensureVideoService()
+
+	// Get video ID
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid video ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get video
+	video, err := videoSvc.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponseMsg(
+			"Video not found",
+			err.Error(),
+		))
+		return
+	}
+
+	fullPath := video.FilePath
+
+	// Check if file exists
+	fileInfo, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, models.ErrorResponseMsg(
+			"File not found",
+			err.Error(),
+		))
+		return
+	}
+
+	if fileInfo.IsDir() {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Path is a directory",
+			"",
+		))
+		return
+	}
+
+	// Open file
+	file, err := os.Open(fullPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to open file",
+			err.Error(),
+		))
+		return
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("Failed to close file: %v", err)
+		}
+	}()
+
+	// Get file size
+	fileSize := fileInfo.Size()
+
+	// Set content type based on extension
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	contentType := getContentType(ext)
+
+	// Handle range requests for video seeking
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader != "" {
+		handleRangeRequest(c, file, fileSize, contentType, rangeHeader)
+	} else {
+		// Serve entire file
+		c.Header("Content-Type", contentType)
+		c.Header("Content-Length", fmt.Sprintf("%d", fileSize))
+		c.Header("Accept-Ranges", "bytes")
+		c.Status(http.StatusOK)
+		if _, err := io.Copy(c.Writer, file); err != nil {
+			log.Printf("Failed to copy file to response: %v", err)
+		}
+	}
+}
+
 // getContentType returns the MIME type for a video file extension
 func getContentType(ext string) string {
 	mimeTypes := map[string]string{

@@ -148,7 +148,6 @@ export default {
 		})
 
 		this.unsubscribeWs = websocketService.on('activity_update', (data) => {
-			console.log('Activity update received:', data)
 			// Update current activity if it matches
 			if (this.currentActivity && this.currentActivity.id === data.id) {
 				this.currentActivity = data

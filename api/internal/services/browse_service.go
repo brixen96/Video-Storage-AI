@@ -15,14 +15,18 @@ type BrowseService struct {
 	libraryService  *LibraryService
 	mediaService    *MediaService
 	activityService *ActivityService
+	videoService    *VideoService
 }
 
 // NewBrowseService creates a new browse service
 func NewBrowseService() *BrowseService {
+	activitySvc := NewActivityService()
+	librarySvc := NewLibraryService()
 	return &BrowseService{
-		libraryService:  NewLibraryService(),
+		libraryService:  librarySvc,
 		mediaService:    NewMediaService(),
-		activityService: NewActivityService(),
+		activityService: activitySvc,
+		videoService:    NewVideoService(activitySvc, librarySvc),
 	}
 }
 
@@ -68,9 +72,13 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 			continue // Skip items we can't read
 		}
 
+		// Get full path for this item
+		itemFullPath := filepath.Join(fullPath, entry.Name())
+
 		item := models.BrowseItem{
 			Name:     entry.Name(),
 			Path:     filepath.Join(relativePath, entry.Name()),
+			FullPath: itemFullPath,
 			IsDir:    entry.IsDir(),
 			Size:     itemInfo.Size(),
 			Modified: itemInfo.ModTime(),
@@ -85,42 +93,45 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 				item.Type = "video"
 				item.Extension = ext
 
+				// Load existing marks from database (not_interested, in_edit_list)
+				if videoMarks, err := s.videoService.GetVideoMarksByPath(itemFullPath); err == nil && videoMarks != nil {
+					item.NotInterested = videoMarks.NotInterested
+					item.InEditList = videoMarks.InEditList
+				}
+
 				// Extract metadata if requested
 				if extractMetadata {
-					itemFullPath := filepath.Join(fullPath, entry.Name())
 					if metadata, err := s.mediaService.ExtractMetadata(itemFullPath); err == nil {
 						item.Duration = metadata.Duration
 						item.Width = metadata.Width
 						item.Height = metadata.Height
 						item.FrameRate = metadata.FrameRate
 
-						// Generate thumbnail if it doesn't exist
-						thumbnailName := strings.TrimSuffix(entry.Name(), ext) + ".jpg"
-
-						// Build thumbnail directory path
-						var thumbnailDir = os.Getenv("THUMBNAIL_DIR")
-						// Build thumbnail directory path with library ID
-						libraryThumbnailDir := filepath.Join(thumbnailDir, fmt.Sprintf("%d", libraryID))
-						// Build thumbnail directory path with library ID and relative path
-						if relativePath != "" {
-							libraryThumbnailDir = filepath.Join(libraryThumbnailDir, relativePath)
+						// Use centralized thumbnail generation with hierarchical structure
+						thumbnailDir := os.Getenv("THUMBNAIL_DIR")
+						if thumbnailDir == "" {
+							thumbnailDir = filepath.Join("assets", "thumbnails")
 						}
-						// Build full thumbnail path with library ID and relative path
-						thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
 
-						// Create thumbnail directory if it doesn't exist
-						if err := os.MkdirAll(libraryThumbnailDir, 0755); err == nil {
+						// Create thumbnail configuration
+						thumbnailConfig := ThumbnailConfig{
+							LibraryID:     libraryID,
+							LibraryPath:   library.Path,
+							VideoFilePath: itemFullPath,
+							Duration:      metadata.Duration,
+							ThumbnailDir:  thumbnailDir,
+						}
+
+						// Get expected thumbnail path
+						expectedThumbnail := s.mediaService.GetThumbnailPath(thumbnailConfig)
+						if expectedThumbnail != nil {
 							// Check if thumbnail exists
-							if _, err := os.Stat(thumbnailFullPath); os.IsNotExist(err) {
+							if !s.mediaService.ThumbnailExists(expectedThumbnail.FullPath) {
 								// Set thumbnail path immediately (will show placeholder until generated)
-								if relativePath == "" {
-									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
-								} else {
-									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
-								}
+								item.Thumbnail = expectedThumbnail.URLPath
 
 								// Generate thumbnail asynchronously
-								go func(videoPath, thumbPath, videoName string, duration float64) {
+								go func(config ThumbnailConfig, videoName string) {
 									// Create activity log for thumbnail generation
 									activity, actErr := s.activityService.StartTask(
 										"thumbnail_generation",
@@ -128,23 +139,18 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 										map[string]interface{}{
 											"video_name": videoName,
 											"library_id": libraryID,
-											"path":       thumbPath,
+											"path":       config.VideoFilePath,
 										},
 									)
 									if actErr != nil {
 										log.Printf("Failed to create thumbnail activity: %v\n", actErr)
 									}
 
-									// Generate thumbnail at 10% of duration or 5 seconds
-									timestamp := duration * 0.1
-									if timestamp > 5 {
-										timestamp = 5
-									}
-
-									if err := s.mediaService.GenerateThumbnail(videoPath, thumbPath, timestamp); err == nil {
+									// Generate thumbnail using centralized method
+									if result, err := s.mediaService.GenerateThumbnailHierarchical(config); err == nil {
 										// Mark activity as completed
 										if activity != nil {
-											if err := s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail for %s", videoName)); err != nil {
+											if err := s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Generated thumbnail at %s", result.RelativePath)); err != nil {
 												log.Printf("Failed to complete task: %v", err)
 											}
 										}
@@ -156,14 +162,10 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 											}
 										}
 									}
-								}(itemFullPath, thumbnailFullPath, entry.Name(), metadata.Duration)
+								}(thumbnailConfig, entry.Name())
 							} else {
 								// Thumbnail already exists
-								if relativePath == "" {
-									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s", libraryID, thumbnailName)
-								} else {
-									item.Thumbnail = fmt.Sprintf("thumbnails/%d/%s/%s", libraryID, relativePath, thumbnailName)
-								}
+								item.Thumbnail = expectedThumbnail.URLPath
 							}
 						}
 					}

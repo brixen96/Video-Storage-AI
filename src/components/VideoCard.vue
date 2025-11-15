@@ -76,19 +76,6 @@
 			</div>
 
 			<!-- Performers -->
-			<div v-if="video.performers && video.performers.length > 0" class="video-performers">
-				<div
-					v-for="performer in video.performers.slice(0, 3)"
-					:key="performer.id"
-					class="performer-avatar"
-					:title="performer.name"
-					@click.stop="$emit('open-performer', performer)"
-				>
-					<img v-if="performer.image_path" :src="getAssetURL(performer.image_path)" :alt="performer.name" />
-					<div v-else class="performer-initials">{{ getInitials(performer.name) }}</div>
-				</div>
-				<div v-if="video.performers.length > 3" class="performer-more">+{{ video.performers.length - 3 }}</div>
-			</div>
 
 			<!-- Studio -->
 			<div v-if="video.studios && video.studios.length > 0" class="video-studio" @click.stop="$emit('open-studio', video.studios[0])">
@@ -154,7 +141,7 @@ export default {
 			return null
 		},
 		startPreview() {
-			// Delay preview start by 500ms to avoid loading on quick hovers
+			// Delay preview start by 300ms to avoid loading on quick hovers
 			this.hoverTimeout = setTimeout(() => {
 				if (this.hasPreview && this.$refs.previewVideo) {
 					this.isPreviewPlaying = true
@@ -162,7 +149,7 @@ export default {
 						// Ignore play errors (e.g., if user navigates away quickly)
 					})
 				}
-			}, 500)
+			}, 300)
 		},
 		stopPreview() {
 			// Clear the timeout if user moves away before preview starts

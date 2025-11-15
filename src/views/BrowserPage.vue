@@ -34,21 +34,36 @@
 
 					<!-- Breadcrumb Navigation with Back Button -->
 					<div v-if="tab.libraryId" class="breadcrumb-nav mb-3 d-flex align-items-center gap-2">
-						<button v-if="tab.pathSegments.length > 0" class="btn btn-outline-primary btn-back" @click="goBack(tab)" title="Go back">
+						<button
+							v-if="tab.pathSegments.length > 0 && !tab.showNotInterested && !tab.showEditList"
+							class="btn btn-outline-primary btn-back"
+							@click="goBack(tab)"
+							title="Go back"
+						>
 							<font-awesome-icon :icon="['fas', 'arrow-left']" />
 						</button>
 						<nav aria-label="breadcrumb" class="flex-grow-1">
-							<ol class="breadcrumb mb-0">
+							<!-- Show library-wide indicator when filtering by marks -->
+							<div v-if="tab.showNotInterested || tab.showEditList" class="alert alert-info mb-0 py-2 d-flex align-items-center gap-2">
+								<font-awesome-icon :icon="['fas', 'info-circle']" />
+								<span>
+									Showing all
+									<strong v-if="tab.showNotInterested">Not Interested</strong>
+									<strong v-if="tab.showEditList">Edit List</strong>
+									videos from the entire library
+								</span>
+							</div>
+							<!-- Normal breadcrumb navigation -->
+							<ol v-else class="breadcrumb mb-0">
 								<li class="breadcrumb-item">
 									<a href="#" @click.prevent="navigateToPath(tab, '')" class="breadcrumb-link">
 										<font-awesome-icon :icon="['fas', 'home']" />
 									</a>
 								</li>
 								<li v-for="(segment, index) in tab.pathSegments" :key="index" class="breadcrumb-item">
-									<a v-if="index < tab.pathSegments.length - 1" href="#" @click.prevent="navigateToSegment(tab, index)" class="breadcrumb-link">
+									<a href="#" @click.prevent="navigateToSegment(tab, index)" class="breadcrumb-link">
 										{{ segment }}
 									</a>
-									<span v-else class="breadcrumb-current">{{ segment }}</span>
 								</li>
 							</ol>
 						</nav>
@@ -207,7 +222,7 @@
 </template>
 
 <script>
-import { librariesAPI, getAssetURL } from '@/services/api'
+import { librariesAPI, videosAPI, getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 
 export default {
@@ -311,21 +326,69 @@ export default {
 			}
 
 			// IMPORTANT: Update pathSegments based on currentPath
-			this.tabs[tabIndex].pathSegments = this.tabs[tabIndex].currentPath.split('/').filter((s) => s && s.trim())
+			// Handle both forward slashes and backslashes
+			const currentPath = this.tabs[tabIndex].currentPath || ''
+			this.tabs[tabIndex].pathSegments = currentPath
+				.split(/[/\\]/) // Split on both / and \
+				.filter((s) => s && s.trim())
 
 			// Set loading state
 			this.tabs[tabIndex].loading = true
 
 			try {
-				// Always request metadata extraction and thumbnail generation
-				const response = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, true)
+				// Check if we should load from the entire library (when marking filters are active)
+				if (this.tabs[tabIndex].showNotInterested || this.tabs[tabIndex].showEditList) {
+					// Load all marked videos from the entire library
+					const params = {
+						library_id: this.tabs[tabIndex].libraryId,
+						per_page: 1000, // Load a large number to show all marked videos
+					}
 
-				// Map API response to tab items
-				if (response.data && response.data.items) {
-					this.tabs[tabIndex].items = response.data.items
+					if (this.tabs[tabIndex].showNotInterested) {
+						params.not_interested = true
+					}
+
+					if (this.tabs[tabIndex].showEditList) {
+						params.in_edit_list = true
+					}
+
+					const response = await videosAPI.getAll(params)
+
+					// Convert video objects to browse items format
+					// Check if response.data is an array directly or wrapped in a data property
+					const videos = Array.isArray(response.data) ? response.data : response.data?.data || []
+
+					if (videos.length > 0) {
+						this.tabs[tabIndex].items = videos.map((video) => ({
+							name: video.title || video.file_path.split(/[\\/]/).pop(),
+							path: video.file_path,
+							full_path: video.file_path,
+							type: 'video',
+							is_dir: false,
+							size: video.file_size || 0,
+							modified: video.updated_at || video.created_at,
+							duration: video.duration,
+							thumbnail: video.thumbnail_path,
+							not_interested: video.not_interested,
+							in_edit_list: video.in_edit_list,
+							video_id: video.id,
+							in_database: true,
+						}))
+					} else {
+						this.tabs[tabIndex].items = []
+					}
 				} else {
-					console.log('No items in response')
-					this.tabs[tabIndex].items = []
+					// Normal browsing mode - load current folder
+					// Always request metadata extraction and thumbnail generation
+					const response = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, true)
+
+					// Map API response to tab items
+					if (response.data && response.data.items) {
+						this.tabs[tabIndex].items = response.data.items
+					} else {
+						console.log('No items in response')
+						this.tabs[tabIndex].items = []
+					}
 				}
 			} catch (error) {
 				console.error('Failed to load library content:', error)
@@ -398,13 +461,33 @@ export default {
 			this.selectedVideo = {}
 			this.selectedLibraryId = null
 		},
-		toggleNotInterested(tab, item) {
+		async toggleNotInterested(tab, item) {
 			item.not_interested = !item.not_interested
-			// TODO: Persist to backend
+
+			// Persist to backend
+			try {
+				await videosAPI.updateVideoMarksByPath(item.full_path, {
+					not_interested: item.not_interested,
+				})
+			} catch (error) {
+				console.error('Failed to update not interested status:', error)
+				// Revert on error
+				item.not_interested = !item.not_interested
+			}
 		},
-		toggleEditList(tab, item) {
+		async toggleEditList(tab, item) {
 			item.in_edit_list = !item.in_edit_list
-			// TODO: Persist to backend
+
+			// Persist to backend
+			try {
+				await videosAPI.updateVideoMarksByPath(item.full_path, {
+					in_edit_list: item.in_edit_list,
+				})
+			} catch (error) {
+				console.error('Failed to update edit list status:', error)
+				// Revert on error
+				item.in_edit_list = !item.in_edit_list
+			}
 		},
 		filteredItems(tab) {
 			if (!tab.items) return []
@@ -417,21 +500,18 @@ export default {
 				filtered = filtered.filter((item) => item.name.toLowerCase().includes(query))
 			}
 
-			// Apply type filter
-			if (tab.filterType === 'videos') {
-				filtered = filtered.filter((item) => item.type === 'video')
-			} else if (tab.filterType === 'folders') {
-				filtered = filtered.filter((item) => item.type === 'folder')
+			// Only apply type filter if not in library-wide marking mode
+			// (in library-wide mode, we only show videos anyway)
+			if (!tab.showNotInterested && !tab.showEditList) {
+				if (tab.filterType === 'videos') {
+					filtered = filtered.filter((item) => item.type === 'video')
+				} else if (tab.filterType === 'folders') {
+					filtered = filtered.filter((item) => item.type === 'folder')
+				}
 			}
 
-			// Apply marking filters
-			if (tab.showNotInterested) {
-				filtered = filtered.filter((item) => item.not_interested)
-			}
-
-			if (tab.showEditList) {
-				filtered = filtered.filter((item) => item.in_edit_list)
-			}
+			// Note: No need to filter by marks here anymore since loadLibraryContent
+			// already loads only marked videos when showNotInterested or showEditList is active
 
 			return filtered
 		},
@@ -451,6 +531,8 @@ export default {
 			if (tab.showNotInterested) {
 				tab.showEditList = false
 			}
+			// Reload content to show all marked videos from the library
+			this.loadLibraryContent(tab)
 		},
 		toggleShowEditList(tab) {
 			tab.showEditList = !tab.showEditList
@@ -458,6 +540,8 @@ export default {
 			if (tab.showEditList) {
 				tab.showNotInterested = false
 			}
+			// Reload content to show all marked videos from the library
+			this.loadLibraryContent(tab)
 		},
 		formatDuration(seconds) {
 			const hours = Math.floor(seconds / 3600)

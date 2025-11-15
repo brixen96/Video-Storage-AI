@@ -5,8 +5,9 @@ import "time"
 // BrowseItem represents a file or folder in the browser
 type BrowseItem struct {
 	Name      string    `json:"name"`
-	Path      string    `json:"path"` // Relative path from library root
-	Type      string    `json:"type"` // "folder", "video", or "file"
+	Path      string    `json:"path"`      // Relative path from library root
+	FullPath  string    `json:"full_path"` // Absolute file path
+	Type      string    `json:"type"`      // "folder", "video", or "file"
 	IsDir     bool      `json:"is_dir"`
 	Size      int64     `json:"size"`
 	Modified  time.Time `json:"modified"`

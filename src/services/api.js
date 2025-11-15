@@ -47,6 +47,7 @@ export const performersAPI = {
 		const params = searchTerm ? { search: searchTerm } : {}
 		return api.get('/performers', { params })
 	},
+	search: (params) => api.get('/performers', { params }),
 	getById: (id) => api.get(`/performers/${id}`),
 	getPreviews: (id) => api.get(`/performers/${id}/previews`),
 	create: (data) => api.post('/performers', data),
@@ -71,6 +72,9 @@ export const videosAPI = {
 	removeTags: (id, tagIds) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds } }),
 	bulk: (operation, videoIds, data = {}) => api.post('/videos/bulk', { operation, video_ids: videoIds, ...data }),
 	getThumbnail: (id) => `http://localhost:8080/api/v1/videos/${id}/thumbnail`,
+	openInExplorer: (id) => api.post(`/videos/${id}/open-in-explorer`),
+	updateVideoMarksByPath: (filePath, marks) =>
+		api.patch('/videos/marks-by-path', { file_path: filePath, ...marks }),
 }
 
 export const studiosAPI = {

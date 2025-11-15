@@ -55,7 +55,12 @@ func (h *Hub) Broadcast(message []byte) {
 
 // BroadcastActivityUpdate broadcasts an activity update to all clients.
 func (h *Hub) BroadcastActivityUpdate(activity *models.Activity) {
-	message, err := json.Marshal(activity)
+	// Wrap message with type
+	wrapper := map[string]interface{}{
+		"type": "activity_update",
+		"data": activity,
+	}
+	message, err := json.Marshal(wrapper)
 	if err == nil {
 		h.Broadcast(message)
 	}
@@ -63,7 +68,12 @@ func (h *Hub) BroadcastActivityUpdate(activity *models.Activity) {
 
 // BroadcastStatusUpdate broadcasts a status update to all clients.
 func (h *Hub) BroadcastStatusUpdate(status *models.ActivityStatus) {
-	message, err := json.Marshal(status)
+	// Wrap message with type
+	wrapper := map[string]interface{}{
+		"type": "status_update",
+		"data": status,
+	}
+	message, err := json.Marshal(wrapper)
 	if err == nil {
 		h.Broadcast(message)
 	}

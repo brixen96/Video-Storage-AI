@@ -285,14 +285,61 @@
 
 				<!-- Performers -->
 				<div v-if="selectedVideo.performers && selectedVideo.performers.length > 0" class="detail-section">
-					<h3>Performers</h3>
-					<div class="performers-list">
-						<div v-for="performer in selectedVideo.performers" :key="performer.id" class="performer-item" @click="openPerformer(performer)">
-							<img v-if="performer.image_path" :src="getAssetURL(performer.image_path)" :alt="performer.name" />
-							<div v-else class="performer-placeholder">
-								<font-awesome-icon :icon="['fas', 'user']" />
+					<h3>
+						<font-awesome-icon :icon="['fas', 'users']" />
+						Performers ({{ selectedVideo.performers.length }})
+					</h3>
+					<div class="performers-grid">
+						<div
+							v-for="performer in selectedVideo.performers"
+							:key="performer.id"
+							class="performer-card"
+							@click="openPerformer(performer)"
+							@mouseenter="startPerformerPreview(performer)"
+							@mouseleave="stopPerformerPreview(performer)"
+						>
+							<video
+								v-if="performer.preview_path"
+								:ref="`performer-preview-${performer.id}`"
+								:src="getPerformerPreviewUrl(performer)"
+								class="performer-preview-video"
+								loop
+								muted
+								autoplay
+								playsinline
+								preload="auto"
+								@loadeddata="onPerformerPreviewLoaded(performer)"
+								@error="handlePreviewError"
+							></video>
+
+							<!-- Static Image/Placeholder -->
+							<div v-else class="performer-image">
+								<img v-if="performer.metadata_obj && performer.metadata_obj.image_url" :src="performer.metadata_obj.image_url" :alt="performer.name" />
+								<div v-else class="performer-placeholder">
+									<font-awesome-icon :icon="['fas', 'user']" size="3x" />
+								</div>
 							</div>
-							<span>{{ performer.name }}</span>
+
+							<!-- Performer Info Overlay -->
+							<div class="performer-info">
+								<h4>{{ performer.name }}</h4>
+								<div v-if="performer.metadata_obj" class="performer-meta">
+									<span v-if="performer.metadata_obj.birthdate" class="meta-item">
+										<font-awesome-icon :icon="['fas', 'birthday-cake']" />
+										{{ calculateAge(performer.metadata_obj.birthdate) }}
+									</span>
+									<span v-if="performer.metadata_obj.country" class="meta-item">
+										<font-awesome-icon :icon="['fas', 'globe']" />
+										{{ performer.metadata_obj.country }}
+									</span>
+								</div>
+								<div class="performer-stats">
+									<span class="stat-badge">
+										<font-awesome-icon :icon="['fas', 'video']" />
+										{{ performer.scene_count || 0 }} scenes
+									</span>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -379,17 +426,32 @@
 			</div>
 		</div>
 		<div v-if="showBulkActions" class="modal-backdrop show"></div>
+
+		<!-- Video Player Modal -->
+		<VideoPlayerModal :show="showVideoPlayer" :video="videoForModal" @close="onVideoPlayerClose" @edit-metadata="editMetadata" @open-explorer="openInExplorer" />
+
+		<!-- Edit Metadata Modal -->
+		<EditMetadataModal :show="showEditMetadata" :video="videoForModal" @close="onEditMetadataClose" @saved="onEditMetadataSaved" />
+
+		<!-- Add Tags Modal -->
+		<AddTagModal :show="showTagModal" :video="videoForModal" @close="onTagModalClose" @saved="onTagModalSaved" />
 	</div>
 </template>
 
 <script>
 import VideoCard from '@/components/VideoCard.vue'
+import VideoPlayerModal from '@/components/VideoPlayerModal.vue'
+import EditMetadataModal from '@/components/EditMetadataModal.vue'
+import AddTagModal from '@/components/AddTagModal.vue'
 import { videosAPI, performersAPI, studiosAPI, librariesAPI, getAssetURL } from '@/services/api'
 
 export default {
 	name: 'VideosPage',
 	components: {
 		VideoCard,
+		VideoPlayerModal,
+		EditMetadataModal,
+		AddTagModal,
 	},
 	data() {
 		return {
@@ -430,6 +492,12 @@ export default {
 			studios: [],
 			libraries: [],
 			selectedLibrary: '',
+			showVideoPlayer: false,
+			showEditMetadata: false,
+			showTagModal: false,
+			videoForModal: null,
+			previewingPerformer: null,
+			performerPreviewTimeouts: {},
 		}
 	},
 	computed: {
@@ -603,12 +671,12 @@ export default {
 			this.contextMenu.show = false
 		},
 		playVideo(video) {
-			console.log('Play video:', video)
-			// Implement video player
+			this.videoForModal = video
+			this.showVideoPlayer = true
 		},
 		editMetadata(video) {
-			console.log('Edit metadata:', video)
-			// Implement metadata editor
+			this.videoForModal = video
+			this.showEditMetadata = true
 		},
 		async fetchMetadata(video) {
 			try {
@@ -637,8 +705,8 @@ export default {
 			this.hideContextMenu()
 		},
 		openTagModal(video) {
-			console.log('Open tag modal:', video)
-			// Implement tag selector
+			this.videoForModal = video
+			this.showTagModal = true
 		},
 		openPerformer(performer) {
 			this.$router.push(`/performers/${performer.id}`)
@@ -743,14 +811,112 @@ export default {
 			console.log('Toggle favorite:', video)
 			this.$toast.success(`Favorite toggled for ${video.title}`)
 		},
-		openInExplorer(video) {
-			if (!video.filepath) {
+		async openInExplorer(video) {
+			if (!video.file_path) {
 				this.$toast.error('File path not available')
 				return
 			}
-			// Note: Opening file explorer requires backend support or Electron integration
-			console.log('Open in explorer:', video.filepath)
-			this.$toast.success('Opening file location...')
+
+			try {
+				await videosAPI.openInExplorer(video.id)
+				this.$toast.success('Opening file location...')
+			} catch (error) {
+				console.error('Failed to open in explorer:', error)
+				this.$toast.error('Failed to open file location')
+			}
+		},
+		onVideoPlayerClose() {
+			this.showVideoPlayer = false
+			this.videoForModal = null
+		},
+		onEditMetadataClose() {
+			this.showEditMetadata = false
+			this.videoForModal = null
+		},
+		onEditMetadataSaved() {
+			this.loadVideos()
+			this.showEditMetadata = false
+			this.videoForModal = null
+		},
+		onTagModalClose() {
+			this.showTagModal = false
+			this.videoForModal = null
+		},
+		onTagModalSaved() {
+			this.loadVideos()
+			this.showTagModal = false
+			this.videoForModal = null
+		},
+		startPerformerPreview(performer) {
+			// Delay preview start by 300ms to avoid loading on quick hovers
+			this.performerPreviewTimeouts[performer.id] = setTimeout(() => {
+				if (performer.preview_path) {
+					const videoRef = this.$refs[`performer-preview-${performer.id}`]
+					if (videoRef && videoRef[0]) {
+						this.previewingPerformer = performer.id
+						videoRef[0].play().catch(() => {
+							// Ignore play errors
+						})
+					}
+				}
+			}, 300)
+		},
+		stopPerformerPreview(performer) {
+			// Clear the timeout if user moves away before preview starts
+			if (this.performerPreviewTimeouts[performer.id]) {
+				clearTimeout(this.performerPreviewTimeouts[performer.id])
+				delete this.performerPreviewTimeouts[performer.id]
+			}
+
+			// Stop preview if playing
+			if (this.previewingPerformer === performer.id) {
+				const videoRef = this.$refs[`performer-preview-${performer.id}`]
+				if (videoRef && videoRef[0]) {
+					videoRef[0].pause()
+					videoRef[0].currentTime = 0
+				}
+				this.previewingPerformer = null
+			}
+		},
+		onPerformerPreviewLoaded(performer) {
+			// Preview loaded successfully
+			console.log(`Preview loaded for ${performer.name}`)
+		},
+		calculateAge(birthdate) {
+			if (!birthdate) return ''
+			const birth = new Date(birthdate)
+			const today = new Date()
+			let age = today.getFullYear() - birth.getFullYear()
+			const monthDiff = today.getMonth() - birth.getMonth()
+			if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+				age--
+			}
+			return `${age} years`
+		},
+		getPerformerPreviewUrl(performer) {
+			if (!performer.preview_path) {
+				return ''
+			}
+			// If already a full URL, return as-is
+			if (performer.preview_path.startsWith('http://') || performer.preview_path.startsWith('https://')) {
+				return performer.preview_path
+			}
+			// If path already starts with /assets/, just prepend the base URL
+			if (performer.preview_path.startsWith('/assets/') || performer.preview_path.startsWith('assets/')) {
+				const cleanPath = performer.preview_path.startsWith('/') ? performer.preview_path.slice(1) : performer.preview_path
+				return `http://localhost:8080/${cleanPath}`
+			}
+			// Otherwise use getAssetURL for full path conversion
+			return getAssetURL(performer.preview_path)
+		},
+		handlePreviewError(event) {
+			const video = event.target
+			console.error('Performer preview failed to load:', {
+				src: video.src,
+				error: video.error,
+				networkState: video.networkState,
+				readyState: video.readyState,
+			})
 		},
 	},
 }

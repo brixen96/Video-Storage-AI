@@ -95,6 +95,11 @@ func createTables() error {
 		bitrate INTEGER,
 		fps REAL,
 		thumbnail_path TEXT,
+		date TEXT,
+		rating INTEGER DEFAULT 0,
+		description TEXT,
+		is_favorite BOOLEAN DEFAULT 0,
+		is_pinned BOOLEAN DEFAULT 0,
 		not_interested BOOLEAN DEFAULT 0,
 		in_edit_list BOOLEAN DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -279,6 +284,16 @@ func runMigrations() error {
 		`ALTER TABLE activity_logs ADD COLUMN updated_at DATETIME`,
 		// Migration 6: Add error column to activity_logs table
 		`ALTER TABLE activity_logs ADD COLUMN error TEXT`,
+		// Migration 7: Add date column to videos table
+		`ALTER TABLE videos ADD COLUMN date TEXT`,
+		// Migration 8: Add rating column to videos table
+		`ALTER TABLE videos ADD COLUMN rating INTEGER DEFAULT 0`,
+		// Migration 9: Add description column to videos table
+		`ALTER TABLE videos ADD COLUMN description TEXT`,
+		// Migration 10: Add is_favorite column to videos table
+		`ALTER TABLE videos ADD COLUMN is_favorite BOOLEAN DEFAULT 0`,
+		// Migration 11: Add is_pinned column to videos table
+		`ALTER TABLE videos ADD COLUMN is_pinned BOOLEAN DEFAULT 0`,
 	}
 
 	for _, migration := range migrations {

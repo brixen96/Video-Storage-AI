@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -34,13 +36,27 @@ var SupportedVideoExtensions = []string{
 	".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg",
 }
 
+// thumbnailJob represents a thumbnail generation job (deprecated - use thumbnailJobHierarchical)
+type thumbnailJob struct {
+	videoID           int64
+	filePath          string
+	outputPath        string
+	timestamp         float64
+}
+
+// thumbnailJobHierarchical represents a hierarchical thumbnail generation job
+type thumbnailJobHierarchical struct {
+	videoID int64
+	config  ThumbnailConfig
+}
+
 // GetAll retrieves all videos with optional filters
 func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, int, error) {
 	// Build base query - include library_id in SELECT
 	baseQuery := `
 		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec,
-		       v.resolution, v.bitrate, v.fps, v.thumbnail_path,
-		       v.created_at, v.updated_at, v.last_played_at, v.play_count
+		       v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.date, v.rating, v.description,
+		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.created_at, v.updated_at, v.last_played_at, v.play_count
 		FROM videos v
 	`
 
@@ -122,6 +138,17 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 			args = append(args, tagID)
 		}
 		conditions = append(conditions, fmt.Sprintf("vt.tag_id IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Add marking filters
+	if query.NotInterested != nil {
+		conditions = append(conditions, "v.not_interested = ?")
+		args = append(args, *query.NotInterested)
+	}
+
+	if query.InEditList != nil {
+		conditions = append(conditions, "v.in_edit_list = ?")
+		args = append(args, *query.InEditList)
 	}
 
 	// Build the WHERE clause
@@ -210,9 +237,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	for rows.Next() {
 		var video models.Video
 		var lastPlayedAt sql.NullTime
+		var date sql.NullString
+		var description sql.NullString
 		err := rows.Scan(
 			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
+			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 		)
 		if err != nil {
@@ -222,6 +252,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 
 		if lastPlayedAt.Valid {
 			video.LastPlayedAt = &lastPlayedAt.Time
+		}
+		if date.Valid {
+			video.Date = date.String
+		}
+		if description.Valid {
+			video.Description = description.String
 		}
 
 		videos = append(videos, video)
@@ -248,10 +284,13 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	var video models.Video
 	var lastPlayedAt sql.NullTime
+	var date sql.NullString
+	var description sql.NullString
 
 	query := `
 		SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
-		       bitrate, fps, thumbnail_path, created_at, updated_at, last_played_at, play_count
+		       bitrate, fps, thumbnail_path, date, rating, description, is_favorite, is_pinned,
+		       not_interested, in_edit_list, created_at, updated_at, last_played_at, play_count
 		FROM videos
 		WHERE id = ?
 	`
@@ -259,6 +298,7 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	err := s.db.QueryRow(query, id).Scan(
 		&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
+		&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 		&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 	)
 
@@ -271,6 +311,12 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 
 	if lastPlayedAt.Valid {
 		video.LastPlayedAt = &lastPlayedAt.Time
+	}
+	if date.Valid {
+		video.Date = date.String
+	}
+	if description.Valid {
+		video.Description = description.String
 	}
 
 	// Load relationships
@@ -327,30 +373,98 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 		return nil, err
 	}
 
+	// Update basic fields
 	if update.Title != nil {
 		video.Title = *update.Title
 	}
-	if update.ThumbnailPath != nil {
-		video.ThumbnailPath = *update.ThumbnailPath
+	if update.Date != nil {
+		video.Date = *update.Date
+	}
+	if update.Rating != nil {
+		video.Rating = *update.Rating
+	}
+	if update.Description != nil {
+		video.Description = *update.Description
+	}
+	if update.IsFavorite != nil {
+		video.IsFavorite = *update.IsFavorite
+	}
+	if update.IsPinned != nil {
+		video.IsPinned = *update.IsPinned
 	}
 	if update.PlayCount != nil {
 		video.PlayCount = *update.PlayCount
+	}
+	if update.NotInterested != nil {
+		video.NotInterested = *update.NotInterested
+	}
+	if update.InEditList != nil {
+		video.InEditList = *update.InEditList
 	}
 
 	video.UpdatedAt = time.Now()
 
 	query := `
 		UPDATE videos
-		SET title = ?, thumbnail_path = ?, play_count = ?, updated_at = ?
+		SET title = ?, date = ?, rating = ?, description = ?, is_favorite = ?, is_pinned = ?,
+		    play_count = ?, not_interested = ?, in_edit_list = ?, updated_at = ?
 		WHERE id = ?
 	`
 
-	_, err = s.db.Exec(query, video.Title, video.ThumbnailPath, video.PlayCount, video.UpdatedAt, id)
+	_, err = s.db.Exec(query, video.Title, video.Date, video.Rating, video.Description,
+		video.IsFavorite, video.IsPinned, video.PlayCount, video.NotInterested, video.InEditList, video.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update video: %w", err)
 	}
 
-	return video, nil
+	// Update relationships
+	// Update studio relationship
+	if update.StudioID != nil {
+		// Clear existing studios
+		if _, err := s.db.Exec("DELETE FROM video_studios WHERE video_id = ?", id); err != nil {
+			return nil, fmt.Errorf("failed to clear studios: %w", err)
+		}
+		// Add new studio if provided
+		if *update.StudioID > 0 {
+			if _, err := s.db.Exec("INSERT INTO video_studios (video_id, studio_id) VALUES (?, ?)",
+				id, *update.StudioID); err != nil {
+				return nil, fmt.Errorf("failed to add studio: %w", err)
+			}
+		}
+	}
+
+	// Update performer relationships
+	if update.PerformerIDs != nil {
+		// Clear existing performers
+		if _, err := s.db.Exec("DELETE FROM video_performers WHERE video_id = ?", id); err != nil {
+			return nil, fmt.Errorf("failed to clear performers: %w", err)
+		}
+		// Add new performers
+		for _, performerID := range update.PerformerIDs {
+			if _, err := s.db.Exec("INSERT INTO video_performers (video_id, performer_id) VALUES (?, ?)",
+				id, performerID); err != nil {
+				return nil, fmt.Errorf("failed to add performer: %w", err)
+			}
+		}
+	}
+
+	// Update tag relationships
+	if update.TagIDs != nil {
+		// Clear existing tags
+		if _, err := s.db.Exec("DELETE FROM video_tags WHERE video_id = ?", id); err != nil {
+			return nil, fmt.Errorf("failed to clear tags: %w", err)
+		}
+		// Add new tags
+		for _, tagID := range update.TagIDs {
+			if _, err := s.db.Exec("INSERT INTO video_tags (video_id, tag_id) VALUES (?, ?)",
+				id, tagID); err != nil {
+				return nil, fmt.Errorf("failed to add tag: %w", err)
+			}
+		}
+	}
+
+	// Reload video with updated relationships
+	return s.GetByID(id)
 }
 
 // Delete deletes a video
@@ -407,15 +521,52 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	// Create media service for metadata extraction
 	mediaService := NewMediaService()
 
+	// Get thumbnail base directory
+	thumbnailDir := os.Getenv("THUMBNAIL_DIR")
+	if thumbnailDir == "" {
+		thumbnailDir = filepath.Join("assets", "thumbnails")
+	}
+
+	// Setup parallel thumbnail generation using new hierarchical structure
+	numWorkers := runtime.NumCPU() * 2 // Use 2x CPU cores for I/O bound work
+	thumbnailJobs := make(chan thumbnailJobHierarchical, numWorkers*2)
+	var wg sync.WaitGroup
+	var thumbnailMutex sync.Mutex
+
+	// Start thumbnail worker pool
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for job := range thumbnailJobs {
+				result, err := mediaService.GenerateThumbnailHierarchical(job.config)
+				if err != nil {
+					log.Printf("Worker %d: Failed to generate thumbnail for video ID %d: %v", workerID, job.videoID, err)
+				} else {
+					log.Printf("Worker %d: Generated thumbnail for video ID %d at %s", workerID, job.videoID, result.RelativePath)
+					// Update video thumbnail path in database
+					thumbnailMutex.Lock()
+					s.updateVideoThumbnailPath(job.videoID, result.RelativePath)
+					thumbnailMutex.Unlock()
+				}
+			}
+		}(i)
+	}
+
+	// Process videos sequentially, but queue thumbnails for parallel generation
 	for _, filePath := range videoFiles {
 		processed++
 		progress := int((float64(processed) / float64(total)) * 100)
+		currentFile := filepath.Base(filePath)
+
+		// Update progress with current file being processed
+		progressMsg := fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)\nCurrent: %s", processed, total, skipped, added, currentFile)
 
 		// Check if video already exists
 		exists, err := s.videoExists(filePath)
 		if err == nil && exists {
 			skipped++
-			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added)); err != nil {
+			if err := s.activityService.UpdateProgress(activity.ID, progress, progressMsg); err != nil {
 				log.Printf("Failed to update progress: %v", err)
 			}
 			continue
@@ -425,7 +576,8 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
 			skipped++
-			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err)); err != nil {
+			progressMsg = fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v\nCurrent: %s", processed, total, skipped, added, err, currentFile)
+			if err := s.activityService.UpdateProgress(activity.ID, progress, progressMsg); err != nil {
 				log.Printf("Failed to update progress: %v", err)
 			}
 			continue
@@ -447,33 +599,66 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 			resolution = fmt.Sprintf("%dx%d", metadata.Width, metadata.Height)
 		}
 
-		// Create video record with library ID
-		create := &models.VideoCreate{
-			LibraryID:  libraryID,
-			Title:      filepath.Base(filePath),
-			FilePath:   filePath,
-			FileSize:   metadata.Size,
-			Duration:   metadata.Duration,
-			Codec:      metadata.Codec,
-			Resolution: resolution,
-			Bitrate:    metadata.Bitrate,
-			FPS:        metadata.FrameRate,
+		// Get expected thumbnail path using hierarchical structure (but don't generate yet)
+		thumbnailConfig := ThumbnailConfig{
+			LibraryID:     libraryID,
+			LibraryPath:   library.Path,
+			VideoFilePath: filePath,
+			Duration:      metadata.Duration,
+			ThumbnailDir:  thumbnailDir,
 		}
 
-		_, err = s.Create(create)
+		expectedThumbnail := mediaService.GetThumbnailPath(thumbnailConfig)
+		thumbnailPath := ""
+		if expectedThumbnail != nil {
+			thumbnailPath = expectedThumbnail.RelativePath
+		}
+
+		// Create video record with library ID and thumbnail path
+		create := &models.VideoCreate{
+			LibraryID:     libraryID,
+			Title:         filepath.Base(filePath),
+			FilePath:      filePath,
+			FileSize:      metadata.Size,
+			Duration:      metadata.Duration,
+			Codec:         metadata.Codec,
+			Resolution:    resolution,
+			Bitrate:       metadata.Bitrate,
+			FPS:           metadata.FrameRate,
+			ThumbnailPath: thumbnailPath,
+		}
+
+		video, err := s.Create(create)
 		if err != nil {
 			skipped++
-			if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v", processed, total, skipped, added, err)); err != nil {
+			progressMsg = fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d) - Error: %v\nCurrent: %s", processed, total, skipped, added, err, currentFile)
+			if err := s.activityService.UpdateProgress(activity.ID, progress, progressMsg); err != nil {
 				log.Printf("Failed to update progress: %v", err)
 			}
 			continue
 		}
 
+		// Queue thumbnail generation for parallel processing using hierarchical structure
+		thumbnailJobs <- thumbnailJobHierarchical{
+			videoID: video.ID,
+			config:  thumbnailConfig,
+		}
+
+		thumbnailMutex.Lock()
 		added++
-		if err := s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)", processed, total, skipped, added)); err != nil {
+		thumbnailMutex.Unlock()
+
+		progressMsg = fmt.Sprintf("Processing %d/%d (Skipped: %d, Added: %d)\nCurrent: %s", processed, total, skipped, added, currentFile)
+		if err := s.activityService.UpdateProgress(activity.ID, progress, progressMsg); err != nil {
 			log.Printf("Failed to update progress: %v", err)
 		}
 	}
+
+	// Close thumbnail jobs channel and wait for all workers to finish
+	close(thumbnailJobs)
+	log.Println("Waiting for thumbnail generation workers to complete...")
+	wg.Wait()
+	log.Println("All thumbnail generation workers completed")
 
 	// Complete activity
 	_ = s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan complete: %d videos added, %d skipped", added, skipped))
@@ -519,6 +704,83 @@ func (s *VideoService) videoExists(filePath string) (bool, error) {
 	return count > 0, nil
 }
 
+// updateVideoThumbnailPath updates the thumbnail path for a video
+func (s *VideoService) updateVideoThumbnailPath(videoID int64, thumbnailPath string) error {
+	query := `UPDATE videos SET thumbnail_path = ? WHERE id = ?`
+	_, err := s.db.Exec(query, thumbnailPath, videoID)
+	if err != nil {
+		log.Printf("Failed to update thumbnail path for video %d: %v", videoID, err)
+		return err
+	}
+	return nil
+}
+
+// VideoMarks holds marking information for a video
+type VideoMarks struct {
+	NotInterested bool
+	InEditList    bool
+}
+
+// GetVideoMarksByPath retrieves video marks (not_interested, in_edit_list) by file path
+func (s *VideoService) GetVideoMarksByPath(filePath string) (*VideoMarks, error) {
+	var marks VideoMarks
+	query := `SELECT not_interested, in_edit_list FROM videos WHERE file_path = ?`
+	err := s.db.QueryRow(query, filePath).Scan(&marks.NotInterested, &marks.InEditList)
+	if err == sql.ErrNoRows {
+		// Video doesn't exist in database yet, return nil (no marks)
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get video marks: %w", err)
+	}
+	return &marks, nil
+}
+
+// GetByFilePath retrieves a video by file path
+func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
+	var video models.Video
+	var date, description sql.NullString
+	var lastPlayedAt sql.NullTime
+
+	query := `SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
+	          bitrate, fps, thumbnail_path, date, rating, description, is_favorite, is_pinned,
+	          not_interested, in_edit_list, created_at, updated_at, last_played_at, play_count
+	          FROM videos WHERE file_path = ?`
+
+	err := s.db.QueryRow(query, filePath).Scan(
+		&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
+		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
+		&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned,
+		&video.NotInterested, &video.InEditList, &video.CreatedAt, &video.UpdatedAt,
+		&lastPlayedAt, &video.PlayCount,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("video not found with file path: %s", filePath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get video by file path: %w", err)
+	}
+
+	// Handle nullable fields
+	if date.Valid {
+		video.Date = date.String
+	}
+	if description.Valid {
+		video.Description = description.String
+	}
+	if lastPlayedAt.Valid {
+		video.LastPlayedAt = &lastPlayedAt.Time
+	}
+
+	// Load related data
+	if err := s.loadVideoRelationships(&video); err != nil {
+		return nil, err
+	}
+
+	return &video, nil
+}
+
 // loadVideoRelationships loads related data for a video
 func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	// Load performers
@@ -542,6 +804,8 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 			if err == nil {
 				if metadata.Valid {
 					performer.Metadata = metadata.String
+					// Unmarshal metadata for frontend use
+					performer.UnmarshalMetadata()
 				}
 				video.Performers = append(video.Performers, performer)
 			}

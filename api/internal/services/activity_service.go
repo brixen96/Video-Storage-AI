@@ -107,10 +107,9 @@ func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 		activity.CompletedAt = &completedAt.Time
 	}
 
+	// Details is stored as JSON string in the database
 	if len(detailsJSON) > 0 {
-		if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal details: %w", err)
-		}
+		activity.Details = string(detailsJSON)
 	}
 
 	return &activity, nil
@@ -182,10 +181,9 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 			activity.Error = &errorMsg.String
 		}
 
+		// Details is stored as JSON string in the database
 		if len(detailsJSON) > 0 {
-			if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
-				log.Printf("failed to unmarshal details: %v", err)
-			}
+			activity.Details = string(detailsJSON)
 		}
 
 		activities = append(activities, activity)
@@ -238,11 +236,23 @@ func (s *ActivityService) Update(id int, update *models.ActivityLogUpdate) (*mod
 		return nil, fmt.Errorf("failed to update activity: %w", err)
 	}
 
+	// Get the updated activity
+	activity, err := s.GetByID(int64(id))
+	if err != nil {
+		return nil, err
+	}
+
+	// Broadcast the individual activity update
+	if err := s.BroadcastUpdate(activity); err != nil {
+		log.Printf("failed to broadcast activity update: %v", err)
+	}
+
+	// Broadcast the overall status update
 	if err := s.BroadcastStatusUpdate(); err != nil {
 		log.Printf("failed to broadcast status update: %v", err)
 	}
 
-	return s.GetByID(int64(id))
+	return activity, nil
 }
 
 // Delete deletes an activity log
@@ -411,7 +421,7 @@ func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 func (s *ActivityService) StartTask(taskType, message string, details map[string]interface{}) (*models.Activity, error) {
 	activity := &models.Activity{
 		TaskType:  taskType,
-		Status:    models.TaskStatusPending,
+		Status:    models.TaskStatusRunning,
 		Message:   message,
 		Progress:  0,
 	}
@@ -443,10 +453,11 @@ func (s *ActivityService) StartTask(taskType, message string, details map[string
 		activity.Status,
 		activity.Message,
 		detailsJSON,
-		0, // progress
-		now,
-		now,
-		nil,
+		0,   // progress
+		now, // started_at
+		now, // updated_at
+		nil, // completed_at
+		nil, // error
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create activity: %w", err)
@@ -585,10 +596,9 @@ func (s *ActivityService) GetTasksByStatus(status string, limit, offset int) ([]
 			activity.Error = &errorMsg.String
 		}
 
+		// Details is stored as JSON string in the database
 		if len(detailsJSON) > 0 {
-			if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
-				log.Printf("failed to unmarshal details: %v", err)
-			}
+			activity.Details = string(detailsJSON)
 		}
 
 		activities = append(activities, activity)
