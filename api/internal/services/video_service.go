@@ -36,14 +36,6 @@ var SupportedVideoExtensions = []string{
 	".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg",
 }
 
-// thumbnailJob represents a thumbnail generation job (deprecated - use thumbnailJobHierarchical)
-type thumbnailJob struct {
-	videoID           int64
-	filePath          string
-	outputPath        string
-	timestamp         float64
-}
-
 // thumbnailJobHierarchical represents a hierarchical thumbnail generation job
 type thumbnailJobHierarchical struct {
 	videoID int64

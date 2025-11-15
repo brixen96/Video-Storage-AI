@@ -92,12 +92,12 @@
 			</div>
 		</div>
 
-		<!-- Create Modal -->
+		<!-- Create/Edit Modal -->
 		<div v-if="showCreateModal" class="modal show d-block" @click.self="closeCreateModal">
 			<div class="modal-dialog modal-dialog-centered">
 				<div class="modal-content">
 					<div class="modal-header">
-						<h5 class="modal-title">Create New Tag</h5>
+						<h5 class="modal-title">{{ editingTag ? 'Edit Tag' : 'Create New Tag' }}</h5>
 						<button type="button" class="btn-close" @click="closeCreateModal"></button>
 					</div>
 					<div class="modal-body">
@@ -119,7 +119,36 @@
 					</div>
 					<div class="modal-footer">
 						<button type="button" class="btn btn-secondary" @click="closeCreateModal">Cancel</button>
-						<button type="button" class="btn btn-primary" @click="createTag">Create</button>
+						<button type="button" class="btn btn-primary" @click="editingTag ? updateTag() : createTag()">
+							{{ editingTag ? 'Update' : 'Create' }}
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Merge Modal -->
+		<div v-if="showMergeModal" class="modal show d-block" @click.self="closeMergeModal">
+			<div class="modal-dialog modal-dialog-centered">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title">Merge Tags</h5>
+						<button type="button" class="btn-close" @click="closeMergeModal"></button>
+					</div>
+					<div class="modal-body">
+						<p>Merge <strong>{{ mergeSourceTag?.name }}</strong> into:</p>
+						<div class="mb-3">
+							<label class="form-label">Target Tag</label>
+							<select v-model="mergeTargetId" class="form-select">
+								<option value="">Select target tag...</option>
+								<option v-for="tag in availableTargetTags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+							</select>
+						</div>
+						<p class="text-muted small">All videos tagged with the source tag will be re-tagged with the target tag, and the source tag will be deleted.</p>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" @click="closeMergeModal">Cancel</button>
+						<button type="button" class="btn btn-primary" :disabled="!mergeTargetId" @click="performMerge">Merge</button>
 					</div>
 				</div>
 			</div>
@@ -142,6 +171,9 @@ export default {
 			selectedTags: [],
 			showCreateModal: false,
 			showMergeModal: false,
+			editingTag: null,
+			mergeSourceTag: null,
+			mergeTargetId: null,
 			createForm: { name: '', color: '#6c757d', icon: '' },
 			commonIcons: ['tag', 'star', 'heart', 'fire', 'bolt', 'crown', 'gem', 'award', 'bookmark', 'flag'],
 		}
@@ -161,12 +193,17 @@ export default {
 		allSelected() {
 			return this.filteredTags.length > 0 && this.selectedTags.length === this.filteredTags.length
 		},
+		availableTargetTags() {
+			if (!this.mergeSourceTag) return this.tags
+			return this.tags.filter((tag) => tag.id !== this.mergeSourceTag.id)
+		},
 	},
 	methods: {
 		async loadTags() {
 			try {
 				const response = await tagsAPI.getAll()
-				this.tags = response.data || []
+
+				this.tags = response || []
 			} catch (err) {
 				console.error('Failed to load tags:', err)
 			}
@@ -180,19 +217,33 @@ export default {
 			this.selectedTags = this.allSelected ? [] : this.filteredTags.map((tag) => tag.id)
 		},
 		openCreateModal() {
+			this.editingTag = null
+			this.createForm = { name: '', color: '#6c757d', icon: '' }
 			this.showCreateModal = true
 		},
 		closeCreateModal() {
 			this.showCreateModal = false
+			this.editingTag = null
+			this.createForm = { name: '', color: '#6c757d', icon: '' }
 		},
 		async createTag() {
 			try {
 				await tagsAPI.create(this.createForm)
 				await this.loadTags()
 				this.closeCreateModal()
-				this.$toast.success('Tag Created', `Tag "${this.createForm.name}" created`)
+				console.log('Tag created successfully')
 			} catch (err) {
-				this.$toast.error('Create Failed', 'Failed to create tag')
+				console.error('Create Failed:', err)
+			}
+		},
+		async updateTag() {
+			try {
+				await tagsAPI.update(this.editingTag.id, this.createForm)
+				await this.loadTags()
+				this.closeCreateModal()
+				console.log('Tag updated successfully')
+			} catch (err) {
+				console.error('Update Failed:', err)
 			}
 		},
 		async deleteTag(tag) {
@@ -200,9 +251,9 @@ export default {
 			try {
 				await tagsAPI.delete(tag.id)
 				await this.loadTags()
-				this.$toast.success('Tag Deleted', 'Tag deleted successfully')
+				console.log('Tag deleted successfully')
 			} catch (err) {
-				this.$toast.error('Delete Failed', 'Failed to delete tag')
+				console.error('Delete Failed:', err)
 			}
 		},
 		async bulkDelete() {
@@ -211,18 +262,44 @@ export default {
 				await Promise.all(this.selectedTags.map((id) => tagsAPI.delete(id)))
 				await this.loadTags()
 				this.selectedTags = []
-				this.$toast.success('Tags Deleted', 'Tags deleted successfully')
+				console.log('Tags deleted successfully')
 			} catch (err) {
-				this.$toast.error('Delete Failed', 'Failed to delete tags')
+				console.error('Delete Failed:', err)
 			}
 		},
 		startEdit(tag) {
-			// Will implement inline editing
-			console.log('Edit tag:', tag)
+			this.editingTag = tag
+			this.createForm = {
+				name: tag.name,
+				color: tag.color || '#6c757d',
+				icon: tag.icon || '',
+			}
+			this.showCreateModal = true
 		},
 		openMergeModal(tag) {
-			// Will implement merge functionality
-			console.log('Merge tag:', tag)
+			this.mergeSourceTag = tag
+			this.mergeTargetId = null
+			this.showMergeModal = true
+		},
+		closeMergeModal() {
+			this.showMergeModal = false
+			this.mergeSourceTag = null
+			this.mergeTargetId = null
+		},
+		async performMerge() {
+			if (!this.mergeTargetId) return
+
+			try {
+				await tagsAPI.merge({
+					source_tag_ids: [this.mergeSourceTag.id],
+					target_tag_id: this.mergeTargetId,
+				})
+				await this.loadTags()
+				this.closeMergeModal()
+				console.log('Tags merged successfully')
+			} catch (err) {
+				console.error('Merge Failed:', err)
+			}
 		},
 	},
 	mounted() {

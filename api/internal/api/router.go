@@ -180,12 +180,7 @@ func createGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Creat
 func updateGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Update group"}) }
 func deleteGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Delete group"}) }
 
-func getTags(c *gin.Context)   { c.JSON(http.StatusOK, gin.H{"message": "Get tags"}) }
-func getTag(c *gin.Context)    { c.JSON(http.StatusOK, gin.H{"message": "Get tag"}) }
-func createTag(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Create tag"}) }
-func updateTag(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Update tag"}) }
-func deleteTag(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Delete tag"}) }
-func mergeTags(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Merge tags"}) }
+// Tag handlers are implemented in tag_handlers.go
 
 // Activity handlers are implemented in activity_handlers.go
 

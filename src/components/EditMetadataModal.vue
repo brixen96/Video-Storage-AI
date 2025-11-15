@@ -83,7 +83,14 @@
 						<div class="mb-3">
 							<label class="form-label">Rating</label>
 							<div class="rating-selector">
-								<button v-for="star in 5" :key="star" type="button" class="btn btn-sm" :class="star <= formData.rating ? 'btn-warning' : 'btn-outline-secondary'" @click="formData.rating = star">
+								<button
+									v-for="star in 5"
+									:key="star"
+									type="button"
+									class="btn btn-sm"
+									:class="star <= formData.rating ? 'btn-warning' : 'btn-outline-secondary'"
+									@click="formData.rating = star"
+								>
 									<font-awesome-icon :icon="['fas', 'star']" />
 								</button>
 								<button type="button" class="btn btn-sm btn-outline-secondary ms-2" @click="formData.rating = 0">Clear</button>
@@ -220,7 +227,9 @@ export default {
 		async loadTags() {
 			try {
 				const response = await tagsAPI.getAll()
-				this.tags = response.data || []
+				console.log(response)
+
+				this.tags = response || []
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 			}

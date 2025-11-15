@@ -150,7 +150,7 @@ export default {
 		async loadTags() {
 			try {
 				const response = await tagsAPI.getAll()
-				this.tags = response.data || []
+				this.tags = response || []
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 				this.$toast.error('Failed to load tags')

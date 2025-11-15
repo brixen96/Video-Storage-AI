@@ -22,7 +22,8 @@
       "Bash(timeout 5 go run:*)",
       "Bash(taskkill:*)",
       "Bash(taskkill /F /PID 25204)",
-      "Bash(timeout 5 powershell:*)"
+      "Bash(timeout 5 powershell:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
