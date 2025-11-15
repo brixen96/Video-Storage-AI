@@ -79,18 +79,20 @@ export const videosAPI = {
 
 export const studiosAPI = {
 	getAll: () => api.get('/studios'),
-	getById: (id) => api.get(`/studios/${id}`),
+	getById: (id, includeGroups = false) => api.get(`/studios/${id}`, { params: { include_groups: includeGroups } }),
 	create: (data) => api.post('/studios', data),
 	update: (id, data) => api.put(`/studios/${id}`, data),
 	delete: (id) => api.delete(`/studios/${id}`),
+	resetMetadata: (id) => api.post(`/studios/${id}/reset-metadata`),
 }
 
 export const groupsAPI = {
-	getAll: () => api.get('/groups'),
+	getAll: (studioId) => api.get('/groups', { params: studioId ? { studio_id: studioId } : {} }),
 	getById: (id) => api.get(`/groups/${id}`),
 	create: (data) => api.post('/groups', data),
 	update: (id, data) => api.put(`/groups/${id}`, data),
 	delete: (id) => api.delete(`/groups/${id}`),
+	resetMetadata: (id) => api.post(`/groups/${id}/reset-metadata`),
 }
 
 export const tagsAPI = {

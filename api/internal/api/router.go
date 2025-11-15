@@ -98,21 +98,23 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// Studios endpoints
 		studios := v1.Group("/studios")
 		{
-			studios.GET("", getStudios)          // List all studios
-			studios.GET("/:id", getStudio)       // Get single studio
-			studios.POST("", createStudio)       // Create studio
-			studios.PUT("/:id", updateStudio)    // Update studio
-			studios.DELETE("/:id", deleteStudio) // Delete studio
+			studios.GET("", getStudios)                             // List all studios
+			studios.GET("/:id", getStudio)                          // Get single studio
+			studios.POST("", createStudio)                          // Create studio
+			studios.PUT("/:id", updateStudio)                       // Update studio
+			studios.DELETE("/:id", deleteStudio)                    // Delete studio
+			studios.POST("/:id/reset-metadata", resetStudioMetadata) // Reset metadata
 		}
 
 		// Groups endpoints
 		groups := v1.Group("/groups")
 		{
-			groups.GET("", getGroups)          // List all groups
-			groups.GET("/:id", getGroup)       // Get single group
-			groups.POST("", createGroup)       // Create group
-			groups.PUT("/:id", updateGroup)    // Update group
-			groups.DELETE("/:id", deleteGroup) // Delete group
+			groups.GET("", getGroups)                              // List all groups
+			groups.GET("/:id", getGroup)                           // Get single group
+			groups.POST("", createGroup)                           // Create group
+			groups.PUT("/:id", updateGroup)                        // Update group
+			groups.DELETE("/:id", deleteGroup)                     // Delete group
+			groups.POST("/:id/reset-metadata", resetGroupMetadata) // Reset metadata
 		}
 
 		// Tags endpoints
@@ -167,19 +169,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 // Video handlers are implemented in video_handlers.go
 // Performer handlers are implemented in performer_handlers.go
-
-func getStudios(c *gin.Context)   { c.JSON(http.StatusOK, gin.H{"message": "Get studios"}) }
-func getStudio(c *gin.Context)    { c.JSON(http.StatusOK, gin.H{"message": "Get studio"}) }
-func createStudio(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Create studio"}) }
-func updateStudio(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Update studio"}) }
-func deleteStudio(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Delete studio"}) }
-
-func getGroups(c *gin.Context)   { c.JSON(http.StatusOK, gin.H{"message": "Get groups"}) }
-func getGroup(c *gin.Context)    { c.JSON(http.StatusOK, gin.H{"message": "Get group"}) }
-func createGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Create group"}) }
-func updateGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Update group"}) }
-func deleteGroup(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "Delete group"}) }
-
+// Studio handlers are implemented in studio_handlers.go
+// Group handlers are implemented in group_handlers.go
 // Tag handlers are implemented in tag_handlers.go
 
 // Activity handlers are implemented in activity_handlers.go

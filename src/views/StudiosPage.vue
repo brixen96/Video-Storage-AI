@@ -264,268 +264,277 @@
 	</div>
 </template>
 
-<script>
-import { studiosAPI, groupsAPI } from '@/services/api'
-import { getAssetURL } from '@/services/api'
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { studiosAPI, groupsAPI, getAssetURL } from '@/services/api'
 
-export default {
-	name: 'StudiosPage',
-	data() {
-		return {
-			studios: [],
-			groups: [],
-			loading: false,
-			searchQuery: '',
-			sortBy: 'name',
-			filterCountry: '',
-			selectedStudio: null,
-			showStudioModal: false,
-			showGroupModal: false,
-			editingStudio: null,
-			editingGroup: null,
-			studioForm: {
-				name: '',
-				logo_path: '',
-				description: '',
-				founded_date: '',
-				country: '',
-				website: '',
-			},
-			groupForm: {
-				name: '',
-				logo_path: '',
-				description: '',
-			},
-			contextMenu: {
-				show: false,
-				x: 0,
-				y: 0,
-				studio: null,
+// State
+const studios = ref([])
+const groups = ref([])
+const loading = ref(false)
+const searchQuery = ref('')
+const sortBy = ref('name')
+const filterCountry = ref('')
+const selectedStudio = ref(null)
+const showStudioModal = ref(false)
+const showGroupModal = ref(false)
+const editingStudio = ref(null)
+const editingGroup = ref(null)
+const studioForm = ref({
+	name: '',
+	logo_path: '',
+	description: '',
+	founded_date: '',
+	country: '',
+	website: '',
+})
+const groupForm = ref({
+	name: '',
+	logo_path: '',
+	description: '',
+})
+const contextMenu = ref({
+	show: false,
+	x: 0,
+	y: 0,
+	studio: null,
+})
+
+// Computed
+const filteredStudios = computed(() => {
+	let filtered = [...studios.value]
+
+	// Search filter
+	if (searchQuery.value) {
+		const query = searchQuery.value.toLowerCase()
+		filtered = filtered.filter((s) => s.name.toLowerCase().includes(query) || s.description?.toLowerCase().includes(query))
+	}
+
+	// Country filter
+	if (filterCountry.value) {
+		filtered = filtered.filter((s) => s.country === filterCountry.value)
+	}
+
+	// Sort
+	filtered.sort((a, b) => {
+		if (sortBy.value === 'name') {
+			return a.name.localeCompare(b.name)
+		} else if (sortBy.value === 'created') {
+			return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+		} else if (sortBy.value === 'videos') {
+			return (b.video_count || 0) - (a.video_count || 0)
+		}
+		return 0
+	})
+
+	return filtered
+})
+
+const availableCountries = computed(() => {
+	const countries = new Set()
+	studios.value.forEach((s) => {
+		if (s.country) countries.add(s.country)
+	})
+	return Array.from(countries).sort()
+})
+
+const studioGroups = computed(() => {
+	if (!selectedStudio.value) return []
+	return groups.value.filter((g) => g.studio_id === selectedStudio.value.id)
+})
+
+// Methods
+const loadStudios = async () => {
+	loading.value = true
+	try {
+		const response = await studiosAPI.getAll()
+		studios.value = response || []
+	} catch (error) {
+		console.error('Failed to load studios:', error)
+	} finally {
+		loading.value = false
+	}
+}
+
+const loadGroups = async () => {
+	try {
+		const response = await groupsAPI.getAll()
+		groups.value = response || []
+	} catch (error) {
+		console.error('Failed to load groups:', error)
+	}
+}
+
+const selectStudio = (studio) => {
+	selectedStudio.value = studio
+}
+
+const selectGroup = (group) => {
+	// Navigate to group details or show modal
+	console.log('Selected group:', group)
+}
+
+const openCreateModal = () => {
+	editingStudio.value = null
+	studioForm.value = {
+		name: '',
+		logo_path: '',
+		description: '',
+		founded_date: '',
+		country: '',
+		website: '',
+	}
+	showStudioModal.value = true
+}
+
+const openCreateGroupModal = () => {
+	editingGroup.value = null
+	groupForm.value = {
+		name: '',
+		logo_path: '',
+		description: '',
+	}
+	showGroupModal.value = true
+}
+
+const editStudio = (studio) => {
+	editingStudio.value = studio
+	studioForm.value = {
+		name: studio.name,
+		logo_path: studio.logo_path || '',
+		description: studio.description || '',
+		founded_date: studio.founded_date || '',
+		country: studio.country || '',
+		website: studio.metadata?.website || '',
+	}
+	showStudioModal.value = true
+	hideContextMenu()
+}
+
+const editGroup = (group) => {
+	editingGroup.value = group
+	groupForm.value = {
+		name: group.name,
+		logo_path: group.logo_path || '',
+		description: group.description || '',
+	}
+	showGroupModal.value = true
+}
+
+const saveStudio = async () => {
+	try {
+		const data = {
+			name: studioForm.value.name,
+			logo_path: studioForm.value.logo_path,
+			description: studioForm.value.description,
+			founded_date: studioForm.value.founded_date,
+			country: studioForm.value.country,
+			metadata: {
+				website: studioForm.value.website,
 			},
 		}
-	},
-	computed: {
-		filteredStudios() {
-			let filtered = [...this.studios]
 
-			// Search filter
-			if (this.searchQuery) {
-				const query = this.searchQuery.toLowerCase()
-				filtered = filtered.filter((s) => s.name.toLowerCase().includes(query) || s.description?.toLowerCase().includes(query))
-			}
+		if (editingStudio.value) {
+			await studiosAPI.update(editingStudio.value.id, data)
+			console.log('Studio updated successfully')
+		} else {
+			await studiosAPI.create(data)
+			console.log('Studio created successfully')
+		}
 
-			// Country filter
-			if (this.filterCountry) {
-				filtered = filtered.filter((s) => s.country === this.filterCountry)
-			}
-
-			// Sort
-			filtered.sort((a, b) => {
-				if (this.sortBy === 'name') {
-					return a.name.localeCompare(b.name)
-				} else if (this.sortBy === 'created') {
-					return new Date(b.created_at) - new Date(a.created_at)
-				} else if (this.sortBy === 'videos') {
-					return (b.video_count || 0) - (a.video_count || 0)
-				}
-				return 0
-			})
-
-			return filtered
-		},
-		availableCountries() {
-			const countries = new Set()
-			this.studios.forEach((s) => {
-				if (s.country) countries.add(s.country)
-			})
-			return Array.from(countries).sort()
-		},
-		studioGroups() {
-			if (!this.selectedStudio) return []
-			return this.groups.filter((g) => g.studio_id === this.selectedStudio.id)
-		},
-	},
-	mounted() {
-		this.loadStudios()
-		this.loadGroups()
-		document.addEventListener('click', this.hideContextMenu)
-	},
-	beforeUnmount() {
-		document.removeEventListener('click', this.hideContextMenu)
-	},
-	methods: {
-		getAssetURL,
-		async loadStudios() {
-			this.loading = true
-			try {
-				const response = await studiosAPI.getAll()
-				this.studios = response.data || []
-			} catch (error) {
-				console.error('Failed to load studios:', error)
-				this.$toast.error('Failed to load studios', 'error')
-			} finally {
-				this.loading = false
-			}
-		},
-		async loadGroups() {
-			try {
-				const response = await groupsAPI.getAll()
-				this.groups = response.data || []
-			} catch (error) {
-				console.error('Failed to load groups:', error)
-			}
-		},
-		selectStudio(studio) {
-			this.selectedStudio = studio
-		},
-		selectGroup(group) {
-			// Navigate to group details or show modal
-			console.log('Selected group:', group)
-		},
-		openCreateModal() {
-			this.editingStudio = null
-			this.studioForm = {
-				name: '',
-				logo_path: '',
-				description: '',
-				founded_date: '',
-				country: '',
-				website: '',
-			}
-			this.showStudioModal = true
-		},
-		openCreateGroupModal() {
-			this.editingGroup = null
-			this.groupForm = {
-				name: '',
-				logo_path: '',
-				description: '',
-			}
-			this.showGroupModal = true
-		},
-		editStudio(studio) {
-			this.editingStudio = studio
-			this.studioForm = {
-				name: studio.name,
-				logo_path: studio.logo_path || '',
-				description: studio.description || '',
-				founded_date: studio.founded_date || '',
-				country: studio.country || '',
-				website: studio.metadata?.website || '',
-			}
-			this.showStudioModal = true
-			this.hideContextMenu()
-		},
-		editGroup(group) {
-			this.editingGroup = group
-			this.groupForm = {
-				name: group.name,
-				logo_path: group.logo_path || '',
-				description: group.description || '',
-			}
-			this.showGroupModal = true
-		},
-		async saveStudio() {
-			try {
-				const data = {
-					name: this.studioForm.name,
-					logo_path: this.studioForm.logo_path,
-					description: this.studioForm.description,
-					founded_date: this.studioForm.founded_date,
-					country: this.studioForm.country,
-					metadata: {
-						website: this.studioForm.website,
-					},
-				}
-
-				if (this.editingStudio) {
-					await studiosAPI.update(this.editingStudio.id, data)
-					this.$toast.success('Studio updated successfully', 'success')
-				} else {
-					await studiosAPI.create(data)
-					this.$toast.success('Studio created successfully', 'success')
-				}
-
-				this.closeStudioModal()
-				this.loadStudios()
-			} catch (error) {
-				console.error('Failed to save studio:', error)
-				this.$toast.error('Failed to save studio', 'error')
-			}
-		},
-		async saveGroup() {
-			try {
-				const data = {
-					studio_id: this.selectedStudio.id,
-					name: this.groupForm.name,
-					logo_path: this.groupForm.logo_path,
-					description: this.groupForm.description,
-				}
-
-				if (this.editingGroup) {
-					await groupsAPI.update(this.editingGroup.id, data)
-					this.$toast.success('Group updated successfully', 'success')
-				} else {
-					await groupsAPI.create(data)
-					this.$toast.success('Group created successfully', 'success')
-				}
-
-				this.closeGroupModal()
-				this.loadGroups()
-			} catch (error) {
-				console.error('Failed to save group:', error)
-				this.$toast.error('Failed to save group', 'error')
-			}
-		},
-		async deleteStudio(studio) {
-			if (!confirm(`Are you sure you want to delete "${studio.name}"?`)) return
-
-			try {
-				await studiosAPI.delete(studio.id)
-				this.$toast.error('Studio deleted successfully', 'success')
-				this.loadStudios()
-				if (this.selectedStudio?.id === studio.id) {
-					this.selectedStudio = null
-				}
-			} catch (error) {
-				console.error('Failed to delete studio:', error)
-				this.$toast.error('Failed to delete studio', 'error')
-			}
-			this.hideContextMenu()
-		},
-		async deleteGroup(group) {
-			if (!confirm(`Are you sure you want to delete "${group.name}"?`)) return
-
-			try {
-				await groupsAPI.delete(group.id)
-				this.$toast.success('Group deleted successfully', 'success')
-				this.loadGroups()
-			} catch (error) {
-				console.error('Failed to delete group:', error)
-				this.$toast.error('Failed to delete group', 'error')
-			}
-		},
-		closeStudioModal() {
-			this.showStudioModal = false
-			this.editingStudio = null
-		},
-		closeGroupModal() {
-			this.showGroupModal = false
-			this.editingGroup = null
-		},
-		showContextMenu(event, studio) {
-			this.contextMenu = {
-				show: true,
-				x: event.clientX,
-				y: event.clientY,
-				studio,
-			}
-		},
-		hideContextMenu() {
-			this.contextMenu.show = false
-		},
-	},
+		closeStudioModal()
+		loadStudios()
+	} catch (error) {
+		console.error('Failed to save studio:', error)
+	}
 }
+
+const saveGroup = async () => {
+	if (!selectedStudio.value) return
+	try {
+		const data = {
+			studio_id: selectedStudio.value.id,
+			name: groupForm.value.name,
+			logo_path: groupForm.value.logo_path,
+			description: groupForm.value.description,
+		}
+
+		if (editingGroup.value) {
+			await groupsAPI.update(editingGroup.value.id, data)
+			console.log('Group updated successfully')
+		} else {
+			await groupsAPI.create(data)
+			console.log('Group created successfully')
+		}
+
+		closeGroupModal()
+		loadGroups()
+	} catch (error) {
+		console.error('Failed to save group:', error)
+	}
+}
+
+const deleteStudio = async (studio) => {
+	if (!confirm(`Are you sure you want to delete "${studio.name}"?`)) return
+
+	try {
+		await studiosAPI.delete(studio.id)
+		console.log('Studio deleted successfully')
+		loadStudios()
+		if (selectedStudio.value?.id === studio.id) {
+			selectedStudio.value = null
+		}
+	} catch (error) {
+		console.error('Failed to delete studio:', error)
+	}
+	hideContextMenu()
+}
+
+const deleteGroup = async (group) => {
+	if (!confirm(`Are you sure you want to delete "${group.name}"?`)) return
+
+	try {
+		await groupsAPI.delete(group.id)
+		console.log('Group deleted successfully')
+		loadGroups()
+	} catch (error) {
+		console.error('Failed to delete group:', error)
+	}
+}
+
+const closeStudioModal = () => {
+	showStudioModal.value = false
+	editingStudio.value = null
+}
+
+const closeGroupModal = () => {
+	showGroupModal.value = false
+	editingGroup.value = null
+}
+
+const showContextMenu = (event, studio) => {
+	contextMenu.value = {
+		show: true,
+		x: event.clientX,
+		y: event.clientY,
+		studio,
+	}
+}
+
+const hideContextMenu = () => {
+	contextMenu.value.show = false
+}
+
+// Lifecycle
+onMounted(() => {
+	loadStudios()
+	loadGroups()
+	document.addEventListener('click', hideContextMenu)
+})
+
+onBeforeUnmount(() => {
+	document.removeEventListener('click', hideContextMenu)
+})
 </script>
 
 <style scoped>
