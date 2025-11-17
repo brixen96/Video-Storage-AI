@@ -176,6 +176,15 @@ func createTables() error {
 		FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
 	);
 
+	-- Performer-Tag relationship (many-to-many) - Master Tags
+	CREATE TABLE IF NOT EXISTS performer_tags (
+		performer_id INTEGER NOT NULL,
+		tag_id INTEGER NOT NULL,
+		PRIMARY KEY (performer_id, tag_id),
+		FOREIGN KEY (performer_id) REFERENCES performers(id) ON DELETE CASCADE,
+		FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+	);
+
 	-- Video-Studio relationship
 	CREATE TABLE IF NOT EXISTS video_studios (
 		video_id INTEGER NOT NULL,

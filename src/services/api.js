@@ -57,6 +57,10 @@ export const performersAPI = {
 	fetchMetadata: (id) => api.post(`/performers/${id}/fetch-metadata`),
 	resetMetadata: (id) => api.post(`/performers/${id}/reset-metadata`),
 	resetPreviews: (id) => api.post(`/performers/${id}/reset-previews`),
+	getTags: (id) => api.get(`/performers/${id}/tags`),
+	addTag: (id, tagId) => api.post(`/performers/${id}/tags`, { tag_id: tagId }),
+	removeTag: (id, tagId) => api.delete(`/performers/${id}/tags/${tagId}`),
+	syncTags: (id) => api.post(`/performers/${id}/sync-tags`),
 }
 
 export const videosAPI = {
@@ -123,9 +127,20 @@ export const activityAPI = {
 	cleanOld: (days = 30) => api.post('/activity/clean', null, { params: { days } }),
 }
 
+export const databaseAPI = {
+	getStats: () => api.get('/database/stats'),
+	optimize: () => api.post('/database/optimize'),
+	backup: () => api.post('/database/backup'),
+	listBackups: () => api.get('/database/backups'),
+	restore: (backupPath) => api.post('/database/restore', { backup_path: backupPath }),
+}
+
 export const aiAPI = {
-	chat: (data) => api.post('/ai/chat', data),
+	linkPerformers: (data) => api.post('/ai/link-performers', data),
+	applyLinks: (data) => api.post('/ai/apply-links', data),
 	suggestTags: (data) => api.post('/ai/suggest-tags', data),
+	applyTagSuggestions: (data) => api.post('/ai/apply-tag-suggestions', data),
+	chat: (data) => api.post('/ai/chat', data),
 	suggestNaming: (data) => api.post('/ai/suggest-naming', data),
 	analyzeLibrary: (data) => api.post('/ai/analyze-library', data),
 }

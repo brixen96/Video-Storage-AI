@@ -71,6 +71,12 @@
 							Activity
 						</router-link>
 					</li>
+					<li class="nav-item">
+						<router-link to="/ai" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
+							AI
+						</router-link>
+					</li>
 				</ul>
 
 				<!-- Right side items -->

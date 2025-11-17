@@ -47,6 +47,11 @@ const routes = [
 		component: () => import(/* webpackChunkName: "activity" */ '@/views/ActivityPage.vue'),
 	},
 	{
+		path: '/ai',
+		name: 'AI',
+		component: () => import(/* webpackChunkName: "ai" */ '@/views/AIPage.vue'),
+	},
+	{
 		path: '/settings',
 		name: 'Settings',
 		component: () => import(/* webpackChunkName: "settings" */ '@/views/SettingsPage.vue'),

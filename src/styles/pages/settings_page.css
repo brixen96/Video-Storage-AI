@@ -3,3 +3,351 @@
 	background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
 	color: #fff;
 }
+
+.page-header h1 {
+	font-size: 2.5rem;
+	font-weight: 700;
+	color: #00d9ff;
+	margin-bottom: 0.5rem;
+}
+
+.page-header .lead {
+	color: rgba(255, 255, 255, 0.7);
+	font-size: 1.1rem;
+}
+
+/* Tabs */
+.nav-tabs {
+	border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.nav-tabs .nav-link {
+	color: rgba(255, 255, 255, 0.6);
+	border: none;
+	background: transparent;
+	padding: 0.75rem 1.5rem;
+	font-weight: 500;
+	transition: all 0.3s ease;
+	border-bottom: 3px solid transparent;
+}
+
+.nav-tabs .nav-link:hover {
+	color: #00d9ff;
+	border-bottom-color: rgba(0, 217, 255, 0.3);
+}
+
+.nav-tabs .nav-link.active {
+	color: #00d9ff;
+	background: rgba(0, 217, 255, 0.1);
+	border-bottom-color: #00d9ff;
+}
+
+/* Settings Sections */
+.settings-section {
+	animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.section-title {
+	font-size: 1.75rem;
+	font-weight: 600;
+	color: #00d9ff;
+	margin-bottom: 2rem;
+	padding-bottom: 0.75rem;
+	border-bottom: 2px solid rgba(0, 217, 255, 0.3);
+}
+
+/* Setting Items */
+.setting-item {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 1.5rem;
+	margin-bottom: 1rem;
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 12px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	transition: all 0.3s ease;
+}
+
+.setting-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(0, 217, 255, 0.3);
+	transform: translateX(5px);
+}
+
+.setting-info {
+	flex: 1;
+	padding-right: 2rem;
+}
+
+.setting-info h4 {
+	font-size: 1.1rem;
+	font-weight: 600;
+	color: #fff;
+	margin-bottom: 0.5rem;
+}
+
+.setting-info p {
+	font-size: 0.9rem;
+	color: rgba(255, 255, 255, 0.6);
+	margin: 0;
+}
+
+.setting-control {
+	min-width: 250px;
+	max-width: 350px;
+}
+
+.setting-control .form-select,
+.setting-control .form-control {
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	color: #fff;
+	padding: 0.5rem 1rem;
+}
+
+.setting-control .form-select:focus,
+.setting-control .form-control:focus {
+	background: rgba(0, 0, 0, 0.4);
+	border-color: #00d9ff;
+	box-shadow: 0 0 0 0.25rem rgba(0, 217, 255, 0.25);
+	color: #fff;
+}
+
+.setting-control .form-select option {
+	background: #1a1a2e;
+	color: #fff;
+}
+
+.form-check-input {
+	width: 3rem;
+	height: 1.5rem;
+	background-color: rgba(255, 255, 255, 0.1);
+	border-color: rgba(255, 255, 255, 0.3);
+	cursor: pointer;
+}
+
+.form-check-input:checked {
+	background-color: #00d9ff;
+	border-color: #00d9ff;
+}
+
+.form-check-input:focus {
+	border-color: #00d9ff;
+	box-shadow: 0 0 0 0.25rem rgba(0, 217, 255, 0.25);
+}
+
+.form-check-label {
+	margin-left: 0.75rem;
+	color: rgba(255, 255, 255, 0.8);
+	font-weight: 500;
+}
+
+/* Database Stats */
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	padding: 1rem;
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 8px;
+}
+
+.stat-item {
+	display: flex;
+	justify-content: space-between;
+	padding: 0.5rem;
+}
+
+.stat-label {
+	color: rgba(255, 255, 255, 0.6);
+	font-weight: 500;
+}
+
+.stat-value {
+	color: #00d9ff;
+	font-weight: 700;
+	font-size: 1.1rem;
+}
+
+/* Action Buttons */
+.action-buttons {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.action-buttons .btn {
+	width: 100%;
+	font-weight: 500;
+	transition: all 0.3s ease;
+}
+
+.action-buttons .btn:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* About Section */
+.about-content {
+	max-width: 800px;
+}
+
+.app-info h3 {
+	font-size: 2rem;
+	font-weight: 700;
+	color: #fff;
+	margin-bottom: 0.5rem;
+}
+
+.version {
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 0.9rem;
+	margin-bottom: 1rem;
+}
+
+.description {
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 1.1rem;
+	line-height: 1.6;
+	margin-bottom: 2rem;
+}
+
+.features-list {
+	margin: 2rem 0;
+}
+
+.features-list h4 {
+	font-size: 1.3rem;
+	color: #00d9ff;
+	margin-bottom: 1rem;
+}
+
+.features-list ul {
+	list-style: none;
+	padding: 0;
+}
+
+.features-list li {
+	padding: 0.75rem 0;
+	font-size: 1rem;
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.tech-stack h4 {
+	font-size: 1.3rem;
+	color: #00d9ff;
+	margin-bottom: 1rem;
+}
+
+.tech-badges {
+	display: flex;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+}
+
+.tech-badges .badge {
+	padding: 0.5rem 1rem;
+	font-size: 0.9rem;
+	font-weight: 600;
+}
+
+.links-section h4 {
+	font-size: 1.3rem;
+	color: #00d9ff;
+	margin-bottom: 1rem;
+}
+
+.link-buttons {
+	display: flex;
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.link-buttons .btn {
+	font-weight: 500;
+}
+
+/* Settings Footer */
+.settings-footer {
+	margin-top: 3rem;
+	padding-top: 2rem;
+	border-top: 2px solid rgba(255, 255, 255, 0.1);
+	display: flex;
+	justify-content: flex-start;
+	gap: 1rem;
+}
+
+.settings-footer .btn {
+	font-weight: 600;
+	padding: 0.75rem 2rem;
+	transition: all 0.3s ease;
+}
+
+.settings-footer .btn-primary {
+	background: linear-gradient(135deg, #00d9ff 0%, #0099cc 100%);
+	border: none;
+}
+
+.settings-footer .btn-primary:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 6px 20px rgba(0, 217, 255, 0.4);
+}
+
+.settings-footer .btn-secondary {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	color: #fff;
+}
+
+.settings-footer .btn-secondary:hover {
+	background: rgba(255, 255, 255, 0.15);
+	border-color: rgba(255, 255, 255, 0.3);
+	transform: translateY(-2px);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+	.setting-item {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.setting-info {
+		padding-right: 0;
+		margin-bottom: 1rem;
+	}
+
+	.setting-control {
+		width: 100%;
+		max-width: none;
+	}
+
+	.stats-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.nav-tabs .nav-link {
+		padding: 0.5rem 1rem;
+		font-size: 0.9rem;
+	}
+
+	.settings-footer {
+		flex-direction: column;
+	}
+
+	.settings-footer .btn {
+		width: 100%;
+	}
+}

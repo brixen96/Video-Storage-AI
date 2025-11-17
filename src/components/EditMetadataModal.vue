@@ -23,6 +23,7 @@
 							<div class="performers-selector">
 								<div class="selected-performers mb-2">
 									<span v-for="performer in selectedPerformers" :key="performer.id" class="badge bg-primary me-2 mb-2">
+										<font-awesome-icon v-if="performer.zoo" :icon="['fas', 'dog']" class="me-1" title="Zoo Content" />
 										{{ performer.name }}
 										<button type="button" class="btn-close btn-close-white ms-2" @click="removePerformer(performer)"></button>
 									</span>
@@ -40,7 +41,10 @@
 										<div v-else class="performer-thumb-placeholder">
 											<font-awesome-icon :icon="['fas', 'user']" />
 										</div>
-										<span>{{ performer.name }}</span>
+										<span>
+											<font-awesome-icon v-if="performer.zoo" :icon="['fas', 'dog']" class="text-danger me-1" title="Zoo Content" />
+											{{ performer.name }}
+										</span>
 									</div>
 								</div>
 							</div>
@@ -49,9 +53,18 @@
 						<!-- Studios -->
 						<div class="mb-3">
 							<label class="form-label">Studio</label>
-							<select v-model="formData.studioId" class="form-select">
+							<select v-model="formData.studioId" class="form-select" @change="onStudioChange">
 								<option :value="null">None</option>
 								<option v-for="studio in studios" :key="studio.id" :value="studio.id">{{ studio.name }}</option>
+							</select>
+						</div>
+
+						<!-- Groups -->
+						<div v-if="filteredGroups.length > 0" class="mb-3">
+							<label class="form-label">Group</label>
+							<select v-model="formData.groupId" class="form-select">
+								<option :value="null">None</option>
+								<option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
 							</select>
 						</div>
 
@@ -139,7 +152,7 @@
 </template>
 
 <script>
-import { videosAPI, performersAPI, studiosAPI, tagsAPI, getAssetURL } from '@/services/api'
+import { videosAPI, performersAPI, studiosAPI, groupsAPI, tagsAPI, getAssetURL } from '@/services/api'
 import AddPerformerModal from './AddPerformerModal.vue'
 
 export default {
@@ -163,6 +176,7 @@ export default {
 			formData: {
 				title: '',
 				studioId: null,
+				groupId: null,
 				date: '',
 				rating: 0,
 				description: '',
@@ -174,6 +188,7 @@ export default {
 			performerSearch: '',
 			performerResults: [],
 			studios: [],
+			groups: [],
 			tags: [],
 			selectedTagId: null,
 			showAddPerformerModal: false,
@@ -182,6 +197,10 @@ export default {
 	computed: {
 		availableTags() {
 			return this.tags.filter((tag) => !this.selectedTags.find((t) => t.id === tag.id))
+		},
+		filteredGroups() {
+			if (!this.formData.studioId) return this.groups
+			return this.groups.filter((g) => g.studio_id === this.formData.studioId)
 		},
 	},
 	watch: {
@@ -196,6 +215,7 @@ export default {
 	},
 	async mounted() {
 		await this.loadStudios()
+		await this.loadGroups()
 		await this.loadTags()
 	},
 	methods: {
@@ -206,6 +226,7 @@ export default {
 			this.formData = {
 				title: this.video.title || '',
 				studioId: this.video.studios?.[0]?.id || null,
+				groupId: this.video.groups?.[0]?.id || null,
 				date: this.video.date || '',
 				rating: this.video.rating || 0,
 				description: this.video.description || '',
@@ -219,10 +240,22 @@ export default {
 		async loadStudios() {
 			try {
 				const response = await studiosAPI.getAll()
-				this.studios = response.data || []
+				this.studios = response || []
 			} catch (error) {
 				console.error('Failed to load studios:', error)
 			}
+		},
+		async loadGroups() {
+			try {
+				const response = await groupsAPI.getAll()
+				this.groups = response || []
+			} catch (error) {
+				console.error('Failed to load groups:', error)
+			}
+		},
+		onStudioChange() {
+			// Reset group when studio changes
+			this.formData.groupId = null
 		},
 		async loadTags() {
 			try {
@@ -280,6 +313,7 @@ export default {
 				const updateData = {
 					title: this.formData.title,
 					studio_id: this.formData.studioId,
+					group_id: this.formData.groupId,
 					performer_ids: this.selectedPerformers.map((p) => p.id),
 					tag_ids: this.selectedTags.map((t) => t.id),
 					date: this.formData.date || undefined,

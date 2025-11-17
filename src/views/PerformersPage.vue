@@ -26,8 +26,35 @@
 						</select>
 					</div>
 
-					<!-- View Toggle -->
+					<!-- Zoo Quick Filter -->
 					<div class="col-md-2">
+						<div class="btn-group w-100" role="group">
+							<button
+								:class="['btn', 'btn-sm', filters.zooFilter === 'all' ? 'btn-primary' : 'btn-outline-primary']"
+								@click="filters.zooFilter = 'all'"
+								title="Show All Performers"
+							>
+								All
+							</button>
+							<button
+								:class="['btn', 'btn-sm', filters.zooFilter === 'zoo-only' ? 'btn-danger' : 'btn-outline-danger']"
+								@click="filters.zooFilter = 'zoo-only'"
+								title="Show Zoo Only"
+							>
+								<font-awesome-icon :icon="['fas', 'dog']" />
+							</button>
+							<button
+								:class="['btn', 'btn-sm', filters.zooFilter === 'non-zoo' ? 'btn-success' : 'btn-outline-success']"
+								@click="filters.zooFilter = 'non-zoo'"
+								title="Hide Zoo"
+							>
+								<font-awesome-icon :icon="['fas', 'ban']" />
+							</button>
+						</div>
+					</div>
+
+					<!-- View Toggle -->
+					<div class="col-md-1">
 						<div class="btn-group w-100" role="group">
 							<button :class="['btn', 'btn-outline-primary', { active: viewMode === 'grid' }]" @click="viewMode = 'grid'">
 								<font-awesome-icon :icon="['fas', 'th']" />
@@ -38,11 +65,11 @@
 						</div>
 					</div>
 
-					<!-- Filter Toggle -->
-					<div class="col-md-3">
+					<!-- Advanced Filter Toggle -->
+					<div class="col-md-2">
 						<button class="btn btn-outline-secondary w-100" @click="showFilters = !showFilters">
 							<font-awesome-icon :icon="['fas', 'filter']" class="me-2" />
-							{{ showFilters ? 'Hide Filters' : 'Show Filters' }}
+							{{ showFilters ? 'Hide' : 'Filters' }}
 						</button>
 					</div>
 				</div>
@@ -50,14 +77,18 @@
 				<!-- Advanced Filters -->
 				<div v-if="showFilters" class="filters-panel mt-3">
 					<div class="row g-3">
-						<!-- Zoo Toggle -->
+						<!-- Zoo Filter -->
 						<div class="col-md-3">
 							<div class="filter-group">
-								<label class="form-label">Content Filter</label>
-								<div class="form-check form-switch">
-									<input v-model="filters.showZoo" class="form-check-input" type="checkbox" id="zooToggle" />
-									<label class="form-check-label" for="zooToggle"> Show Zoo Content </label>
-								</div>
+								<label class="form-label">
+									<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
+									Zoo Filter
+								</label>
+								<select v-model="filters.zooFilter" class="form-select form-select-sm">
+									<option value="all">Show All</option>
+									<option value="zoo-only">Zoo Only</option>
+									<option value="non-zoo">Non-Zoo Only</option>
+								</select>
 							</div>
 						</div>
 
@@ -169,7 +200,9 @@
 						</div>
 
 						<!-- Zoo Badge -->
-						<div v-if="performer.zoo" class="zoo-badge">Zoo</div>
+						<div v-if="performer.zoo" class="zoo-badge" title="Zoo Content">
+							<font-awesome-icon :icon="['fas', 'dog']" />
+						</div>
 					</div>
 
 					<!-- Card Info -->
@@ -216,7 +249,10 @@
 						</div>
 					</div>
 					<div class="list-content">
-						<h5 class="performer-name">{{ performer.name }}</h5>
+						<h5 class="performer-name">
+							{{ performer.name }}
+							<font-awesome-icon v-if="performer.zoo" :icon="['fas', 'dog']" class="zoo-icon ms-2" title="Zoo Content" />
+						</h5>
 						<div class="performer-details">
 							<span v-if="getAge(performer)" class="detail-item">Age: {{ getAge(performer) }}</span>
 							<span v-if="performer.metadata?.measurements" class="detail-item">Measurements: {{ performer.metadata.measurements }}</span>
@@ -236,6 +272,10 @@
 
 		<!-- Context Menu -->
 		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click="closeContextMenu">
+			<button class="context-menu-item" @click="toggleZoo(contextMenu.performer)">
+				<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
+				{{ contextMenu.performer?.zoo ? 'Unmark Zoo' : 'Mark as Zoo' }}
+			</button>
 			<button class="context-menu-item" @click="fetchMetadata(contextMenu.performer)">
 				<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
 				Fetch Metadata
@@ -410,11 +450,43 @@
 
 						<!-- Tags Tab -->
 						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'tags' }]">
-							<div v-if="getTagsData(detailsPanel.performer)?.length" class="tags-container">
-								<span v-for="(tag, index) in getTagsData(detailsPanel.performer)" :key="index" class="tag-badge">{{ tag }}</span>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No tags available</p>
+							<div class="tags-management">
+								<!-- Add Tag Section -->
+								<div class="add-tag-section mb-3">
+									<div class="input-group">
+										<select v-model.number="selectedTagId" class="form-select">
+											<option value="">Select a tag...</option>
+											<option v-for="tag in availableTagsForPerformer" :key="tag.id" :value="tag.id">
+												{{ tag.name }}
+											</option>
+										</select>
+										<button class="btn btn-primary" @click="addTagToPerformer" :disabled="!selectedTagId">
+											<font-awesome-icon :icon="['fas', 'plus']" class="me-1" />
+											Add Tag
+										</button>
+									</div>
+								</div>
+
+								<!-- Current Tags -->
+								<div v-if="performerMasterTags.length > 0" class="tags-container">
+									<div v-for="tag in performerMasterTags" :key="tag.id" class="tag-badge-removable">
+										<span>{{ tag.name }}</span>
+										<button class="btn-remove-tag-small" @click="removeTagFromPerformer(tag.id)" title="Remove tag">
+											<font-awesome-icon :icon="['fas', 'times']" />
+										</button>
+									</div>
+								</div>
+								<div v-else class="empty-tab">
+									<p>No master tags assigned</p>
+								</div>
+
+								<!-- Sync Button -->
+								<div v-if="performerMasterTags.length > 0" class="mt-3">
+									<button class="btn btn-outline-primary btn-sm w-100" @click="syncPerformerTags" :disabled="isSyncingTags">
+										<font-awesome-icon :icon="['fas', isSyncingTags ? 'spinner' : 'sync']" :spin="isSyncingTags" class="me-2" />
+										{{ isSyncingTags ? 'Syncing...' : `Sync Tags to ${detailsPanel.performer.scene_count || 0} Videos` }}
+									</button>
+								</div>
 							</div>
 						</div>
 
@@ -511,7 +583,8 @@
 </template>
 
 <script>
-import { performersAPI } from '@/services/api'
+import { performersAPI, tagsAPI } from '@/services/api'
+import settingsService from '@/services/settingsService'
 
 export default {
 	name: 'PerformersPage',
@@ -573,16 +646,19 @@ export default {
 			localStorage.removeItem('performerPreviews')
 		}
 
+		// Get settings
+		const settings = settingsService.getSettings()
+
 		return {
 			performers: [],
 			loading: false,
 			error: null,
 			searchQuery: '',
 			sortBy: 'name',
-			viewMode: 'grid',
+			viewMode: settings.defaultViewMode || 'grid',
 			showFilters: false,
 			filters: {
-				showZoo: true,
+				zooFilter: settings.defaultZooFilter || 'all', // 'all', 'zoo-only', 'non-zoo'
 				ageMin: null,
 				ageMax: null,
 				breastMin: '',
@@ -614,6 +690,11 @@ export default {
 				y: 0,
 				previewIndex: 0,
 			},
+			// Tag Management
+			allTags: [],
+			performerMasterTags: [],
+			selectedTagId: null,
+			isSyncingTags: false,
 		}
 	},
 
@@ -634,9 +715,12 @@ export default {
 			}
 
 			// Zoo filter
-			if (!this.filters.showZoo) {
-				result = result.filter((p) => p && !p.zoo)
+			if (this.filters.zooFilter === 'zoo-only') {
+				result = result.filter((p) => p && p.zoo === true)
+			} else if (this.filters.zooFilter === 'non-zoo') {
+				result = result.filter((p) => p && p.zoo !== true)
 			}
+			// If 'all', no filtering needed
 
 			// Age filter
 			if (this.filters.ageMin) {
@@ -703,6 +787,14 @@ export default {
 
 			return result
 		},
+		availableTagsForPerformer() {
+			// Filter out tags that are already assigned to the performer
+			if (!Array.isArray(this.performerMasterTags)) {
+				return this.allTags || []
+			}
+			const assignedTagIds = new Set(this.performerMasterTags.map((t) => t.id))
+			return (this.allTags || []).filter((tag) => !assignedTagIds.has(tag.id))
+		},
 	},
 	methods: {
 		// Calculate age from birthdate
@@ -748,7 +840,6 @@ export default {
 					this.performers = []
 				}
 
-	
 				// Preload previews for all performers in background (non-blocking)
 				if (this.performers.length > 0) {
 					this.preloadAllPreviews()
@@ -862,8 +953,11 @@ export default {
 			this.detailsPanel.performer = performer
 			this.carouselIndex = 0
 			this.activeTab = 'basic' // Reset to basic tab
+			this.selectedTagId = null // Reset selected tag
 			// Load all previews for this performer
 			await this.loadPerformerPreviews(performer.id)
+			// Load performer master tags
+			await this.loadPerformerTags(performer.id)
 		},
 		closeDetails() {
 			this.detailsPanel.visible = false
@@ -931,14 +1025,34 @@ export default {
 					const updatedPerformer = this.performers.find((p) => p.id === performer.id)
 					if (updatedPerformer) {
 						this.detailsPanel.performer = updatedPerformer
-						console.log('Updated performer in panel:', updatedPerformer)
-						console.log('Performer metadata:', updatedPerformer.metadata)
 					}
 				}
 				this.$toast.success('Metadata Fetched', `Successfully fetched metadata for ${performer.name}`)
 			} catch (err) {
 				console.error('Failed to fetch metadata:', err)
 				this.$toast.error('Fetch Failed', err.response?.data?.error || 'Failed to fetch metadata from AdultDataLink')
+			}
+		},
+		async toggleZoo(performer) {
+			this.closeContextMenu()
+			try {
+				const newZooValue = !performer.zoo
+				const response = await performersAPI.update(performer.id, { zoo: newZooValue })
+
+				// Update local state with response from server
+				if (response && response.zoo !== undefined) {
+					performer.zoo = response.zoo
+				} else {
+					performer.zoo = newZooValue
+				}
+
+				// Force re-render
+				this.$forceUpdate()
+
+				this.$toast.success('Updated', `${performer.name} ${newZooValue ? 'marked as Zoo' : 'unmarked as Zoo'}`)
+			} catch (err) {
+				console.error('Failed to toggle zoo:', err)
+				this.$toast.error('Update Failed', 'Failed to update zoo status')
 			}
 		},
 		async resetPerformer(performer) {
@@ -1036,14 +1150,83 @@ export default {
 			}
 			return Object.keys(platformData).length > 0 ? platformData : null
 		},
-		getTagsData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.tags) return []
-			// Tags might be an array of objects or strings
-			if (Array.isArray(adlData.tags)) {
-				return adlData.tags.map((tag) => (typeof tag === 'string' ? tag : tag.name || tag.tag || JSON.stringify(tag)))
+		// Tag Management Methods
+		async loadPerformerTags(performerId) {
+			console.log('Loading tags for performer:', performerId)
+			try {
+				const response = await performersAPI.getTags(performerId)
+				console.log('Performer tags response:', response)
+				// Response interceptor unwraps to {success, message, data}
+				// We need to access .data to get the actual tags array
+				this.performerMasterTags = response.data || []
+				console.log('Set performerMasterTags to:', this.performerMasterTags)
+			} catch (error) {
+				console.error('Failed to load performer tags:', error)
+				this.performerMasterTags = []
 			}
-			return []
+		},
+		async addTagToPerformer() {
+			if (!this.selectedTagId || !this.detailsPanel.performer) return
+
+			const tagId = parseInt(this.selectedTagId)
+			const performerId = this.detailsPanel.performer.id
+
+			console.log('Adding tag:', { performerId, tagId })
+
+			try {
+				const response = await performersAPI.addTag(performerId, tagId)
+				console.log('Add tag response:', response)
+				this.$toast.success('Tag Added', 'Master tag added to performer')
+				await this.loadPerformerTags(performerId)
+				this.selectedTagId = null
+			} catch (error) {
+				console.error('Failed to add tag:', error)
+				if (error.response) {
+					console.error('Error response:', error.response.data)
+				}
+				this.$toast.error('Error', 'Failed to add master tag')
+			}
+		},
+		async removeTagFromPerformer(tagId) {
+			if (!this.detailsPanel.performer) return
+			if (!confirm('Remove this master tag from the performer?')) return
+
+			try {
+				await performersAPI.removeTag(this.detailsPanel.performer.id, tagId)
+				this.$toast.success('Tag Removed', 'Master tag removed from performer')
+				await this.loadPerformerTags(this.detailsPanel.performer.id)
+			} catch (error) {
+				console.error('Failed to remove tag:', error)
+				this.$toast.error('Error', 'Failed to remove master tag')
+			}
+		},
+		async syncPerformerTags() {
+			if (!this.detailsPanel.performer) return
+			const sceneCount = this.detailsPanel.performer.scene_count || 0
+			if (!confirm(`Apply master tags to all ${sceneCount} videos featuring this performer?`)) return
+
+			this.isSyncingTags = true
+			try {
+				const response = await performersAPI.syncTags(this.detailsPanel.performer.id)
+				// Response interceptor unwraps to {success, message, data}
+				const videosUpdated = response.data?.videos_updated || 0
+				this.$toast.success('Sync Complete', `Applied master tags to ${videosUpdated} videos`)
+			} catch (error) {
+				console.error('Failed to sync tags:', error)
+				this.$toast.error('Error', 'Failed to sync master tags to videos')
+			} finally {
+				this.isSyncingTags = false
+			}
+		},
+		async loadAllTags() {
+			try {
+				const response = await tagsAPI.getAll()
+				// Response interceptor unwraps to {success, message, data}
+				this.allTags = response.data || []
+			} catch (error) {
+				console.error('Failed to load tags:', error)
+				this.allTags = []
+			}
 		},
 		getBiosData(performer) {
 			const adlData = performer.metadata?.adult_data_link_response
@@ -1085,6 +1268,7 @@ export default {
 	},
 	mounted() {
 		this.loadPerformers()
+		this.loadAllTags()
 
 		// Close context menus on click outside
 		document.addEventListener('click', () => {

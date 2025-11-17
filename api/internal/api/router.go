@@ -83,16 +83,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// Performers endpoints
 		performers := v1.Group("/performers")
 		{
-			performers.GET("", getPerformers)                     // List all performers
-			performers.GET("/:id", getPerformer)                  // Get single performer
-			performers.GET("/:id/previews", getPerformerPreviews) // Get all preview videos
-			performers.POST("", createPerformer)                  // Create performer
-			performers.POST("/scan", scanPerformers)              // Scan performer folders
-			performers.PUT("/:id", updatePerformer)               // Update performer
-			performers.DELETE("/:id", deletePerformer)            // Delete performer
-			performers.POST("/:id/fetch-metadata", fetchMetadata) // Fetch from AdultDataLink
-			performers.POST("/:id/reset-metadata", resetMetadata) // Reset metadata
-			performers.POST("/:id/reset-previews", resetPreviews) // Reset previews
+			performers.GET("", getPerformers)                       // List all performers
+			performers.GET("/:id", getPerformer)                    // Get single performer
+			performers.GET("/:id/previews", getPerformerPreviews)   // Get all preview videos
+			performers.GET("/:id/tags", getPerformerTags)           // Get performer master tags
+			performers.POST("", createPerformer)                    // Create performer
+			performers.POST("/scan", scanPerformers)                // Scan performer folders
+			performers.PUT("/:id", updatePerformer)                 // Update performer
+			performers.DELETE("/:id", deletePerformer)              // Delete performer
+			performers.POST("/:id/fetch-metadata", fetchMetadata)   // Fetch from AdultDataLink
+			performers.POST("/:id/reset-metadata", resetMetadata)   // Reset metadata
+			performers.POST("/:id/reset-previews", resetPreviews)   // Reset previews
+			performers.POST("/:id/tags", addPerformerTag)           // Add master tag to performer
+			performers.DELETE("/:id/tags/:tagId", removePerformerTag) // Remove master tag from performer
+			performers.POST("/:id/sync-tags", syncPerformerTags)    // Sync master tags to all videos
 		}
 
 		// Studios endpoints
@@ -151,13 +155,26 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			files.DELETE("/delete", deleteFile) // Delete file
 		}
 
+		// Database management endpoints
+		database := v1.Group("/database")
+		{
+			database.GET("/stats", getDatabaseStats)       // Get database statistics
+			database.POST("/optimize", optimizeDatabase)   // Optimize database (VACUUM)
+			database.POST("/backup", backupDatabase)       // Create database backup
+			database.GET("/backups", listBackups)          // List available backups
+			database.POST("/restore", restoreDatabase)     // Restore from backup
+		}
+
 		// AI Assistant endpoints
 		ai := v1.Group("/ai")
 		{
-			ai.POST("/chat", aiChat)                      // Chat with AI assistant
-			ai.POST("/suggest-tags", aiSuggestTags)       // AI auto-tagging
-			ai.POST("/suggest-naming", aiSuggestNaming)   // AI naming suggestions
-			ai.POST("/analyze-library", aiAnalyzeLibrary) // AI library analysis
+			ai.POST("/link-performers", autoLinkPerformers)  // Auto-link performers to videos
+			ai.POST("/apply-links", applyPerformerLinks)     // Apply selected performer links
+			ai.POST("/suggest-tags", suggestTags)            // AI smart tagging
+			ai.POST("/apply-tag-suggestions", applyTagSuggestions) // Apply tag suggestions
+			ai.POST("/chat", aiChat)                         // Chat with AI assistant (placeholder)
+			ai.POST("/suggest-naming", aiSuggestNaming)      // AI naming suggestions (placeholder)
+			ai.POST("/analyze-library", aiAnalyzeLibrary)    // AI library analysis (placeholder)
 		}
 
 		// WebSocket endpoint
@@ -178,6 +195,5 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 // File operation handlers are implemented in file_handlers.go
 
 func aiChat(c *gin.Context)           { c.JSON(http.StatusOK, gin.H{"message": "AI chat"}) }
-func aiSuggestTags(c *gin.Context)    { c.JSON(http.StatusOK, gin.H{"message": "AI suggest tags"}) }
 func aiSuggestNaming(c *gin.Context)  { c.JSON(http.StatusOK, gin.H{"message": "AI suggest naming"}) }
 func aiAnalyzeLibrary(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "AI analyze library"}) }

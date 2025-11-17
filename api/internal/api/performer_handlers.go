@@ -502,3 +502,135 @@ func getPerformerPreviews(c *gin.Context) {
 		"Previews retrieved successfully",
 	))
 }
+
+// getPerformerTags retrieves all master tags for a performer
+func getPerformerTags(c *gin.Context) {
+	svc := ensurePerformerService()
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	tags, err := svc.GetPerformerTags(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to retrieve performer tags",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		tags,
+		"Performer tags retrieved successfully",
+	))
+}
+
+// addPerformerTag adds a master tag to a performer
+func addPerformerTag(c *gin.Context) {
+	svc := ensurePerformerService()
+
+	idStr := c.Param("id")
+	performerID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	var request struct {
+		TagID int64 `json:"tag_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	err = svc.AddPerformerTag(performerID, request.TagID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to add performer tag",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Master tag added to performer"))
+}
+
+// removePerformerTag removes a master tag from a performer
+func removePerformerTag(c *gin.Context) {
+	svc := ensurePerformerService()
+
+	idStr := c.Param("id")
+	performerID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	tagIDStr := c.Param("tagId")
+	tagID, err := strconv.ParseInt(tagIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid tag ID",
+			err.Error(),
+		))
+		return
+	}
+
+	err = svc.RemovePerformerTag(performerID, tagID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to remove performer tag",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Master tag removed from performer"))
+}
+
+// syncPerformerTags syncs a performer's master tags to all their videos
+func syncPerformerTags(c *gin.Context) {
+	svc := ensurePerformerService()
+
+	idStr := c.Param("id")
+	performerID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	videosUpdated, err := svc.SyncPerformerTagsToVideos(performerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to sync performer tags",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		gin.H{"videos_updated": videosUpdated},
+		fmt.Sprintf("Synced master tags to %d videos", videosUpdated),
+	))
+}

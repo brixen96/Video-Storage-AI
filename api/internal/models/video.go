@@ -52,6 +52,7 @@ type VideoCreate struct {
 type VideoUpdate struct {
 	Title         *string  `json:"title,omitempty"`
 	StudioID      *int64   `json:"studio_id,omitempty"`
+	GroupID       *int64   `json:"group_id,omitempty"`
 	PerformerIDs  []int64  `json:"performer_ids,omitempty"`
 	TagIDs        []int64  `json:"tag_ids,omitempty"`
 	Date          *string  `json:"date,omitempty"`
@@ -71,7 +72,9 @@ type VideoSearchQuery struct {
 	PerformerID   int64   `json:"performer_id" form:"performer_id"`
 	StudioID      int64   `json:"studio_id" form:"studio_id"`
 	GroupID       int64   `json:"group_id" form:"group_id"`
+	TagID         int64   `json:"tag_id" form:"tag_id"`
 	TagIDs        []int64 `json:"tag_ids" form:"tag_ids"`
+	Zoo           *bool   `json:"zoo" form:"zoo"`
 	Resolution    string  `json:"resolution" form:"resolution"`
 	MinDuration   float64 `json:"min_duration" form:"min_duration"`
 	MaxDuration   float64 `json:"max_duration" form:"max_duration"`

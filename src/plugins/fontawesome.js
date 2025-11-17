@@ -72,6 +72,10 @@ import {
 	faUserPlus,
 	faCloudUploadAlt,
 	faSignal,
+	faPaw,
+	faDog,
+	faBan,
+	faDatabase,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -154,7 +158,11 @@ library.add(
 	faCloudUploadAlt,
 	faSignal,
 	faTwitter,
-	faInstagram
+	faInstagram,
+	faPaw,
+	faDog,
+	faBan,
+	faDatabase
 )
 
 export default FontAwesomeIcon

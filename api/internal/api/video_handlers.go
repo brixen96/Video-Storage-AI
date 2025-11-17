@@ -20,7 +20,8 @@ func ensureVideoService() *services.VideoService {
 	if videoService == nil {
 		activitySvc := ensureActivityService()
 		librarySvc := ensureLibraryService()
-		videoService = services.NewVideoService(activitySvc, librarySvc)
+		performerSvc := ensurePerformerService()
+		videoService = services.NewVideoService(activitySvc, librarySvc, performerSvc)
 	}
 	return videoService
 }

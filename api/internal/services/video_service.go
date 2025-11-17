@@ -17,17 +17,19 @@ import (
 
 // VideoService handles video-related business logic
 type VideoService struct {
-	db              *sql.DB
-	activityService *ActivityService
-	libraryService  *LibraryService
+	db               *sql.DB
+	activityService  *ActivityService
+	libraryService   *LibraryService
+	performerService *PerformerService
 }
 
 // NewVideoService creates a new video service
-func NewVideoService(activityService *ActivityService, libraryService *LibraryService) *VideoService {
+func NewVideoService(activityService *ActivityService, libraryService *LibraryService, performerService *PerformerService) *VideoService {
 	return &VideoService{
-		db:              database.DB,
-		activityService: activityService,
-		libraryService:  libraryService,
+		db:               database.DB,
+		activityService:  activityService,
+		libraryService:   libraryService,
+		performerService: performerService,
 	}
 }
 
@@ -130,6 +132,26 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 			args = append(args, tagID)
 		}
 		conditions = append(conditions, fmt.Sprintf("vt.tag_id IN (%s)", strings.Join(placeholders, ",")))
+	}
+
+	// Single tag filter
+	if query.TagID > 0 {
+		joins = append(joins, "INNER JOIN video_tags vt2 ON v.id = vt2.video_id")
+		conditions = append(conditions, "vt2.tag_id = ?")
+		args = append(args, query.TagID)
+	}
+
+	// Zoo content filter (checks if video has any performers with zoo = true)
+	if query.Zoo != nil {
+		joins = append(joins, "INNER JOIN video_performers vp2 ON v.id = vp2.video_id")
+		joins = append(joins, "INNER JOIN performers p ON vp2.performer_id = p.id")
+		if *query.Zoo {
+			// Show only zoo content
+			conditions = append(conditions, "p.zoo = 1")
+		} else {
+			// Show only non-zoo content (no performers with zoo = true)
+			conditions = append(conditions, "p.zoo = 0")
+		}
 	}
 
 	// Add marking filters
@@ -425,6 +447,21 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 		}
 	}
 
+	// Update group relationship
+	if update.GroupID != nil {
+		// Clear existing groups
+		if _, err := s.db.Exec("DELETE FROM video_groups WHERE video_id = ?", id); err != nil {
+			return nil, fmt.Errorf("failed to clear groups: %w", err)
+		}
+		// Add new group if provided
+		if *update.GroupID > 0 {
+			if _, err := s.db.Exec("INSERT INTO video_groups (video_id, group_id) VALUES (?, ?)",
+				id, *update.GroupID); err != nil {
+				return nil, fmt.Errorf("failed to add group: %w", err)
+			}
+		}
+	}
+
 	// Update performer relationships
 	if update.PerformerIDs != nil {
 		// Clear existing performers
@@ -436,6 +473,14 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 			if _, err := s.db.Exec("INSERT INTO video_performers (video_id, performer_id) VALUES (?, ?)",
 				id, performerID); err != nil {
 				return nil, fmt.Errorf("failed to add performer: %w", err)
+			}
+
+			// Auto-apply performer's master tags to this video
+			if s.performerService != nil {
+				if err := s.performerService.ApplyMasterTagsToVideo(performerID, id); err != nil {
+					// Log error but don't fail the entire operation
+					log.Printf("Warning: failed to apply master tags from performer %d to video %d: %v", performerID, id, err)
+				}
 			}
 		}
 	}
@@ -777,7 +822,7 @@ func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
 func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	// Load performers
 	performerQuery := `
-		SELECT p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.metadata, p.created_at, p.updated_at
+		SELECT p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.zoo, p.metadata, p.created_at, p.updated_at
 		FROM performers p
 		INNER JOIN video_performers vp ON p.id = vp.performer_id
 		WHERE vp.video_id = ?
@@ -792,8 +837,19 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 		for performerRows.Next() {
 			var performer models.Performer
 			var metadata sql.NullString
-			err := performerRows.Scan(&performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.SceneCount, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
+			var zooVal interface{}
+			err := performerRows.Scan(&performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.SceneCount, &zooVal, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
 			if err == nil {
+				// Convert to bool - handle both int64 and bool types
+				switch v := zooVal.(type) {
+				case int64:
+					performer.Zoo = v != 0
+				case bool:
+					performer.Zoo = v
+				default:
+					performer.Zoo = false
+				}
+
 				if metadata.Valid {
 					performer.Metadata = metadata.String
 					// Unmarshal metadata for frontend use

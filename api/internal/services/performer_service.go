@@ -43,12 +43,23 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
+		var zooVal interface{}
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan performer: %w", err)
+		}
+
+		// Convert to bool - handle both int64 and bool types
+		switch v := zooVal.(type) {
+		case int64:
+			p.Zoo = v != 0
+		case bool:
+			p.Zoo = v
+		default:
+			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -71,9 +82,10 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	`
 
 	var p models.Performer
+	var zooVal interface{}
 	err := s.db.QueryRow(query, id).Scan(
 		&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-		&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+		&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -81,6 +93,16 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query performer: %w", err)
+	}
+
+	// Convert to bool - handle both int64 and bool types
+	switch v := zooVal.(type) {
+	case int64:
+		p.Zoo = v != 0
+	case bool:
+		p.Zoo = v
+	default:
+		p.Zoo = false
 	}
 
 	// Parse metadata JSON
@@ -189,6 +211,9 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 	if update.SceneCount != nil {
 		performer.SceneCount = *update.SceneCount
 	}
+	if update.Zoo != nil {
+		performer.Zoo = *update.Zoo
+	}
 	if update.Metadata != nil {
 		performer.MetadataObj = update.Metadata
 	}
@@ -203,14 +228,22 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 	// Update database
 	query := `
 		UPDATE performers
-		SET name = ?, preview_path = ?, folder_path = ?, scene_count = ?, metadata = ?, updated_at = ?
+		SET name = ?, preview_path = ?, folder_path = ?, scene_count = ?, zoo = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`
+
+	// Convert bool to int for SQLite
+	var zooInt int
+	if performer.Zoo {
+		zooInt = 1
+	} else {
+		zooInt = 0
+	}
 
 	_, err = s.db.Exec(
 		query,
 		performer.Name, performer.PreviewPath, performer.FolderPath,
-		performer.SceneCount, performer.Metadata, performer.UpdatedAt, id,
+		performer.SceneCount, zooInt, performer.Metadata, performer.UpdatedAt, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update performer: %w", err)
@@ -239,7 +272,7 @@ func (s *PerformerService) Delete(id int64) error {
 // Search searches performers by name
 func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
 		FROM performers
 		WHERE name LIKE ?
 		ORDER BY name ASC
@@ -258,12 +291,23 @@ func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error)
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
+		var zooVal interface{}
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan performer: %w", err)
+		}
+
+		// Convert to bool - handle both int64 and bool types
+		switch v := zooVal.(type) {
+		case int64:
+			p.Zoo = v != 0
+		case bool:
+			p.Zoo = v
+		default:
+			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -323,7 +367,7 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 
 	// Get paginated results
 	query := `
-        SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+        SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
         FROM performers
         ORDER BY name ASC
         LIMIT ? OFFSET ?
@@ -342,12 +386,23 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
+		var zooVal interface{}
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
+		}
+
+		// Convert to bool - handle both int64 and bool types
+		switch v := zooVal.(type) {
+		case int64:
+			p.Zoo = v != 0
+		case bool:
+			p.Zoo = v
+		default:
+			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -379,7 +434,7 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 
 	// Get paginated results
 	query := `
-        SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+        SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
         FROM performers
         WHERE name LIKE ?
         ORDER BY name ASC
@@ -399,12 +454,23 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
+		var zooVal interface{}
 		err := rows.Scan(
 			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
+		}
+
+		// Convert to bool - handle both int64 and bool types
+		switch v := zooVal.(type) {
+		case int64:
+			p.Zoo = v != 0
+		case bool:
+			p.Zoo = v
+		default:
+			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -420,4 +486,166 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 	}
 
 	return performers, total, nil
+}
+
+// GetPerformerTags retrieves all tags for a performer (master tags)
+func (s *PerformerService) GetPerformerTags(performerID int64) ([]models.Tag, error) {
+	query := `
+        SELECT t.id, t.name, t.color, t.icon, t.created_at, t.updated_at
+        FROM tags t
+        INNER JOIN performer_tags pt ON t.id = pt.tag_id
+        WHERE pt.performer_id = ?
+        ORDER BY t.name ASC
+    `
+
+	rows, err := s.db.Query(query, performerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query performer tags: %w", err)
+	}
+	defer rows.Close()
+
+	var tags []models.Tag
+	for rows.Next() {
+		var tag models.Tag
+		err := rows.Scan(&tag.ID, &tag.Name, &tag.Color, &tag.Icon, &tag.CreatedAt, &tag.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan tag: %w", err)
+		}
+		tags = append(tags, tag)
+	}
+
+	return tags, nil
+}
+
+// AddPerformerTag adds a master tag to a performer
+func (s *PerformerService) AddPerformerTag(performerID, tagID int64) error {
+	// Check if relationship already exists
+	var count int
+	err := s.db.QueryRow("SELECT COUNT(*) FROM performer_tags WHERE performer_id = ? AND tag_id = ?", performerID, tagID).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("failed to check existing performer tag: %w", err)
+	}
+
+	if count > 0 {
+		return nil // Already exists
+	}
+
+	// Create the relationship
+	query := "INSERT INTO performer_tags (performer_id, tag_id) VALUES (?, ?)"
+	_, err = s.db.Exec(query, performerID, tagID)
+	if err != nil {
+		return fmt.Errorf("failed to add performer tag: %w", err)
+	}
+
+	log.Printf("Added tag %d to performer %d", tagID, performerID)
+	return nil
+}
+
+// RemovePerformerTag removes a master tag from a performer
+func (s *PerformerService) RemovePerformerTag(performerID, tagID int64) error {
+	query := "DELETE FROM performer_tags WHERE performer_id = ? AND tag_id = ?"
+	_, err := s.db.Exec(query, performerID, tagID)
+	if err != nil {
+		return fmt.Errorf("failed to remove performer tag: %w", err)
+	}
+
+	log.Printf("Removed tag %d from performer %d", tagID, performerID)
+	return nil
+}
+
+// SyncPerformerTagsToVideos applies a performer's master tags to all their videos
+func (s *PerformerService) SyncPerformerTagsToVideos(performerID int64) (int, error) {
+	// Get all master tags for this performer
+	performerTags, err := s.GetPerformerTags(performerID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get performer tags: %w", err)
+	}
+
+	if len(performerTags) == 0 {
+		return 0, nil // No tags to sync
+	}
+
+	// Get all videos featuring this performer
+	query := `
+        SELECT video_id
+        FROM video_performers
+        WHERE performer_id = ?
+    `
+
+	rows, err := s.db.Query(query, performerID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videoIDs []int64
+	for rows.Next() {
+		var videoID int64
+		if err := rows.Scan(&videoID); err != nil {
+			return 0, fmt.Errorf("failed to scan video ID: %w", err)
+		}
+		videoIDs = append(videoIDs, videoID)
+	}
+
+	// Add each master tag to each video (if not already present)
+	tagsAdded := 0
+	videosUpdated := make(map[int64]bool)
+	for _, videoID := range videoIDs {
+		for _, tag := range performerTags {
+			// Check if video already has this tag
+			var count int
+			err := s.db.QueryRow("SELECT COUNT(*) FROM video_tags WHERE video_id = ? AND tag_id = ?", videoID, tag.ID).Scan(&count)
+			if err != nil {
+				log.Printf("Warning: Failed to check existing video tag: %v", err)
+				continue
+			}
+
+			if count == 0 {
+				// Add the tag
+				_, err = s.db.Exec("INSERT INTO video_tags (video_id, tag_id) VALUES (?, ?)", videoID, tag.ID)
+				if err != nil {
+					log.Printf("Warning: Failed to add tag %d to video %d: %v", tag.ID, videoID, err)
+					continue
+				}
+				tagsAdded++
+				videosUpdated[videoID] = true
+			}
+		}
+	}
+
+	log.Printf("Synced %d tags to %d videos for performer %d", tagsAdded, len(videosUpdated), performerID)
+	return len(videosUpdated), nil
+}
+
+// ApplyMasterTagsToVideo automatically adds a performer's master tags to a video
+// This should be called whenever a performer is linked to a video
+func (s *PerformerService) ApplyMasterTagsToVideo(performerID, videoID int64) error {
+	// Get all master tags for this performer
+	performerTags, err := s.GetPerformerTags(performerID)
+	if err != nil {
+		return fmt.Errorf("failed to get performer tags: %w", err)
+	}
+
+	// Add each master tag to the video (if not already present)
+	for _, tag := range performerTags {
+		// Check if video already has this tag
+		var count int
+		err := s.db.QueryRow("SELECT COUNT(*) FROM video_tags WHERE video_id = ? AND tag_id = ?", videoID, tag.ID).Scan(&count)
+		if err != nil {
+			log.Printf("Warning: Failed to check existing video tag: %v", err)
+			continue
+		}
+
+		if count == 0 {
+			// Add the tag
+			_, err = s.db.Exec("INSERT INTO video_tags (video_id, tag_id) VALUES (?, ?)", videoID, tag.ID)
+			if err != nil {
+				log.Printf("Warning: Failed to add master tag %d to video %d: %v", tag.ID, videoID, err)
+				continue
+			}
+			log.Printf("Applied master tag '%s' from performer %d to video %d", tag.Name, performerID, videoID)
+		}
+	}
+
+	return nil
 }

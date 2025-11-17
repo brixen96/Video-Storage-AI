@@ -23,7 +23,15 @@
       "Bash(taskkill:*)",
       "Bash(taskkill /F /PID 25204)",
       "Bash(timeout 5 powershell:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(Start-Process -FilePath \".\\bin\\video-storage-ai.exe\" -WorkingDirectory \"C:\\Repos\\Video Storage AI\\api\" -PassThru)",
+      "Bash(start /B ..binvideo-storage-ai.exe)",
+      "Bash(timeout 10 ..binvideo-storage-ai.exe)",
+      "Bash(timeout 3 ping:*)",
+      "Bash(nul)",
+      "Bash(timeout 30 go build:*)",
+      "Bash(test:*)"
     ],
     "deny": [],
     "ask": []

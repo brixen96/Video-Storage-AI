@@ -16,12 +16,12 @@
 				</div>
 
 				<!-- Current Activity -->
-				<div v-if="currentActivity && wsConnected" class="current-activity mb-">
+				<div v-if="currentActivity && wsConnected" class="current-activity text-light">
 					<div class="d-flex justify-content-between align-items-center mb-2">
 						<span class="badge" :class="getTaskTypeBadge(currentActivity.task_type)">
 							{{ formatTaskType(currentActivity.task_type) }}
 						</span>
-						<span class="badge" :class="'bg-' + statusColor">{{ currentActivity.status }}</span>
+						<span class="badge text-light" :class="'bg-' + statusColor">{{ currentActivity.status }}</span>
 					</div>
 					<p class="mb-1">{{ currentActivity.message }}</p>
 					<div v-if="currentActivity.progress !== undefined" class="progress" style="height: 4px">
@@ -37,8 +37,8 @@
 				</div>
 
 				<!-- Status Summary -->
-				<div class="status-summary">
-					<div class="row g-2 text-light">
+				<div class="status-summary text-light">
+					<div class="row g-2">
 						<div class="col-6">
 							<div class="stat-box">
 								<div class="stat-value text-warning">{{ status.running_tasks || 0 }}</div>

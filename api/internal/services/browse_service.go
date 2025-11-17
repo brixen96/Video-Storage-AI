@@ -22,11 +22,12 @@ type BrowseService struct {
 func NewBrowseService() *BrowseService {
 	activitySvc := NewActivityService()
 	librarySvc := NewLibraryService()
+	performerSvc := NewPerformerService()
 	return &BrowseService{
 		libraryService:  librarySvc,
 		mediaService:    NewMediaService(),
 		activityService: activitySvc,
-		videoService:    NewVideoService(activitySvc, librarySvc),
+		videoService:    NewVideoService(activitySvc, librarySvc, performerSvc),
 	}
 }
 
