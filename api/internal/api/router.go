@@ -78,6 +78,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
+			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
+		}
+
+		// Conversion endpoints
+		conversion := v1.Group("/conversion")
+		{
+			conversion.GET("/status", checkFFmpegStatus) // Check FFmpeg installation status
 		}
 
 		// Performers endpoints

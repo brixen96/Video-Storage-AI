@@ -259,6 +259,13 @@ func runMigrations() error {
 		`
 		ALTER TABLE performers ADD COLUMN zoo BOOLEAN DEFAULT 0
 	`,
+		// Migration 5: Add conversion link columns to videos table
+		`
+		ALTER TABLE videos ADD COLUMN converted_from INTEGER
+	`,
+		`
+		ALTER TABLE videos ADD COLUMN converted_to INTEGER
+	`,
 		`CREATE TABLE IF NOT EXISTS activities (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             task_type TEXT NOT NULL,

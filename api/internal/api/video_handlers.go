@@ -79,14 +79,17 @@ func createVideo(c *gin.Context) {
 
 	var create models.VideoCreate
 	if err := c.ShouldBindJSON(&create); err != nil {
+		log.Printf("Failed to bind JSON in createVideo: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.Printf("Creating video with data: %+v", create)
+
 	video, err := svc.Create(&create)
 	if err != nil {
 		log.Printf("Failed to create video: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create video: %v", err)})
 		return
 	}
 

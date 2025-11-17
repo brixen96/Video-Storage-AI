@@ -40,7 +40,7 @@
 
 			<!-- Video Info -->
 			<div class="player-footer">
-				<div class="video-info">
+				<div class="vp-video-info">
 					<div class="info-item">
 						<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
 						<span v-if="duration">{{ formatDuration(duration) }}</span>
@@ -56,6 +56,14 @@
 					</div>
 				</div>
 				<div class="player-actions">
+					<button v-if="needsConversion && !isConverting" class="btn btn-sm btn-warning me-2" @click="convertVideo" title="Convert to MP4 for better compatibility">
+						<font-awesome-icon :icon="['fas', 'sync']" class="me-1" />
+						Convert to MP4
+					</button>
+					<button v-if="isConverting" class="btn btn-sm btn-warning me-2" disabled>
+						<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+						Converting...
+					</button>
 					<button class="btn btn-sm btn-outline-primary me-2" @click="toggleFullscreen">
 						<font-awesome-icon :icon="['fas', 'expand']" class="me-1" />
 						Fullscreen
@@ -71,6 +79,8 @@
 </template>
 
 <script>
+import conversionService from '@/services/conversionService'
+
 export default {
 	name: 'VideoPlayer',
 	props: {
@@ -87,12 +97,18 @@ export default {
 			required: false,
 			default: null,
 		},
+		videoId: {
+			type: Number,
+			required: false,
+			default: null,
+		},
 	},
 	data() {
 		return {
 			duration: 0,
 			currentTime: 0,
 			videoError: false,
+			isConverting: false,
 		}
 	},
 	computed: {
@@ -118,6 +134,12 @@ export default {
 				'.3gp': 'video/3gpp',
 			}
 			return mimeTypes[ext] || 'video/mp4'
+		},
+		needsConversion() {
+			// Check if video format needs conversion to MP4
+			const ext = this.video.extension?.toLowerCase() || ''
+			const unsupportedFormats = ['.wmv', '.avi', '.mkv', '.flv', '.mpg', '.mpeg']
+			return unsupportedFormats.includes(ext) && this.videoId
 		},
 	},
 	methods: {
@@ -171,6 +193,32 @@ export default {
 			const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
 			const i = Math.floor(Math.log(bytes) / Math.log(k))
 			return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+		},
+		async convertVideo() {
+			if (!this.videoId) {
+				console.error('Video ID is required for conversion')
+				return
+			}
+
+			this.isConverting = true
+
+			try {
+				const response = await conversionService.convertToMP4(this.videoId)
+				console.log('Conversion response:', response)
+
+				if (response.data) {
+					this.$toast.success('Success', 'Video converted to MP4 successfully!')
+					this.$emit('video-converted', response.data)
+					// Close the player and potentially reload the video list
+					this.close()
+				}
+			} catch (error) {
+				console.error('Conversion failed:', error)
+				const errorMsg = error.response?.data?.error || error.message || 'Unknown error occurred'
+				this.$toast.error('Conversion Failed', errorMsg)
+			} finally {
+				this.isConverting = false
+			}
 		},
 	},
 	watch: {

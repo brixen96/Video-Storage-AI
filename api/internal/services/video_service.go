@@ -66,8 +66,8 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	}
 
 	if query.Query != "" {
-		conditions = append(conditions, "v.title LIKE ?")
-		args = append(args, "%"+query.Query+"%")
+		conditions = append(conditions, "(v.title LIKE ? OR v.file_path LIKE ?)")
+		args = append(args, "%"+query.Query+"%", "%"+query.Query+"%")
 	}
 
 	if query.Resolution != "" {
@@ -941,4 +941,72 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	}
 
 	return nil
+}
+
+// UpdateConversionLink updates the conversion link for a video
+func (s *VideoService) UpdateConversionLink(videoID int64, linkedVideoID int64, isOriginal bool) error {
+	var column string
+	if isOriginal {
+		column = "converted_to"
+	} else {
+		column = "converted_from"
+	}
+
+	query := fmt.Sprintf("UPDATE videos SET %s = ?, updated_at = ? WHERE id = ?", column)
+	_, err := s.db.Exec(query, linkedVideoID, time.Now(), videoID)
+	return err
+}
+
+// CopyPerformers copies performers from one video to another
+func (s *VideoService) CopyPerformers(fromVideoID, toVideoID int64) error {
+	query := `
+		INSERT INTO video_performers (video_id, performer_id)
+		SELECT ?, performer_id FROM video_performers WHERE video_id = ?
+	`
+	_, err := s.db.Exec(query, toVideoID, fromVideoID)
+	return err
+}
+
+// CopyTags copies tags from one video to another
+func (s *VideoService) CopyTags(fromVideoID, toVideoID int64) error {
+	query := `
+		INSERT INTO video_tags (video_id, tag_id)
+		SELECT ?, tag_id FROM video_tags WHERE video_id = ?
+	`
+	_, err := s.db.Exec(query, toVideoID, fromVideoID)
+	return err
+}
+
+// CopyStudios copies studios from one video to another
+func (s *VideoService) CopyStudios(fromVideoID, toVideoID int64) error {
+	query := `
+		INSERT INTO video_studios (video_id, studio_id)
+		SELECT ?, studio_id FROM video_studios WHERE video_id = ?
+	`
+	_, err := s.db.Exec(query, toVideoID, fromVideoID)
+	return err
+}
+
+// CopyGroups copies groups from one video to another
+func (s *VideoService) CopyGroups(fromVideoID, toVideoID int64) error {
+	query := `
+		INSERT INTO video_groups (video_id, group_id)
+		SELECT ?, group_id FROM video_groups WHERE video_id = ?
+	`
+	_, err := s.db.Exec(query, toVideoID, fromVideoID)
+	return err
+}
+
+// CopyMetadata copies metadata fields from one video to another
+func (s *VideoService) CopyMetadata(fromVideoID, toVideoID int64) error {
+	query := `
+		UPDATE videos
+		SET date = (SELECT date FROM videos WHERE id = ?),
+		    rating = (SELECT rating FROM videos WHERE id = ?),
+		    description = (SELECT description FROM videos WHERE id = ?),
+		    updated_at = ?
+		WHERE id = ?
+	`
+	_, err := s.db.Exec(query, fromVideoID, fromVideoID, fromVideoID, time.Now(), toVideoID)
+	return err
 }

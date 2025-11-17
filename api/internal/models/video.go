@@ -26,6 +26,8 @@ type Video struct {
 	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 	LastPlayedAt  *time.Time `json:"last_played_at,omitempty" db:"last_played_at"`
 	PlayCount     int        `json:"play_count" db:"play_count"`
+	ConvertedFrom *int64     `json:"converted_from,omitempty" db:"converted_from"` // ID of original video if this is a conversion
+	ConvertedTo   *int64     `json:"converted_to,omitempty" db:"converted_to"`     // ID of converted video if this was converted
 
 	// Relationships (loaded separately)
 	Performers []Performer `json:"performers,omitempty"`

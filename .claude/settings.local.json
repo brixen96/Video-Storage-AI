@@ -31,7 +31,10 @@
       "Bash(timeout 3 ping:*)",
       "Bash(nul)",
       "Bash(timeout 30 go build:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(start /B .binvideo-storage-ai.exe)",
+      "Bash(timeout 10:*)",
+      "Bash(timeout 30 ./bin/video-storage-ai.exe:*)"
     ],
     "deny": [],
     "ask": []

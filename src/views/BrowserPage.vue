@@ -90,37 +90,64 @@
 								</div>
 							</div>
 							<div class="col-md-6">
-								<div class="filter-buttons d-flex gap-2 flex-wrap">
-									<button class="btn btn-sm" :class="tab.filterType === 'all' ? 'btn-primary' : 'btn-outline-primary'" @click="setFilterType(tab, 'all')">
-										<font-awesome-icon :icon="['fas', 'list']" class="me-1" />
-										All
-									</button>
-									<button class="btn btn-sm" :class="tab.filterType === 'videos' ? 'btn-primary' : 'btn-outline-primary'" @click="setFilterType(tab, 'videos')">
-										<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
-										Videos
-									</button>
-									<button class="btn btn-sm" :class="tab.filterType === 'folders' ? 'btn-primary' : 'btn-outline-primary'" @click="setFilterType(tab, 'folders')">
-										<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-										Folders
-									</button>
-									<button
-										class="btn btn-sm"
-										:class="tab.showNotInterested ? 'btn-danger' : 'btn-outline-danger'"
-										@click="toggleShowNotInterested(tab)"
-										:title="tab.showNotInterested ? 'Hide Not Interested' : 'Show Not Interested Only'"
-									>
-										<font-awesome-icon :icon="['fas', 'times-circle']" class="me-1" />
-										Not Interested
-									</button>
-									<button
-										class="btn btn-sm"
-										:class="tab.showEditList ? 'btn-success' : 'btn-outline-success'"
-										@click="toggleShowEditList(tab)"
-										:title="tab.showEditList ? 'Hide Edit List' : 'Show Edit List Only'"
-									>
-										<font-awesome-icon :icon="['fas', 'list']" class="me-1" />
-										Edit List
-									</button>
+								<div class="d-flex gap-2 flex-wrap align-items-center">
+									<div class="filter-buttons d-flex gap-2 flex-wrap">
+										<button class="btn btn-sm" :class="tab.filterType === 'all' ? 'btn-primary' : 'btn-outline-primary'" @click="setFilterType(tab, 'all')">
+											<font-awesome-icon :icon="['fas', 'list']" class="me-1" />
+											All
+										</button>
+										<button
+											class="btn btn-sm"
+											:class="tab.filterType === 'videos' ? 'btn-primary' : 'btn-outline-primary'"
+											@click="setFilterType(tab, 'videos')"
+										>
+											<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
+											Videos
+										</button>
+										<button
+											class="btn btn-sm"
+											:class="tab.filterType === 'folders' ? 'btn-primary' : 'btn-outline-primary'"
+											@click="setFilterType(tab, 'folders')"
+										>
+											<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
+											Folders
+										</button>
+										<button
+											class="btn btn-sm"
+											:class="tab.showNotInterested ? 'btn-danger' : 'btn-outline-danger'"
+											@click="toggleShowNotInterested(tab)"
+											:title="tab.showNotInterested ? 'Hide Not Interested' : 'Show Not Interested Only'"
+										>
+											<font-awesome-icon :icon="['fas', 'times-circle']" class="me-1" />
+											Not Interested
+										</button>
+										<button
+											class="btn btn-sm"
+											:class="tab.showEditList ? 'btn-success' : 'btn-outline-success'"
+											@click="toggleShowEditList(tab)"
+											:title="tab.showEditList ? 'Hide Edit List' : 'Show Edit List Only'"
+										>
+											<font-awesome-icon :icon="['fas', 'list']" class="me-1" />
+											Edit List
+										</button>
+									</div>
+									<div class="vr d-none d-md-block"></div>
+									<div class="d-flex gap-2 align-items-center">
+										<label class="text-white small mb-0">Sort:</label>
+										<select v-model="tab.sortBy" class="form-select form-select-sm bg-dark text-white border-secondary" style="width: auto">
+											<option value="name">Name</option>
+											<option value="date">Date</option>
+											<option value="size">Size</option>
+											<option value="duration">Duration</option>
+										</select>
+										<button
+											class="btn btn-sm btn-outline-secondary"
+											@click="toggleSortOrder(tab)"
+											:title="tab.sortOrder === 'asc' ? 'Ascending' : 'Descending'"
+										>
+											<font-awesome-icon :icon="['fas', tab.sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" />
+										</button>
+									</div>
 								</div>
 							</div>
 						</div>
@@ -137,7 +164,7 @@
 					<!-- Content Grid -->
 					<div v-else-if="tab.libraryId && filteredItems(tab).length > 0" class="content-grid">
 						<div
-							v-for="item in filteredItems(tab)"
+							v-for="item in paginatedItems(tab)"
 							:key="item.path"
 							class="content-item"
 							:class="{
@@ -147,12 +174,21 @@
 								'in-edit-list': item.in_edit_list,
 							}"
 							@click="handleItemClick(tab, item)"
+							@contextmenu.prevent="showContextMenu($event, tab, item)"
 						>
 							<div class="item-thumbnail">
 								<font-awesome-icon v-if="item.type === 'folder'" :icon="['fas', 'folder']" class="folder-icon" />
 								<img v-else-if="item.thumbnail" :src="getAssetURL(item.thumbnail)" :alt="item.name" class="video-thumbnail" />
 								<div v-else class="video-placeholder">
 									<font-awesome-icon :icon="['fas', 'video']" />
+								</div>
+
+								<!-- Metadata Extraction Loading Indicator -->
+								<div v-if="item.type === 'video' && (!item.duration || !item.thumbnail)" class="metadata-loading-overlay">
+									<div class="spinner-border spinner-border-sm text-primary" role="status">
+										<span class="visually-hidden">Extracting metadata...</span>
+									</div>
+									<span class="loading-text">Processing...</span>
 								</div>
 
 								<!-- Video Action Buttons -->
@@ -199,25 +235,77 @@
 						</div>
 					</div>
 
-					<!-- Empty State -->
-					<div v-else-if="tab.libraryId" class="empty-state">
-						<font-awesome-icon :icon="['fas', 'folder-open']" class="empty-icon" />
-						<h3>No items found</h3>
-						<p>This folder is empty</p>
-					</div>
-
-					<!-- No Library Selected -->
-					<div v-else class="empty-state">
-						<font-awesome-icon :icon="['fas', 'book-open']" class="empty-icon" />
-						<h3>Select a Library</h3>
-						<p>Choose a library from the dropdown to start browsing</p>
+					<!-- Pagination Controls -->
+					<div v-if="tab.libraryId && totalPages(tab) > 1" class="pagination-controls">
+						<div class="pagination-info">
+							Showing {{ (tab.currentPage - 1) * tab.itemsPerPage + 1 }} - {{ Math.min(tab.currentPage * tab.itemsPerPage, tab.totalItems) }} of
+							{{ tab.totalItems }} items
+						</div>
+						<div class="pagination-buttons">
+							<button class="btn btn-sm btn-outline-primary" :disabled="tab.currentPage === 1" @click="changePage(tab, 1)">
+								<font-awesome-icon :icon="['fas', 'chevron-left']" />
+								<font-awesome-icon :icon="['fas', 'chevron-left']" />
+							</button>
+							<button class="btn btn-sm btn-outline-primary" :disabled="tab.currentPage === 1" @click="changePage(tab, tab.currentPage - 1)">
+								<font-awesome-icon :icon="['fas', 'chevron-left']" />
+							</button>
+							<span class="pagination-current"> Page {{ tab.currentPage }} of {{ totalPages(tab) }} </span>
+							<button class="btn btn-sm btn-outline-primary" :disabled="tab.currentPage === totalPages(tab)" @click="changePage(tab, tab.currentPage + 1)">
+								<font-awesome-icon :icon="['fas', 'chevron-right']" />
+							</button>
+							<button class="btn btn-sm btn-outline-primary" :disabled="tab.currentPage === totalPages(tab)" @click="changePage(tab, totalPages(tab))">
+								<font-awesome-icon :icon="['fas', 'chevron-right']" />
+								<font-awesome-icon :icon="['fas', 'chevron-right']" />
+							</button>
+						</div>
+						<div class="pagination-size">
+							<select v-model.number="tab.itemsPerPage" class="form-select form-select-sm bg-dark text-white border-secondary" @change="tab.currentPage = 1">
+								<option :value="50">50 per page</option>
+								<option :value="100">100 per page</option>
+								<option :value="200">200 per page</option>
+								<option :value="500">500 per page</option>
+							</select>
+						</div>
 					</div>
 				</div>
 			</div>
 		</div>
 
+		<!-- Context Menu -->
+		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click="closeContextMenu">
+			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="playVideo(contextMenu.item)">
+				<font-awesome-icon :icon="['fas', 'play']" class="me-2" />
+				Play Video
+			</div>
+			<div v-if="contextMenu.item?.type === 'folder'" class="context-menu-item" @click="navigateToFolder(contextMenu.tab, contextMenu.item.path)">
+				<font-awesome-icon :icon="['fas', 'folder-open']" class="me-2" />
+				Open Folder
+			</div>
+			<div class="context-menu-divider"></div>
+			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="toggleNotInterested(contextMenu.tab, contextMenu.item)">
+				<font-awesome-icon :icon="['fas', 'times-circle']" class="me-2" />
+				{{ contextMenu.item.not_interested ? 'Remove from Not Interested' : 'Mark as Not Interested' }}
+			</div>
+			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="toggleEditList(contextMenu.tab, contextMenu.item)">
+				<font-awesome-icon :icon="['fas', 'list']" class="me-2" />
+				{{ contextMenu.item.in_edit_list ? 'Remove from Edit List' : 'Add to Edit List' }}
+			</div>
+			<div class="context-menu-divider"></div>
+			<div class="context-menu-item" @click="copyPathToClipboard(contextMenu.item)">
+				<font-awesome-icon :icon="['fas', 'check']" class="me-2" />
+				Copy Path
+			</div>
+		</div>
+
 		<!-- Video Player Modal -->
-		<VideoPlayer :visible="playerVisible" :video="selectedVideo" :libraryId="selectedLibraryId" @close="closePlayer" />
+		<VideoPlayer
+			:visible="playerVisible"
+			:video="selectedVideo"
+			:libraryId="selectedLibraryId"
+			:videoId="selectedVideoId"
+			@close="closePlayer"
+			@video-converted="handleVideoConverted"
+		/>
 	</div>
 </template>
 
@@ -239,11 +327,33 @@ export default {
 			playerVisible: false,
 			selectedVideo: {},
 			selectedLibraryId: null,
+			selectedVideoId: null,
+			searchDebounceTimers: {}, // Store debounce timers per tab
+			contextMenu: {
+				visible: false,
+				x: 0,
+				y: 0,
+				item: null,
+				tab: null,
+			},
 		}
 	},
 	async mounted() {
 		await this.loadLibraries()
 		await this.initializeTabs()
+
+		// Close context menu when clicking outside
+		document.addEventListener('click', this.closeContextMenu)
+		document.addEventListener('contextmenu', this.closeContextMenu)
+
+		// Add keyboard shortcuts
+		document.addEventListener('keydown', this.handleKeyPress)
+	},
+	beforeUnmount() {
+		// Clean up event listeners
+		document.removeEventListener('click', this.closeContextMenu)
+		document.removeEventListener('contextmenu', this.closeContextMenu)
+		document.removeEventListener('keydown', this.handleKeyPress)
 	},
 	methods: {
 		async loadLibraries() {
@@ -283,6 +393,11 @@ export default {
 				filterType: 'all',
 				showNotInterested: false,
 				showEditList: false,
+				sortBy: 'name', // name, date, size, duration
+				sortOrder: 'asc', // asc, desc
+				currentPage: 1,
+				itemsPerPage: 100,
+				totalItems: 0,
 			}
 
 			this.tabs.push(tab)
@@ -336,12 +451,17 @@ export default {
 			this.tabs[tabIndex].loading = true
 
 			try {
-				// Check if we should load from the entire library (when marking filters are active)
-				if (this.tabs[tabIndex].showNotInterested || this.tabs[tabIndex].showEditList) {
-					// Load all marked videos from the entire library
+				// Check if we should search the entire library (when search query is active or marking filters are active)
+				const hasSearchQuery = this.tabs[tabIndex].searchQuery && this.tabs[tabIndex].searchQuery.trim()
+				if (hasSearchQuery || this.tabs[tabIndex].showNotInterested || this.tabs[tabIndex].showEditList) {
+					// Load videos from the entire library based on search/filters
 					const params = {
 						library_id: this.tabs[tabIndex].libraryId,
-						per_page: 1000, // Load a large number to show all marked videos
+						per_page: 1000, // Load a large number
+					}
+
+					if (hasSearchQuery) {
+						params.query = this.tabs[tabIndex].searchQuery.trim()
 					}
 
 					if (this.tabs[tabIndex].showNotInterested) {
@@ -359,21 +479,35 @@ export default {
 					const videos = Array.isArray(response.data) ? response.data : response.data?.data || []
 
 					if (videos.length > 0) {
-						this.tabs[tabIndex].items = videos.map((video) => ({
-							name: video.title || video.file_path.split(/[\\/]/).pop(),
-							path: video.file_path,
-							full_path: video.file_path,
-							type: 'video',
-							is_dir: false,
-							size: video.file_size || 0,
-							modified: video.updated_at || video.created_at,
-							duration: video.duration,
-							thumbnail: video.thumbnail_path,
-							not_interested: video.not_interested,
-							in_edit_list: video.in_edit_list,
-							video_id: video.id,
-							in_database: true,
-						}))
+						// Get library path to calculate relative paths
+						const library = this.libraries.find((l) => l.id === this.tabs[tabIndex].libraryId)
+						const libraryPath = library?.path || ''
+
+						this.tabs[tabIndex].items = videos.map((video) => {
+							// Calculate relative path from library root
+							let relativePath = video.file_path
+							if (libraryPath && video.file_path.startsWith(libraryPath)) {
+								relativePath = video.file_path.substring(libraryPath.length)
+								// Remove leading slash or backslash
+								relativePath = relativePath.replace(/^[/\\]+/, '')
+							}
+
+							return {
+								name: video.title || video.file_path.split(/[\\/]/).pop(),
+								path: relativePath, // Use relative path for streaming
+								full_path: video.file_path,
+								type: 'video',
+								is_dir: false,
+								size: video.file_size || 0,
+								modified: video.updated_at || video.created_at,
+								duration: video.duration,
+								thumbnail: video.thumbnail_path,
+								not_interested: video.not_interested,
+								in_edit_list: video.in_edit_list,
+								video_id: video.id,
+								in_database: true,
+							}
+						})
 					} else {
 						this.tabs[tabIndex].items = []
 					}
@@ -448,18 +582,82 @@ export default {
 				console.log('Already at root')
 			}
 		},
-		playVideo(video) {
+		async playVideo(video) {
 			const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
 			if (activeTab) {
 				this.selectedVideo = video
 				this.selectedLibraryId = activeTab.libraryId
+
+				// Try to find or create a video record for conversion support
+				await this.ensureVideoRecord(video, activeTab.libraryId)
+
 				this.playerVisible = true
+			}
+		},
+		async ensureVideoRecord(browserItem, libraryId) {
+			try {
+				// Check if video already exists in database by file path
+				const searchResponse = await videosAPI.search({
+					query: browserItem.name,
+					library_id: libraryId,
+				})
+
+				// Look for exact file path match
+				// searchResponse.data is the videos array (from backend's gin.H{"data": videos})
+				const existingVideo = searchResponse.data?.find((v) => v.file_path === browserItem.full_path)
+
+				if (existingVideo) {
+					this.selectedVideoId = existingVideo.id
+					return
+				}
+
+				// Video doesn't exist, create it
+				const newVideo = {
+					library_id: libraryId,
+					title: browserItem.name.replace(/\.[^/.]+$/, ''), // Remove extension
+					file_path: browserItem.full_path,
+					file_size: browserItem.size || 0,
+					duration: browserItem.duration || 0,
+					resolution: browserItem.width && browserItem.height ? `${browserItem.width}x${browserItem.height}` : '',
+					fps: browserItem.frame_rate || 0,
+				}
+
+				console.log('Creating video record with data:', newVideo)
+				console.log('Browser item data:', browserItem)
+
+				// Verify library exists
+				try {
+					const library = await librariesAPI.getById(libraryId)
+					console.log('Library exists:', library)
+				} catch (libErr) {
+					console.error('Library does not exist:', libErr)
+					throw new Error(`Library ${libraryId} does not exist`)
+				}
+
+				const createResponse = await videosAPI.create(newVideo)
+				if (createResponse.data?.id) {
+					this.selectedVideoId = createResponse.data.id
+					console.log('Created video record for conversion:', createResponse.data.id)
+				}
+			} catch (error) {
+				console.error('Failed to ensure video record:', error)
+				// Continue without videoId - conversion won't be available
+				this.selectedVideoId = null
 			}
 		},
 		closePlayer() {
 			this.playerVisible = false
 			this.selectedVideo = {}
+			this.selectedVideoId = null
 			this.selectedLibraryId = null
+		},
+		async handleVideoConverted(convertedVideo) {
+			console.log('Video converted:', convertedVideo)
+			// Optionally reload the current tab to show the new converted file
+			const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
+			if (activeTab && activeTab.libraryId) {
+				await this.loadLibraryContent(activeTab)
+			}
 		},
 		async toggleNotInterested(tab, item) {
 			item.not_interested = !item.not_interested
@@ -490,19 +688,20 @@ export default {
 			}
 		},
 		filteredItems(tab) {
+			let dateA = new Date()
+			let dateB = new Date()
+
 			if (!tab.items) return []
 
 			let filtered = [...tab.items]
 
-			// Apply search filter
-			if (tab.searchQuery && tab.searchQuery.trim()) {
-				const query = tab.searchQuery.toLowerCase().trim()
-				filtered = filtered.filter((item) => item.name.toLowerCase().includes(query))
-			}
+			// Note: Search filter is now handled server-side in loadLibraryContent
+			// when tab.searchQuery is active, so no need to filter here
 
-			// Only apply type filter if not in library-wide marking mode
-			// (in library-wide mode, we only show videos anyway)
-			if (!tab.showNotInterested && !tab.showEditList) {
+			// Only apply type filter if not in library-wide mode
+			// (in library-wide mode like search/marking, we only show videos anyway)
+			const hasSearchQuery = tab.searchQuery && tab.searchQuery.trim()
+			if (!hasSearchQuery && !tab.showNotInterested && !tab.showEditList) {
 				if (tab.filterType === 'videos') {
 					filtered = filtered.filter((item) => item.type === 'video')
 				} else if (tab.filterType === 'folders') {
@@ -510,20 +709,82 @@ export default {
 				}
 			}
 
-			// Note: No need to filter by marks here anymore since loadLibraryContent
-			// already loads only marked videos when showNotInterested or showEditList is active
+			// Apply sorting
+			filtered.sort((a, b) => {
+				let comparison = 0
+
+				// Always sort folders first
+				if (a.type === 'folder' && b.type !== 'folder') return -1
+				if (a.type !== 'folder' && b.type === 'folder') return 1
+
+				// Then apply the selected sort
+				switch (tab.sortBy) {
+					case 'name':
+						comparison = (a.name || '').localeCompare(b.name || '')
+						break
+					case 'date':
+						dateA = new Date(a.modified || 0).getTime()
+						dateB = new Date(b.modified || 0).getTime()
+						comparison = dateA - dateB
+						break
+					case 'size':
+						comparison = (a.size || 0) - (b.size || 0)
+						break
+					case 'duration':
+						comparison = (a.duration || 0) - (b.duration || 0)
+						break
+					default:
+						comparison = 0
+				}
+
+				// Apply sort order
+				return tab.sortOrder === 'asc' ? comparison : -comparison
+			})
+
+			// Update total items for pagination
+			tab.totalItems = filtered.length
 
 			return filtered
 		},
-		applyFilters() {
-			// Filters are applied through the computed filteredItems method
-			// This is just for triggering reactivity when search query changes
+		paginatedItems(tab) {
+			const filtered = this.filteredItems(tab)
+			const start = (tab.currentPage - 1) * tab.itemsPerPage
+			const end = start + tab.itemsPerPage
+			return filtered.slice(start, end)
+		},
+		totalPages(tab) {
+			return Math.ceil(tab.totalItems / tab.itemsPerPage)
+		},
+		changePage(tab, page) {
+			if (page < 1 || page > this.totalPages(tab)) return
+			tab.currentPage = page
+			// Scroll to top when changing pages
+			window.scrollTo({ top: 0, behavior: 'smooth' })
+		},
+		applyFilters(tab) {
+			// When search query changes, reload library content after a debounce delay
+			if (tab && tab.id) {
+				// Clear existing timer for this tab
+				if (this.searchDebounceTimers[tab.id]) {
+					clearTimeout(this.searchDebounceTimers[tab.id])
+				}
+
+				// Set new timer (500ms debounce)
+				this.searchDebounceTimers[tab.id] = setTimeout(() => {
+					this.loadLibraryContent(tab)
+				}, 500)
+			}
 		},
 		clearSearch(tab) {
 			tab.searchQuery = ''
+			// Reload content to show folder browsing again
+			this.loadLibraryContent(tab)
 		},
 		setFilterType(tab, type) {
 			tab.filterType = type
+		},
+		toggleSortOrder(tab) {
+			tab.sortOrder = tab.sortOrder === 'asc' ? 'desc' : 'asc'
 		},
 		toggleShowNotInterested(tab) {
 			tab.showNotInterested = !tab.showNotInterested
@@ -555,6 +816,81 @@ export default {
 		},
 		getAssetURL(path) {
 			return getAssetURL(path)
+		},
+		showContextMenu(event, tab, item) {
+			this.contextMenu.visible = true
+			this.contextMenu.x = event.clientX
+			this.contextMenu.y = event.clientY
+			this.contextMenu.item = item
+			this.contextMenu.tab = tab
+		},
+		closeContextMenu() {
+			this.contextMenu.visible = false
+			this.contextMenu.item = null
+			this.contextMenu.tab = null
+		},
+		async copyPathToClipboard(item) {
+			if (!item) return
+			const path = item.full_path || item.path
+			try {
+				await navigator.clipboard.writeText(path)
+				console.log('Path copied to clipboard:', path)
+			} catch (error) {
+				console.error('Failed to copy path:', error)
+			}
+		},
+		handleKeyPress(event) {
+			// Don't handle if typing in input field
+			if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+				return
+			}
+
+			const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
+			if (!activeTab) return
+
+			// Backspace or Alt+Left: Go back to parent folder
+			if (event.key === 'Backspace' || (event.altKey && event.key === 'ArrowLeft')) {
+				event.preventDefault()
+				if (activeTab.pathSegments.length > 0) {
+					const newSegments = activeTab.pathSegments.slice(0, -1)
+					const newPath = newSegments.join('\\')
+					this.navigateToPath(activeTab, newPath)
+				}
+			}
+
+			// Ctrl+T: New tab
+			if (event.ctrlKey && event.key === 't') {
+				event.preventDefault()
+				this.addNewTab()
+			}
+
+			// Ctrl+W: Close tab
+			if (event.ctrlKey && event.key === 'w') {
+				event.preventDefault()
+				this.closeTab(this.activeTabId)
+			}
+
+			// Ctrl+Tab or Ctrl+PageDown: Next tab
+			if (event.ctrlKey && (event.key === 'Tab' || event.key === 'PageDown')) {
+				event.preventDefault()
+				const currentIndex = this.tabs.findIndex((t) => t.id === this.activeTabId)
+				const nextIndex = (currentIndex + 1) % this.tabs.length
+				this.activeTabId = this.tabs[nextIndex].id
+			}
+
+			// Ctrl+Shift+Tab or Ctrl+PageUp: Previous tab
+			if (event.ctrlKey && ((event.shiftKey && event.key === 'Tab') || event.key === 'PageUp')) {
+				event.preventDefault()
+				const currentIndex = this.tabs.findIndex((t) => t.id === this.activeTabId)
+				const prevIndex = currentIndex === 0 ? this.tabs.length - 1 : currentIndex - 1
+				this.activeTabId = this.tabs[prevIndex].id
+			}
+
+			// F5 or Ctrl+R: Refresh current tab
+			if (event.key === 'F5' || (event.ctrlKey && event.key === 'r')) {
+				event.preventDefault()
+				this.loadLibraryContent(activeTab)
+			}
 		},
 	},
 }

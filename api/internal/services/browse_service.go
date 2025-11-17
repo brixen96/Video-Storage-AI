@@ -68,6 +68,11 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 
 	var items []models.BrowseItem
 	for _, entry := range entries {
+		// Skip hidden files and folders (starting with .)
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
 		itemInfo, err := entry.Info()
 		if err != nil {
 			continue // Skip items we can't read
@@ -171,9 +176,9 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 						}
 					}
 				}
-			} else {
-				item.Type = "file"
-				item.Extension = ext
+		} else {
+				// Skip non-video files
+				continue
 			}
 		}
 

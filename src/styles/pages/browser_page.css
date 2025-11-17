@@ -186,7 +186,7 @@
 
 .content-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 	gap: 2rem;
 }
 
@@ -383,4 +383,95 @@
 
 .tabs-list::-webkit-scrollbar-thumb:hover {
 	background: rgba(0, 217, 255, 0.5);
+}
+
+/* Context Menu */
+.context-menu {
+	position: fixed;
+	background: rgba(20, 20, 30, 0.98);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	border-radius: 8px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	backdrop-filter: blur(10px);
+	min-width: 200px;
+	z-index: 9999;
+	overflow: hidden;
+}
+
+.context-menu-item {
+	padding: 10px 16px;
+	color: rgba(255, 255, 255, 0.9);
+	cursor: pointer;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	font-size: 0.9rem;
+}
+
+.context-menu-item:hover {
+	background: rgba(0, 217, 255, 0.1);
+	color: #00d9ff;
+}
+
+.context-menu-divider {
+	height: 1px;
+	background: rgba(255, 255, 255, 0.1);
+	margin: 4px 0;
+}
+
+/* Pagination */
+.pagination-controls {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 1.5rem 1rem;
+	margin-top: 2rem;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	gap: 1rem;
+	flex-wrap: wrap;
+}
+
+.pagination-info {
+	color: rgba(255, 255, 255, 0.7);
+	font-size: 0.9rem;
+}
+
+.pagination-buttons {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.pagination-current {
+	color: rgba(255, 255, 255, 0.9);
+	font-weight: 500;
+	padding: 0 1rem;
+	white-space: nowrap;
+}
+
+.pagination-size {
+	min-width: 150px;
+}
+
+/* Metadata Loading Overlay */
+.metadata-loading-overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.7);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	border-radius: 8px;
+	backdrop-filter: blur(4px);
+}
+
+.metadata-loading-overlay .loading-text {
+	color: rgba(255, 255, 255, 0.9);
+	font-size: 0.75rem;
+	font-weight: 500;
 }
