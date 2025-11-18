@@ -55,6 +55,14 @@
 					<font-awesome-icon :icon="['fas', 'star']" />
 					{{ video.rating }}
 				</div>
+				<div v-if="video.converted_from" class="badge-converted" title="Converted from original">
+					<font-awesome-icon :icon="['fas', 'sync']" />
+					MP4
+				</div>
+				<div v-if="video.converted_to" class="badge-has-conversion" title="Has MP4 conversion available">
+					<font-awesome-icon :icon="['fas', 'check']" />
+					Converted
+				</div>
 			</div>
 
 			<!-- Duration badge -->

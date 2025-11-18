@@ -148,6 +148,15 @@
 											<font-awesome-icon :icon="['fas', tab.sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" />
 										</button>
 									</div>
+									<div class="vr d-none d-md-block"></div>
+									<button
+										class="btn btn-sm btn-outline-primary"
+										@click="refreshCurrentFolder(tab)"
+										title="Refresh folder to see updated thumbnails"
+									>
+										<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': tab.loading }" />
+										<span class="ms-1 d-none d-lg-inline">Refresh</span>
+									</button>
 								</div>
 							</div>
 						</div>
@@ -181,14 +190,6 @@
 								<img v-else-if="item.thumbnail" :src="getAssetURL(item.thumbnail)" :alt="item.name" class="video-thumbnail" />
 								<div v-else class="video-placeholder">
 									<font-awesome-icon :icon="['fas', 'video']" />
-								</div>
-
-								<!-- Metadata Extraction Loading Indicator -->
-								<div v-if="item.type === 'video' && (!item.duration || !item.thumbnail)" class="metadata-loading-overlay">
-									<div class="spinner-border spinner-border-sm text-primary" role="status">
-										<span class="visually-hidden">Extracting metadata...</span>
-									</div>
-									<span class="loading-text">Processing...</span>
 								</div>
 
 								<!-- Video Action Buttons -->
@@ -513,15 +514,36 @@ export default {
 					}
 				} else {
 					// Normal browsing mode - load current folder
-					// Always request metadata extraction and thumbnail generation
-					const response = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, true)
+					// Use smart metadata extraction: quick for small folders, skip for large folders
+					const quickCheckResponse = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, false)
 
-					// Map API response to tab items
-					if (response.data && response.data.items) {
-						this.tabs[tabIndex].items = response.data.items
+					// Count video files
+					const videoCount = quickCheckResponse.data?.items?.filter((item) => item.type === 'video').length || 0
+
+					// Only extract metadata if folder has <= 50 videos
+					const shouldExtractMetadata = videoCount <= 50
+
+					if (shouldExtractMetadata && videoCount > 0) {
+						// Re-fetch with metadata for small folders
+						const response = await librariesAPI.browse(this.tabs[tabIndex].libraryId, this.tabs[tabIndex].currentPath, true)
+						if (response.data && response.data.items) {
+							this.tabs[tabIndex].items = response.data.items
+						} else {
+							this.tabs[tabIndex].items = quickCheckResponse.data?.items || []
+						}
 					} else {
-						console.log('No items in response')
-						this.tabs[tabIndex].items = []
+						// Use quick response for large folders (no metadata)
+						if (quickCheckResponse.data && quickCheckResponse.data.items) {
+							this.tabs[tabIndex].items = quickCheckResponse.data.items
+
+							// Start background thumbnail generation with progress tracking
+							this.$nextTick(() => {
+								this.startBackgroundThumbnailGeneration(this.tabs[tabIndex])
+							})
+						} else {
+							console.log('No items in response')
+							this.tabs[tabIndex].items = []
+						}
 					}
 				}
 			} catch (error) {
@@ -531,6 +553,28 @@ export default {
 				this.tabs[tabIndex].loading = false
 				this.$forceUpdate()
 			}
+		},
+		async startBackgroundThumbnailGeneration(tab) {
+			try {
+				console.log(`Starting background thumbnail generation for folder: ${tab.currentPath}`)
+				const response = await librariesAPI.generateThumbnails(tab.libraryId, tab.currentPath)
+
+				// If response indicates no thumbnails needed, exit early
+				if (response && response.message && response.message.includes('already exist')) {
+					console.log('All thumbnails already exist')
+					return
+				}
+
+				console.log('Background thumbnail generation initiated')
+				console.log('Refresh the folder or revisit it to see generated thumbnails')
+			} catch (error) {
+				console.error('Failed to start background thumbnail generation:', error)
+			}
+		},
+		async refreshCurrentFolder(tab) {
+			console.log('Refreshing current folder...')
+			await this.loadLibraryContent(tab)
+			console.log('Folder refreshed')
 		},
 		handleItemClick(tab, item) {
 			if (item.type === 'folder') {

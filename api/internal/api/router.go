@@ -55,14 +55,15 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// Libraries endpoints
 		libraries := v1.Group("/libraries")
 		{
-			libraries.GET("", getLibraries)              // List all libraries
-			libraries.GET("/primary", getPrimaryLibrary) // Get primary library
-			libraries.GET("/:id", getLibrary)            // Get single library
-			libraries.GET("/:id/browse", browseLibrary)  // Browse library filesystem
-			libraries.GET("/:id/stream", streamVideo)    // Stream video file
-			libraries.POST("", createLibrary)            // Create library
-			libraries.PUT("/:id", updateLibrary)         // Update library
-			libraries.DELETE("/:id", deleteLibrary)      // Delete library
+			libraries.GET("", getLibraries)                            // List all libraries
+			libraries.GET("/primary", getPrimaryLibrary)               // Get primary library
+			libraries.GET("/:id", getLibrary)                          // Get single library
+			libraries.GET("/:id/browse", browseLibrary)                // Browse library filesystem
+			libraries.GET("/:id/stream", streamVideo)                  // Stream video file
+			libraries.POST("", createLibrary)                          // Create library
+			libraries.PUT("/:id", updateLibrary)                       // Update library
+			libraries.DELETE("/:id", deleteLibrary)                    // Delete library
+			libraries.POST("/:id/generate-thumbnails", generateThumbnailsForFolder) // Generate thumbnails for folder
 		}
 
 		// Videos endpoints

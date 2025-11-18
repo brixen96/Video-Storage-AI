@@ -283,10 +283,10 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		return nil, 0, fmt.Errorf("error iterating videos: %w", err)
 	}
 
-	// Load relationships for each video
-	for i := range videos {
-		if err := s.loadVideoRelationships(&videos[i]); err != nil {
-			log.Printf("Warning: Failed to load relationships for video %d: %v", videos[i].ID, err)
+	// Load relationships for all videos in batch
+	if len(videos) > 0 {
+		if err := s.loadVideoRelationshipsBatch(videos); err != nil {
+			log.Printf("Warning: Failed to batch load relationships: %v", err)
 			// Don't fail the entire request, just log the warning
 		}
 	}
@@ -732,13 +732,13 @@ func (s *VideoService) findVideoFiles(dir string) ([]string, error) {
 
 // videoExists checks if a video with the given file path already exists
 func (s *VideoService) videoExists(filePath string) (bool, error) {
-	query := `SELECT COUNT(*) FROM videos WHERE file_path = ?`
-	var count int
-	err := s.db.QueryRow(query, filePath).Scan(&count)
+	query := `SELECT EXISTS(SELECT 1 FROM videos WHERE file_path = ? LIMIT 1)`
+	var exists bool
+	err := s.db.QueryRow(query, filePath).Scan(&exists)
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	return exists, nil
 }
 
 // updateVideoThumbnailPath updates the thumbnail path for a video
@@ -816,6 +816,173 @@ func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
 	}
 
 	return &video, nil
+}
+
+// loadVideoRelationshipsBatch loads related data for multiple videos in batch
+func (s *VideoService) loadVideoRelationshipsBatch(videos []models.Video) error {
+	if len(videos) == 0 {
+		return nil
+	}
+
+	// Collect all video IDs
+	videoIDs := make([]int64, len(videos))
+	videoMap := make(map[int64]*models.Video)
+	for i := range videos {
+		videoIDs[i] = videos[i].ID
+		videoMap[videos[i].ID] = &videos[i]
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(videoIDs))
+	args := make([]interface{}, len(videoIDs))
+	for i, id := range videoIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	placeholderStr := strings.Join(placeholders, ",")
+
+	// Batch load performers
+	performerQuery := fmt.Sprintf(`
+		SELECT vp.video_id, p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.zoo, p.metadata, p.created_at, p.updated_at
+		FROM performers p
+		INNER JOIN video_performers vp ON p.id = vp.performer_id
+		WHERE vp.video_id IN (%s)
+		ORDER BY vp.video_id, p.name
+	`, placeholderStr)
+
+	performerRows, err := s.db.Query(performerQuery, args...)
+	if err == nil {
+		defer func() {
+			if err := performerRows.Close(); err != nil {
+				log.Printf("failed to close performerRows: %v", err)
+			}
+		}()
+		for performerRows.Next() {
+			var videoID int64
+			var performer models.Performer
+			var metadata sql.NullString
+			var zooVal interface{}
+			err := performerRows.Scan(&videoID, &performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.SceneCount, &zooVal, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
+			if err == nil {
+				// Convert to bool - handle both int64 and bool types
+				switch v := zooVal.(type) {
+				case int64:
+					performer.Zoo = v != 0
+				case bool:
+					performer.Zoo = v
+				default:
+					performer.Zoo = false
+				}
+
+				if metadata.Valid {
+					performer.Metadata = metadata.String
+					// Unmarshal metadata for frontend use
+					performer.UnmarshalMetadata()
+				}
+
+				if video, exists := videoMap[videoID]; exists {
+					video.Performers = append(video.Performers, performer)
+				}
+			}
+		}
+	}
+
+	// Batch load tags
+	tagQuery := fmt.Sprintf(`
+		SELECT vt.video_id, t.id, t.name, t.color, t.icon, t.created_at, t.updated_at
+		FROM tags t
+		INNER JOIN video_tags vt ON t.id = vt.tag_id
+		WHERE vt.video_id IN (%s)
+		ORDER BY vt.video_id, t.name
+	`, placeholderStr)
+
+	tagRows, err := s.db.Query(tagQuery, args...)
+	if err == nil {
+		defer func() {
+			if err := tagRows.Close(); err != nil {
+				log.Printf("failed to close tagRows: %v", err)
+			}
+		}()
+		for tagRows.Next() {
+			var videoID int64
+			var tag models.Tag
+			err := tagRows.Scan(&videoID, &tag.ID, &tag.Name, &tag.Color, &tag.Icon, &tag.CreatedAt, &tag.UpdatedAt)
+			if err == nil {
+				if video, exists := videoMap[videoID]; exists {
+					video.Tags = append(video.Tags, tag)
+				}
+			}
+		}
+	}
+
+	// Batch load studios
+	studioQuery := fmt.Sprintf(`
+		SELECT vs.video_id, s.id, s.name, s.logo_path, s.description, s.founded_date, s.country, s.metadata, s.created_at, s.updated_at
+		FROM studios s
+		INNER JOIN video_studios vs ON s.id = vs.studio_id
+		WHERE vs.video_id IN (%s)
+		ORDER BY vs.video_id, s.name
+	`, placeholderStr)
+
+	studioRows, err := s.db.Query(studioQuery, args...)
+	if err == nil {
+		defer func() {
+			if err := studioRows.Close(); err != nil {
+				log.Printf("failed to close studioRows: %v", err)
+			}
+		}()
+		for studioRows.Next() {
+			var videoID int64
+			var studio models.Studio
+			var metadata, foundedDate sql.NullString
+			err := studioRows.Scan(&videoID, &studio.ID, &studio.Name, &studio.LogoPath, &studio.Description, &foundedDate, &studio.Country, &metadata, &studio.CreatedAt, &studio.UpdatedAt)
+			if err == nil {
+				if metadata.Valid {
+					studio.Metadata = metadata.String
+				}
+				if foundedDate.Valid {
+					studio.FoundedDate = foundedDate.String
+				}
+				if video, exists := videoMap[videoID]; exists {
+					video.Studios = append(video.Studios, studio)
+				}
+			}
+		}
+	}
+
+	// Batch load groups
+	groupQuery := fmt.Sprintf(`
+		SELECT vg.video_id, g.id, g.studio_id, g.name, g.logo_path, g.description, g.metadata, g.created_at, g.updated_at
+		FROM groups g
+		INNER JOIN video_groups vg ON g.id = vg.group_id
+		WHERE vg.video_id IN (%s)
+		ORDER BY vg.video_id, g.name
+	`, placeholderStr)
+
+	groupRows, err := s.db.Query(groupQuery, args...)
+	if err == nil {
+		defer func() {
+			if err := groupRows.Close(); err != nil {
+				log.Printf("failed to close groupRows: %v", err)
+			}
+		}()
+		for groupRows.Next() {
+			var videoID int64
+			var group models.Group
+			var metadata sql.NullString
+			err := groupRows.Scan(&videoID, &group.ID, &group.StudioID, &group.Name, &group.LogoPath, &group.Description, &metadata, &group.CreatedAt, &group.UpdatedAt)
+			if err == nil {
+				if metadata.Valid {
+					group.Metadata = metadata.String
+				}
+				if video, exists := videoMap[videoID]; exists {
+					video.Groups = append(video.Groups, group)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // loadVideoRelationships loads related data for a video

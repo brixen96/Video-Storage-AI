@@ -105,6 +105,27 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 					item.InEditList = videoMarks.InEditList
 				}
 
+				// Always check for existing thumbnails, even if not extracting metadata
+				thumbnailDir := os.Getenv("THUMBNAIL_DIR")
+				if thumbnailDir == "" {
+					thumbnailDir = filepath.Join("assets", "thumbnails")
+				}
+
+				// Create minimal config to check for existing thumbnail
+				quickConfig := ThumbnailConfig{
+					LibraryID:     libraryID,
+					LibraryPath:   library.Path,
+					VideoFilePath: itemFullPath,
+					Duration:      1.0, // Placeholder duration
+					ThumbnailDir:  thumbnailDir,
+				}
+
+				expectedThumbnail := s.mediaService.GetThumbnailPath(quickConfig)
+				if expectedThumbnail != nil && s.mediaService.ThumbnailExists(expectedThumbnail.FullPath) {
+					// Thumbnail exists, set the URL
+					item.Thumbnail = expectedThumbnail.URLPath
+				}
+
 				// Extract metadata if requested
 				if extractMetadata {
 					if metadata, err := s.mediaService.ExtractMetadata(itemFullPath); err == nil {

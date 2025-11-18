@@ -2,6 +2,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
+import store from './store'
 import FontAwesomeIcon from './plugins/fontawesome'
 import ToastNotification from './components/ToastNotification.vue'
 // Import Bootstrap JS for interactive components
@@ -24,6 +25,7 @@ app.config.globalProperties.$toast = toastInstance
 
 // Use plugins
 app.use(router)
+app.use(store)
 
 // Mount app
 app.mount('#app')

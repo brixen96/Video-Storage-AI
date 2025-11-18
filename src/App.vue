@@ -6,16 +6,19 @@
 				<component :is="Component" />
 			</keep-alive>
 		</router-view>
+		<ActivityTracker />
 	</div>
 </template>
 
 <script>
 import NavBar from '@/components/NavBar.vue'
+import ActivityTracker from '@/components/ActivityTracker.vue'
 
 export default {
 	name: 'App',
 	components: {
 		NavBar,
+		ActivityTracker,
 	},
 }
 </script>

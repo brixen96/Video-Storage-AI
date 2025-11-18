@@ -52,9 +52,20 @@ func (s *ConversionService) ConvertVideoToMP4(videoID int64) (*models.Video, err
 	ext := filepath.Ext(video.FilePath)
 	outputPath := strings.TrimSuffix(video.FilePath, ext) + "_converted.mp4"
 
-	// Check if output file already exists
-	if _, err := os.Stat(outputPath); err == nil {
-		return nil, fmt.Errorf("converted file already exists at: %s", outputPath)
+	// Check if a video record already exists for this path
+	if existingMarks, err := s.videoService.GetVideoMarksByPath(outputPath); err == nil && existingMarks != nil {
+		// A video record already exists for this converted file
+		// Find and return it
+		allVideos, _, _ := s.videoService.GetAll(&models.VideoSearchQuery{
+			LibraryID: video.LibraryID,
+			Limit:     10000,
+		})
+		for _, v := range allVideos {
+			if v.FilePath == outputPath {
+				log.Printf("Converted video already exists in database (ID: %d), returning it", v.ID)
+				return &v, nil
+			}
+		}
 	}
 
 	// Create activity for tracking

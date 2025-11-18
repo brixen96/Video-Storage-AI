@@ -34,7 +34,15 @@
       "Bash(test:*)",
       "Bash(start /B .binvideo-storage-ai.exe)",
       "Bash(timeout 10:*)",
-      "Bash(timeout 30 ./bin/video-storage-ai.exe:*)"
+      "Bash(timeout 30 ./bin/video-storage-ai.exe:*)",
+      "Bash(powershell -Command \"Start-Process -FilePath ''.\\bin\\video-storage-ai.exe'' -WorkingDirectory ''C:\\Repos\\Video Storage AI\\api'' -PassThru\")",
+      "Bash(..binvideo-storage-ai.exe)",
+      "Bash(bin/video-storage-ai.exe:*)",
+      "Bash(cmd /c \"cd /d C:\\Repos\\Video Storage AI && start /B bin\\video-storage-ai.exe\")",
+      "Bash(yarn add:*)",
+      "Bash(.binvideo-storage-ai.exe)",
+      "Bash(timeout:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

@@ -39,8 +39,12 @@
 								<font-awesome-icon :icon="['fas', 'tasks']" />
 								Bulk ({{ selectedVideos.length }})
 							</button>
+							<button class="btn btn-outline-primary" @click="refreshVideos" title="Refresh video list">
+								<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': loading }" />
+								Refresh
+							</button>
 							<button class="btn btn-success" @click="scanVideos">
-								<font-awesome-icon :icon="['fas', 'sync']" />
+								<font-awesome-icon :icon="['fas', 'database']" />
 								Scan
 							</button>
 						</div>
@@ -608,6 +612,11 @@ export default {
 			} finally {
 				this.loading = false
 			}
+		},
+		async refreshVideos() {
+			console.log('Refreshing videos...')
+			await this.loadVideos()
+			this.$toast.success('Videos refreshed')
 		},
 		async loadPerformers() {
 			try {

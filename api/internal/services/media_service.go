@@ -286,13 +286,20 @@ func (s *MediaService) GenerateThumbnailHierarchical(config ThumbnailConfig) (*T
 	// Full path to thumbnail file
 	thumbnailFullPath := filepath.Join(libraryThumbnailDir, thumbnailName)
 
-	// Calculate thumbnail timestamp (10% of duration, capped at 5 seconds)
-	timestamp := config.Duration * 0.1
-	if timestamp > 5.0 {
-		timestamp = 5.0
-	}
-	if timestamp < 0 {
-		timestamp = 1.0 // Fallback to 1 second if duration is invalid
+	// Calculate thumbnail timestamp (1 minute into video, or 10% if video is shorter)
+	timestamp := 60.0 // 1 minute
+	if config.Duration < 60.0 {
+		// For videos shorter than 1 minute, use 10% of duration
+		timestamp = config.Duration * 0.1
+		if timestamp < 1.0 {
+			timestamp = 1.0 // Minimum 1 second
+		}
+	} else if timestamp >= config.Duration {
+		// Ensure we don't exceed video duration
+		timestamp = config.Duration - 5.0 // 5 seconds before end
+		if timestamp < 1.0 {
+			timestamp = 1.0
+		}
 	}
 
 	// Generate the thumbnail using existing method

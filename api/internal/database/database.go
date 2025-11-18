@@ -31,8 +31,9 @@ func Initialize(cfg *config.Config) error {
 	}
 
 	// Set connection pool settings
-	db.SetMaxIdleConns(cfg.Database.MaxIdleConn)
-	db.SetMaxOpenConns(cfg.Database.MaxOpenConn)
+	// SQLite only supports one writer at a time, so limit connections to prevent lock errors
+	db.SetMaxOpenConns(1) // Critical: SQLite doesn't support concurrent writes
+	db.SetMaxIdleConns(1) // Keep connection alive
 	db.SetConnMaxLifetime(time.Hour)
 
 	// Test connection
@@ -220,6 +221,25 @@ func createTables() error {
 	CREATE INDEX IF NOT EXISTS idx_videos_library_id ON videos(library_id);
 	CREATE INDEX IF NOT EXISTS idx_videos_file_path ON videos(file_path);
 	CREATE INDEX IF NOT EXISTS idx_videos_created_at ON videos(created_at);
+
+	-- Composite indexes for common filtered queries
+	CREATE INDEX IF NOT EXISTS idx_videos_library_created ON videos(library_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_videos_duration ON videos(duration);
+	CREATE INDEX IF NOT EXISTS idx_videos_file_size ON videos(file_size);
+	CREATE INDEX IF NOT EXISTS idx_videos_play_count ON videos(play_count DESC);
+	CREATE INDEX IF NOT EXISTS idx_videos_marks ON videos(not_interested, in_edit_list);
+	CREATE INDEX IF NOT EXISTS idx_videos_rating ON videos(rating DESC);
+
+	-- Relationship table indexes (both directions for JOIN performance)
+	CREATE INDEX IF NOT EXISTS idx_video_performers_video ON video_performers(video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_performers_performer ON video_performers(performer_id, video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id, video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_studios_video ON video_studios(video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_studios_studio ON video_studios(studio_id, video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_groups_video ON video_groups(video_id);
+	CREATE INDEX IF NOT EXISTS idx_video_groups_group ON video_groups(group_id, video_id);
+
 	CREATE INDEX IF NOT EXISTS idx_performers_name ON performers(name);
 	CREATE INDEX IF NOT EXISTS idx_studios_name ON studios(name);
 	CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);

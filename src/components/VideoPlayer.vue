@@ -214,8 +214,14 @@ export default {
 				}
 			} catch (error) {
 				console.error('Conversion failed:', error)
+				console.error('Full error details:', error.response)
 				const errorMsg = error.response?.data?.error || error.message || 'Unknown error occurred'
 				this.$toast.error('Conversion Failed', errorMsg)
+
+				// Also show in console for debugging
+				if (error.response?.data) {
+					console.error('Backend error response:', error.response.data)
+				}
 			} finally {
 				this.isConverting = false
 			}

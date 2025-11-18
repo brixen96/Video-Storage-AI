@@ -33,13 +33,14 @@ api.interceptors.response.use(
 
 // API endpoints
 export const librariesAPI = {
-	getAll: () => api.get('/libraries'),
-	getPrimary: () => api.get('/libraries/primary'),
-	getById: (id) => api.get(`/libraries/${id}`),
-	create: (data) => api.post('/libraries', data),
-	update: (id, data) => api.put(`/libraries/${id}`, data),
-	delete: (id) => api.delete(`/libraries/${id}`),
-	browse: (id, path = '', metadata = false) => api.get(`/libraries/${id}/browse`, { params: { path, metadata: metadata ? 'true' : 'false' } }),
+	getAll: (signal) => api.get('/libraries', { signal }),
+	getPrimary: (signal) => api.get('/libraries/primary', { signal }),
+	getById: (id, signal) => api.get(`/libraries/${id}`, { signal }),
+	create: (data, signal) => api.post('/libraries', data, { signal }),
+	update: (id, data, signal) => api.put(`/libraries/${id}`, data, { signal }),
+	delete: (id, signal) => api.delete(`/libraries/${id}`, { signal }),
+	browse: (id, path = '', metadata = false, signal) => api.get(`/libraries/${id}/browse`, { params: { path, metadata: metadata ? 'true' : 'false' }, signal }),
+	generateThumbnails: (id, path = '', signal) => api.post(`/libraries/${id}/generate-thumbnails`, null, { params: { path }, signal }),
 }
 
 export const performersAPI = {
@@ -64,21 +65,20 @@ export const performersAPI = {
 }
 
 export const videosAPI = {
-	getAll: (params) => api.get('/videos', { params }),
-	getById: (id) => api.get(`/videos/${id}`),
-	search: (params) => api.get('/videos/search', { params }),
-	create: (data) => api.post('/videos', data),
-	update: (id, data) => api.put(`/videos/${id}`, data),
-	delete: (id) => api.delete(`/videos/${id}`),
-	scan: (libraryId) => api.post('/videos/scan', { library_id: libraryId }),
-	fetchMetadata: (id) => api.post(`/videos/${id}/fetch`),
-	addTags: (id, tagIds) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }),
-	removeTags: (id, tagIds) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds } }),
-	bulk: (operation, videoIds, data = {}) => api.post('/videos/bulk', { operation, video_ids: videoIds, ...data }),
+	getAll: (params, signal) => api.get('/videos', { params, signal }),
+	getById: (id, signal) => api.get(`/videos/${id}`, { signal }),
+	search: (params, signal) => api.get('/videos/search', { params, signal }),
+	create: (data, signal) => api.post('/videos', data, { signal }),
+	update: (id, data, signal) => api.put(`/videos/${id}`, data, { signal }),
+	delete: (id, signal) => api.delete(`/videos/${id}`, { signal }),
+	scan: (libraryId, signal) => api.post('/videos/scan', { library_id: libraryId }, { signal }),
+	fetchMetadata: (id, signal) => api.post(`/videos/${id}/fetch`, {}, { signal }),
+	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
+	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),
+	bulk: (operation, videoIds, data = {}, signal) => api.post('/videos/bulk', { operation, video_ids: videoIds, ...data }, { signal }),
 	getThumbnail: (id) => `http://localhost:8080/api/v1/videos/${id}/thumbnail`,
-	openInExplorer: (id) => api.post(`/videos/${id}/open-in-explorer`),
-	updateVideoMarksByPath: (filePath, marks) =>
-		api.patch('/videos/marks-by-path', { file_path: filePath, ...marks }),
+	openInExplorer: (id, signal) => api.post(`/videos/${id}/open-in-explorer`, {}, { signal }),
+	updateVideoMarksByPath: (filePath, marks, signal) => api.patch('/videos/marks-by-path', { file_path: filePath, ...marks }, { signal }),
 }
 
 export const studiosAPI = {
