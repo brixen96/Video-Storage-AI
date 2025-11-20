@@ -129,7 +129,7 @@ export default createStore({
 			commit('SET_PERFORMERS_LOADING', true)
 			try {
 				const response = await performersAPI.getAll()
-				const performers = response.data || []
+				const performers = (response && response.data) || []
 				commit('SET_PERFORMERS', performers)
 				return performers
 			} catch (error) {
@@ -157,7 +157,7 @@ export default createStore({
 			commit('SET_STUDIOS_LOADING', true)
 			try {
 				const response = await studiosAPI.getAll()
-				const studios = response.data || []
+				const studios = (response && response.data) || []
 				commit('SET_STUDIOS', studios)
 				return studios
 			} catch (error) {
@@ -185,7 +185,7 @@ export default createStore({
 			commit('SET_TAGS_LOADING', true)
 			try {
 				const response = await tagsAPI.getAll()
-				const tags = response.data || []
+				const tags = (response && response.data) || []
 				commit('SET_TAGS', tags)
 				return tags
 			} catch (error) {
@@ -202,7 +202,7 @@ export default createStore({
 			// Don't cache filtered requests
 			if (studioId) {
 				const response = await groupsAPI.getAll(studioId)
-				return response.data || []
+				return (response && response.data) || []
 			}
 
 			if (state.groups.loading) {
@@ -219,7 +219,7 @@ export default createStore({
 			commit('SET_GROUPS_LOADING', true)
 			try {
 				const response = await groupsAPI.getAll()
-				const groups = response.data || []
+				const groups = (response && response.data) || []
 				commit('SET_GROUPS', groups)
 				return groups
 			} catch (error) {

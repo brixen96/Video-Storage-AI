@@ -478,7 +478,7 @@ import VideoCard from '@/components/VideoCard.vue'
 import VideoPlayerModal from '@/components/VideoPlayerModal.vue'
 import EditMetadataModal from '@/components/EditMetadataModal.vue'
 import AddTagModal from '@/components/AddTagModal.vue'
-import { videosAPI, performersAPI, studiosAPI, groupsAPI, librariesAPI, tagsAPI, getAssetURL } from '@/services/api'
+import { videosAPI, librariesAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
 
 export default {
@@ -620,32 +620,28 @@ export default {
 		},
 		async loadPerformers() {
 			try {
-				const response = await performersAPI.getAll()
-				this.performers = response.data || []
+				this.performers = await this.$store.dispatch('fetchPerformers')
 			} catch (error) {
 				console.error('Failed to load performers:', error)
 			}
 		},
 		async loadStudios() {
 			try {
-				const response = await studiosAPI.getAll()
-				this.studios = response || []
+				this.studios = await this.$store.dispatch('fetchStudios')
 			} catch (error) {
 				console.error('Failed to load studios:', error)
 			}
 		},
 		async loadGroups() {
 			try {
-				const response = await groupsAPI.getAll()
-				this.groups = response || []
+				this.groups = await this.$store.dispatch('fetchGroups')
 			} catch (error) {
 				console.error('Failed to load groups:', error)
 			}
 		},
 		async loadTags() {
 			try {
-				const response = await tagsAPI.getAll()
-				this.tags = response || []
+				this.tags = await this.$store.dispatch('fetchTags')
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 			}

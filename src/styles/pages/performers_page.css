@@ -558,14 +558,13 @@
 }
 
 .tab-content {
-	min-height: 200px;
+	min-height: fit-content;
 }
 
 .empty-tab {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	min-height: 200px;
 	color: rgba(255, 255, 255, 0.4);
 	font-style: italic;
 }
@@ -702,18 +701,15 @@
 
 .metadata-grid {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
+	grid-template-columns: 1fr 1fr 1fr 1fr;
 	gap: 1rem;
 }
 
 .metadata-item {
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
+	align-items: center;
 	gap: 0.25rem;
-}
-
-.metadata-item.full-width {
-	grid-column: 1 / -1;
 }
 
 .metadata-label {

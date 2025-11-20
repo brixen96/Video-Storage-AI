@@ -149,8 +149,7 @@ export default {
 	methods: {
 		async loadTags() {
 			try {
-				const response = await tagsAPI.getAll()
-				this.tags = response || []
+				this.tags = await this.$store.dispatch('fetchTags')
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 				this.$toast.error('Failed to load tags')
@@ -186,6 +185,8 @@ export default {
 				})
 
 				this.$toast.success('Tag created successfully')
+				// Invalidate cache and reload
+				this.$store.dispatch('invalidateTags')
 				await this.loadTags()
 				this.selectedTags.push(response.data)
 				this.showCreateTag = false

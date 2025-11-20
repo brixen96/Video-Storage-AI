@@ -152,7 +152,7 @@
 </template>
 
 <script>
-import { videosAPI, performersAPI, studiosAPI, groupsAPI, tagsAPI, getAssetURL } from '@/services/api'
+import { videosAPI, performersAPI, getAssetURL } from '@/services/api'
 import AddPerformerModal from './AddPerformerModal.vue'
 
 export default {
@@ -239,16 +239,14 @@ export default {
 		},
 		async loadStudios() {
 			try {
-				const response = await studiosAPI.getAll()
-				this.studios = response || []
+				this.studios = await this.$store.dispatch('fetchStudios')
 			} catch (error) {
 				console.error('Failed to load studios:', error)
 			}
 		},
 		async loadGroups() {
 			try {
-				const response = await groupsAPI.getAll()
-				this.groups = response || []
+				this.groups = await this.$store.dispatch('fetchGroups')
 			} catch (error) {
 				console.error('Failed to load groups:', error)
 			}
@@ -259,10 +257,7 @@ export default {
 		},
 		async loadTags() {
 			try {
-				const response = await tagsAPI.getAll()
-				console.log(response)
-
-				this.tags = response || []
+				this.tags = await this.$store.dispatch('fetchTags')
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 			}

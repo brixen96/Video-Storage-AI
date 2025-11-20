@@ -330,9 +330,6 @@
 							<a :class="['nav-link', { active: activeTab === 'appearance' }]" @click="activeTab = 'appearance'">Appearance</a>
 						</li>
 						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'performances' }]" @click="activeTab = 'performances'">Performances</a>
-						</li>
-						<li class="nav-item">
 							<a :class="['nav-link', { active: activeTab === 'social_media' }]" @click="activeTab = 'social_media'">Social Media</a>
 						</li>
 						<li class="nav-item">
@@ -403,19 +400,6 @@
 							</div>
 							<div v-else class="empty-tab">
 								<p>No appearance data available</p>
-							</div>
-						</div>
-
-						<!-- Performances Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'performances' }]">
-							<div v-if="getPerformancesData(detailsPanel.performer)" class="metadata-grid">
-								<div v-for="(value, key) in getPerformancesData(detailsPanel.performer)" :key="key" class="metadata-item">
-									<span class="metadata-label">{{ formatLabel(key) }}:</span>
-									<span class="metadata-value">{{ formatValue(value) }}</span>
-								</div>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No performance data available</p>
 							</div>
 						</div>
 
@@ -583,7 +567,7 @@
 </template>
 
 <script>
-import { performersAPI, tagsAPI } from '@/services/api'
+import { performersAPI } from '@/services/api'
 import settingsService from '@/services/settingsService'
 
 export default {
@@ -1220,9 +1204,7 @@ export default {
 		},
 		async loadAllTags() {
 			try {
-				const response = await tagsAPI.getAll()
-				// Response interceptor unwraps to {success, message, data}
-				this.allTags = response.data || []
+				this.allTags = await this.$store.dispatch('fetchTags')
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 				this.allTags = []

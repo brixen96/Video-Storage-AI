@@ -773,6 +773,47 @@ func (s *VideoService) GetVideoMarksByPath(filePath string) (*VideoMarks, error)
 	return &marks, nil
 }
 
+// GetVideoMarksBatch retrieves video marks for multiple file paths in a single query
+func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*VideoMarks, error) {
+	if len(filePaths) == 0 {
+		return make(map[string]*VideoMarks), nil
+	}
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(filePaths))
+	args := make([]interface{}, len(filePaths))
+	for i, path := range filePaths {
+		placeholders[i] = "?"
+		args[i] = path
+	}
+	placeholderStr := strings.Join(placeholders, ",")
+
+	query := fmt.Sprintf(`
+		SELECT file_path, not_interested, in_edit_list
+		FROM videos
+		WHERE file_path IN (%s)
+	`, placeholderStr)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query video marks: %w", err)
+	}
+	defer rows.Close()
+
+	marksMap := make(map[string]*VideoMarks)
+	for rows.Next() {
+		var filePath string
+		var marks VideoMarks
+		if err := rows.Scan(&filePath, &marks.NotInterested, &marks.InEditList); err != nil {
+			log.Printf("Warning: Failed to scan video marks: %v", err)
+			continue
+		}
+		marksMap[filePath] = &marks
+	}
+
+	return marksMap, nil
+}
+
 // GetByFilePath retrieves a video by file path
 func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
 	var video models.Video

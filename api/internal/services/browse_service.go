@@ -66,6 +66,28 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 		return nil, fmt.Errorf("failed to read directory: %w", err)
 	}
 
+	// First pass: collect video file paths for batch loading marks
+	var videoFilePaths []string
+	videoFileMap := make(map[string]bool)
+	for _, entry := range entries {
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if isVideoFile(ext) {
+				itemFullPath := filepath.Join(fullPath, entry.Name())
+				videoFilePaths = append(videoFilePaths, itemFullPath)
+				videoFileMap[itemFullPath] = true
+			}
+		}
+	}
+
+	// Batch load all video marks in a single query
+	videoMarksMap, err := s.videoService.GetVideoMarksBatch(videoFilePaths)
+	if err != nil {
+		log.Printf("Warning: Failed to batch load video marks: %v", err)
+		videoMarksMap = make(map[string]*VideoMarks)
+	}
+
+	// Second pass: build browse items
 	var items []models.BrowseItem
 	for _, entry := range entries {
 		// Skip hidden files and folders (starting with .)
@@ -99,8 +121,8 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 				item.Type = "video"
 				item.Extension = ext
 
-				// Load existing marks from database (not_interested, in_edit_list)
-				if videoMarks, err := s.videoService.GetVideoMarksByPath(itemFullPath); err == nil && videoMarks != nil {
+				// Get existing marks from batch-loaded map
+				if videoMarks, exists := videoMarksMap[itemFullPath]; exists && videoMarks != nil {
 					item.NotInterested = videoMarks.NotInterested
 					item.InEditList = videoMarks.InEditList
 				}

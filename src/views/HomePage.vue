@@ -108,7 +108,7 @@
 </template>
 
 <script>
-import { performersAPI, videosAPI, studiosAPI, tagsAPI } from '@/services/api'
+import { videosAPI } from '@/services/api'
 
 export default {
 	name: 'HomePage',
@@ -129,16 +129,16 @@ export default {
 		async loadStats() {
 			try {
 				const [performers, videos, studios, tags] = await Promise.all([
-					performersAPI.getAll().catch(() => ({ data: [] })),
+					this.$store.dispatch('fetchPerformers').catch(() => []),
 					videosAPI.getAll().catch(() => ({ data: [] })),
-					studiosAPI.getAll().catch(() => ({ data: [] })),
-					tagsAPI.getAll().catch(() => ({ data: [] })),
+					this.$store.dispatch('fetchStudios').catch(() => []),
+					this.$store.dispatch('fetchTags').catch(() => []),
 				])
 
-				this.stats.performers = performers.data?.length || 0
+				this.stats.performers = performers.length || 0
 				this.stats.videos = videos.data?.length || 0
-				this.stats.studios = studios.data?.length || 0
-				this.stats.tags = tags.data?.length || 0
+				this.stats.studios = studios.length || 0
+				this.stats.tags = tags.length || 0
 			} catch (error) {
 				console.error('Failed to load stats:', error)
 			}
