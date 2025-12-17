@@ -56,6 +56,11 @@ const routes = [
 		name: 'Settings',
 		component: () => import(/* webpackChunkName: "settings" */ '@/views/SettingsPage.vue'),
 	},
+	{
+		path: '/tasks',
+		name: 'Tasks',
+		component: () => import(/* webpackChunkName: "tasks" */ '@/views/TasksPage.vue'),
+	},
 ]
 
 const router = createRouter({

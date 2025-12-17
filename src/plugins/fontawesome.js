@@ -78,6 +78,24 @@ import {
 	faDog,
 	faBan,
 	faDatabase,
+	faChildDress,
+	faPersonDress,
+	faCamera,
+	faHouseUser,
+	faTasks,
+	faChildReaching,
+	faUserNurse,
+	faUserGroup,
+	faUserGraduate,
+	faMagic,
+	faLayerGroup,
+	faFileVideo,
+	faExclamation,
+	faCopy,
+	faFileSignature,
+	faImage,
+	faRobot,
+	faFileExport,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -166,7 +184,25 @@ library.add(
 	faPaw,
 	faDog,
 	faBan,
-	faDatabase
+	faDatabase,
+	faChildDress,
+	faPersonDress,
+	faCamera,
+	faHouseUser,
+	faTasks,
+	faChildReaching,
+	faUserNurse,
+	faUserGroup,
+	faUserGraduate,
+	faMagic,
+	faLayerGroup,
+	faFileVideo,
+	faExclamation,
+	faCopy,
+	faFileSignature,
+	faImage,
+	faRobot,
+	faFileExport
 )
 
 export default FontAwesomeIcon

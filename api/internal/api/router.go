@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -28,8 +29,11 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		c.Next()
 	})
 
-	// Serve static files (performer previews, thumbnails)
-	router.Static("/assets", cfg.Paths.AssetsBaseDir)
+	// Serve static files (performer previews, thumbnails) with caching
+	// Create assets group with cache middleware
+	assets := router.Group("/assets")
+	assets.Use(middleware.StaticFileCache())
+	assets.StaticFS("", gin.Dir(cfg.Paths.AssetsBaseDir, false))
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
@@ -180,14 +184,30 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/apply-links", applyPerformerLinks)     // Apply selected performer links
 			ai.POST("/suggest-tags", suggestTags)            // AI smart tagging
 			ai.POST("/apply-tag-suggestions", applyTagSuggestions) // Apply tag suggestions
+			ai.POST("/detect-scenes", detectScenes)          // Detect scene boundaries in videos
+			ai.POST("/classify-content", classifyContent)    // Classify video content types
+			ai.POST("/analyze-quality", analyzeQuality)      // Analyze video quality
+			ai.POST("/detect-missing-metadata", detectMissingMetadata) // Find videos with missing metadata
+			ai.POST("/detect-duplicates", detectDuplicates)  // Find duplicate/similar videos
+			ai.POST("/suggest-naming", suggestNaming)        // Generate better filename suggestions
+			ai.GET("/library-analytics", getLibraryAnalytics) // Get comprehensive library statistics
+			ai.POST("/analyze-thumbnail-quality", analyzeThumbnailQuality) // Analyze thumbnail quality
 			ai.POST("/chat", aiChat)                         // Chat with AI assistant (placeholder)
-			ai.POST("/suggest-naming", aiSuggestNaming)      // AI naming suggestions (placeholder)
-			ai.POST("/analyze-library", aiAnalyzeLibrary)    // AI library analysis (placeholder)
 		}
 
 		// WebSocket endpoint
 		v1.GET("/ws", handleWebSocket)
 	}
+
+	// Serve frontend static files from dist folder (production build)
+	// This allows the API to serve the entire application from a single server
+	distPath := filepath.Join(".", "dist")
+
+	// Apply cache middleware globally for frontend files
+	router.Use(middleware.FrontendCacheMiddleware())
+
+	// Handle all unmatched routes (serve frontend SPA)
+	router.NoRoute(middleware.SPAMiddleware(distPath))
 
 	return router
 }
@@ -202,6 +222,6 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 // File operation handlers are implemented in file_handlers.go
 
-func aiChat(c *gin.Context)           { c.JSON(http.StatusOK, gin.H{"message": "AI chat"}) }
-func aiSuggestNaming(c *gin.Context)  { c.JSON(http.StatusOK, gin.H{"message": "AI suggest naming"}) }
-func aiAnalyzeLibrary(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "AI analyze library"}) }
+// AI handlers are implemented in ai_handlers.go
+
+func aiChat(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "AI chat"}) }

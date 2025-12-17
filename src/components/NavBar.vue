@@ -77,6 +77,12 @@
 							AI
 						</router-link>
 					</li>
+					<li class="nav-item">
+						<router-link to="/tasks" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'tasks']" class="me-1" />
+							Tasks
+						</router-link>
+					</li>
 				</ul>
 
 				<!-- Right side items -->

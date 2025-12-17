@@ -7,18 +7,21 @@
 			</keep-alive>
 		</router-view>
 		<ActivityTracker />
+		<CacheDebugPanel />
 	</div>
 </template>
 
 <script>
 import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
+import CacheDebugPanel from '@/components/CacheDebugPanel.vue'
 
 export default {
 	name: 'App',
 	components: {
 		NavBar,
 		ActivityTracker,
+		CacheDebugPanel,
 	},
 }
 </script>

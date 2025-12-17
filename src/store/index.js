@@ -1,5 +1,6 @@
 import { createStore } from 'vuex'
 import { performersAPI, studiosAPI, tagsAPI, groupsAPI } from '@/services/api'
+import cacheService from '@/services/cacheService'
 
 // Cache TTL (Time To Live) in milliseconds
 const CACHE_TTL = {
@@ -7,6 +8,14 @@ const CACHE_TTL = {
 	studios: 5 * 60 * 1000, // 5 minutes
 	tags: 5 * 60 * 1000, // 5 minutes
 	groups: 5 * 60 * 1000, // 5 minutes
+}
+
+// Cache keys for persistent storage
+const CACHE_KEYS = {
+	performers: '/api/v1/performers',
+	studios: '/api/v1/studios',
+	tags: '/api/v1/tags',
+	groups: '/api/v1/groups',
 }
 
 export default createStore({
@@ -109,7 +118,16 @@ export default createStore({
 
 	actions: {
 		async fetchPerformers({ commit, state, getters }, forceRefresh = false) {
-			// Return cached data if valid and not forcing refresh
+			// Check persistent cache first (survives page reloads)
+			if (!forceRefresh) {
+				const cachedData = await cacheService.get(CACHE_KEYS.performers)
+				if (cachedData) {
+					commit('SET_PERFORMERS', cachedData)
+					return cachedData
+				}
+			}
+
+			// Return in-memory cached data if valid and not forcing refresh
 			if (!forceRefresh && getters.isPerformersCacheValid) {
 				return state.performers.data
 			}
@@ -131,6 +149,10 @@ export default createStore({
 				const response = await performersAPI.getAll()
 				const performers = (response && response.data) || []
 				commit('SET_PERFORMERS', performers)
+
+				// Store in persistent cache
+				await cacheService.set(CACHE_KEYS.performers, performers)
+
 				return performers
 			} catch (error) {
 				commit('SET_PERFORMERS_LOADING', false)
@@ -139,6 +161,15 @@ export default createStore({
 		},
 
 		async fetchStudios({ commit, state, getters }, forceRefresh = false) {
+			// Check persistent cache first
+			if (!forceRefresh) {
+				const cachedData = await cacheService.get(CACHE_KEYS.studios)
+				if (cachedData) {
+					commit('SET_STUDIOS', cachedData)
+					return cachedData
+				}
+			}
+
 			if (!forceRefresh && getters.isStudiosCacheValid) {
 				return state.studios.data
 			}
@@ -159,6 +190,10 @@ export default createStore({
 				const response = await studiosAPI.getAll()
 				const studios = (response && response.data) || []
 				commit('SET_STUDIOS', studios)
+
+				// Store in persistent cache
+				await cacheService.set(CACHE_KEYS.studios, studios)
+
 				return studios
 			} catch (error) {
 				commit('SET_STUDIOS_LOADING', false)
@@ -167,6 +202,15 @@ export default createStore({
 		},
 
 		async fetchTags({ commit, state, getters }, forceRefresh = false) {
+			// Check persistent cache first
+			if (!forceRefresh) {
+				const cachedData = await cacheService.get(CACHE_KEYS.tags)
+				if (cachedData) {
+					commit('SET_TAGS', cachedData)
+					return cachedData
+				}
+			}
+
 			if (!forceRefresh && getters.isTagsCacheValid) {
 				return state.tags.data
 			}
@@ -187,6 +231,10 @@ export default createStore({
 				const response = await tagsAPI.getAll()
 				const tags = (response && response.data) || []
 				commit('SET_TAGS', tags)
+
+				// Store in persistent cache
+				await cacheService.set(CACHE_KEYS.tags, tags)
+
 				return tags
 			} catch (error) {
 				commit('SET_TAGS_LOADING', false)
@@ -195,6 +243,15 @@ export default createStore({
 		},
 
 		async fetchGroups({ commit, state, getters }, { studioId = null, forceRefresh = false } = {}) {
+			// Check persistent cache first (only for non-filtered requests)
+			if (!forceRefresh && !studioId) {
+				const cachedData = await cacheService.get(CACHE_KEYS.groups)
+				if (cachedData) {
+					commit('SET_GROUPS', cachedData)
+					return cachedData
+				}
+			}
+
 			if (!forceRefresh && getters.isGroupsCacheValid && !studioId) {
 				return state.groups.data
 			}
@@ -221,6 +278,10 @@ export default createStore({
 				const response = await groupsAPI.getAll()
 				const groups = (response && response.data) || []
 				commit('SET_GROUPS', groups)
+
+				// Store in persistent cache
+				await cacheService.set(CACHE_KEYS.groups, groups)
+
 				return groups
 			} catch (error) {
 				commit('SET_GROUPS_LOADING', false)
@@ -230,15 +291,19 @@ export default createStore({
 
 		invalidatePerformers({ commit }) {
 			commit('INVALIDATE_PERFORMERS')
+			cacheService.invalidate(CACHE_KEYS.performers)
 		},
 		invalidateStudios({ commit }) {
 			commit('INVALIDATE_STUDIOS')
+			cacheService.invalidate(CACHE_KEYS.studios)
 		},
 		invalidateTags({ commit }) {
 			commit('INVALIDATE_TAGS')
+			cacheService.invalidate(CACHE_KEYS.tags)
 		},
 		invalidateGroups({ commit }) {
 			commit('INVALIDATE_GROUPS')
+			cacheService.invalidate(CACHE_KEYS.groups)
 		},
 	},
 })

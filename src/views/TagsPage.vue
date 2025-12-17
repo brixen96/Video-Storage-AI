@@ -46,7 +46,7 @@
 							</th>
 							<th>Name</th>
 							<th style="width: 150px">Color</th>
-							<th style="width: 150px">Icon</th>
+							<th style="width: 175px">Icon</th>
 							<th style="width: 120px">Videos</th>
 							<th style="width: 200px">Actions</th>
 						</tr>
@@ -62,7 +62,7 @@
 							<td>
 								<input type="checkbox" class="form-check-input" :checked="selectedTags.includes(tag.id)" @change="toggleSelect(tag.id)" />
 							</td>
-							<td>{{ tag.name }}</td>
+							<td class="text-light">{{ tag.name }}</td>
 							<td>
 								<span class="color-badge" :style="{ backgroundColor: tag.color || '#6c757d' }">
 									{{ tag.color || '#6c757d' }}
@@ -136,7 +136,9 @@
 						<button type="button" class="btn-close" @click="closeMergeModal"></button>
 					</div>
 					<div class="modal-body">
-						<p>Merge <strong>{{ mergeSourceTag?.name }}</strong> into:</p>
+						<p>
+							Merge <strong>{{ mergeSourceTag?.name }}</strong> into:
+						</p>
 						<div class="mb-3">
 							<label class="form-label">Target Tag</label>
 							<select v-model="mergeTargetId" class="form-select">
@@ -144,7 +146,7 @@
 								<option v-for="tag in availableTargetTags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
 							</select>
 						</div>
-						<p class="text-muted small">All videos tagged with the source tag will be re-tagged with the target tag, and the source tag will be deleted.</p>
+						<p class="small">All videos tagged with the source tag will be re-tagged with the target tag, and the source tag will be deleted.</p>
 					</div>
 					<div class="modal-footer">
 						<button type="button" class="btn btn-secondary" @click="closeMergeModal">Cancel</button>
@@ -175,7 +177,7 @@ export default {
 			mergeSourceTag: null,
 			mergeTargetId: null,
 			createForm: { name: '', color: '#6c757d', icon: '' },
-			commonIcons: ['tag', 'star', 'heart', 'fire', 'bolt', 'crown', 'gem', 'award', 'bookmark', 'flag'],
+			commonIcons: ['crown', 'gem', 'paw', 'child-dress', 'person-dress', 'user-nurse', 'user-graduate', 'camera', 'house-user', 'child-reaching', 'user-group'],
 		}
 	},
 	computed: {
@@ -204,6 +206,7 @@ export default {
 				const response = await tagsAPI.getAll()
 
 				this.tags = response || []
+				console.log(response)
 			} catch (err) {
 				console.error('Failed to load tags:', err)
 			}

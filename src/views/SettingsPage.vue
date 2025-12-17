@@ -28,12 +28,6 @@
 					</button>
 				</li>
 				<li class="nav-item" role="presentation">
-					<button :class="['nav-link', { active: activeTab === 'database' }]" @click="activeTab = 'database'" type="button">
-						<font-awesome-icon :icon="['fas', 'database']" class="me-2" />
-						Database
-					</button>
-				</li>
-				<li class="nav-item" role="presentation">
 					<button :class="['nav-link', { active: activeTab === 'about' }]" @click="activeTab = 'about'" type="button">
 						<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
 						About
@@ -247,79 +241,6 @@
 					</div>
 				</div>
 
-				<!-- Database Settings -->
-				<div v-if="activeTab === 'database'" class="settings-section">
-					<div class="setting-item">
-						<div class="setting-info">
-							<h4>Database Location</h4>
-							<p>Current database file location</p>
-						</div>
-						<div class="setting-control">
-							<input v-model="databaseInfo.location" type="text" class="form-control" readonly />
-						</div>
-					</div>
-
-					<div class="setting-item">
-						<div class="setting-info">
-							<h4>Database Size</h4>
-							<p>Current size of the database</p>
-						</div>
-						<div class="setting-control">
-							<input :value="databaseInfo.size" type="text" class="form-control" readonly />
-						</div>
-					</div>
-
-					<div class="setting-item">
-						<div class="setting-info">
-							<h4>Total Records</h4>
-							<p>Number of items in the database</p>
-						</div>
-						<div class="setting-control">
-							<div class="stats-grid">
-								<div class="stat-item">
-									<span class="stat-label">Videos:</span>
-									<span class="stat-value">{{ databaseInfo.videoCount }}</span>
-								</div>
-								<div class="stat-item">
-									<span class="stat-label">Performers:</span>
-									<span class="stat-value">{{ databaseInfo.performerCount }}</span>
-								</div>
-								<div class="stat-item">
-									<span class="stat-label">Studios:</span>
-									<span class="stat-value">{{ databaseInfo.studioCount }}</span>
-								</div>
-								<div class="stat-item">
-									<span class="stat-label">Tags:</span>
-									<span class="stat-value">{{ databaseInfo.tagCount }}</span>
-								</div>
-							</div>
-						</div>
-					</div>
-
-					<div class="setting-item">
-						<div class="setting-info">
-							<h4>Database Actions</h4>
-							<p>Maintenance and backup operations</p>
-						</div>
-						<div class="setting-control">
-							<div class="action-buttons">
-								<button class="btn btn-primary" @click="optimizeDatabase">
-									<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
-									Optimize Database
-								</button>
-								<button class="btn btn-success" @click="backupDatabase">
-									<font-awesome-icon :icon="['fas', 'save']" class="me-2" />
-									Backup Database
-								</button>
-								<button class="btn btn-warning" @click="restoreDatabase">
-									<font-awesome-icon :icon="['fas', 'upload']" class="me-2" />
-									Restore Backup
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-
 				<!-- About -->
 				<div v-if="activeTab === 'about'" class="settings-section">
 					<div class="about-content">
@@ -396,7 +317,7 @@
 			</div>
 
 			<!-- Save Button -->
-			<div v-if="activeTab !== 'about' && activeTab !== 'database'" class="settings-footer">
+			<div v-if="activeTab !== 'about'" class="settings-footer">
 				<button class="btn btn-primary btn-lg" @click="saveSettings">
 					<font-awesome-icon :icon="['fas', 'save']" class="me-2" />
 					Save Settings
@@ -412,7 +333,6 @@
 
 <script>
 import settingsService from '@/services/settingsService'
-import { databaseAPI } from '@/services/api'
 
 export default {
 	name: 'SettingsPage',
@@ -420,18 +340,7 @@ export default {
 		return {
 			activeTab: 'general',
 			settings: settingsService.getSettings(),
-			databaseInfo: {
-				location: 'C:\\Repos\\Video Storage AI\\api\\video-storage.db',
-				size: 'Loading...',
-				videoCount: 0,
-				performerCount: 0,
-				studioCount: 0,
-				tagCount: 0,
-			},
 		}
-	},
-	mounted() {
-		this.loadDatabaseInfo()
 	},
 	watch: {
 		// Watch for theme changes and apply immediately
@@ -456,95 +365,6 @@ export default {
 				this.settings = settingsService.getSettings()
 				settingsService.applyTheme()
 				this.$toast.info('Settings Reset', 'All settings have been restored to defaults')
-			}
-		},
-		async loadDatabaseInfo() {
-			try {
-				// Get database statistics from API
-				const statsResponse = await databaseAPI.getStats()
-				const stats = statsResponse.data
-
-				// Update counts
-				this.databaseInfo.videoCount = stats.video_count || 0
-				this.databaseInfo.performerCount = stats.performer_count || 0
-				this.databaseInfo.studioCount = stats.studio_count || 0
-				this.databaseInfo.tagCount = stats.tag_count || 0
-
-				// Format database size
-				const sizeInMB = stats.size / 1024 / 1024
-				this.databaseInfo.size = sizeInMB > 1 ? `${sizeInMB.toFixed(2)} MB` : `${(stats.size / 1024).toFixed(2)} KB`
-			} catch (error) {
-				console.error('Failed to load database info:', error)
-				this.databaseInfo.size = 'Unknown'
-			}
-		},
-		async optimizeDatabase() {
-			if (confirm('This will optimize the database. This may take a few moments. Continue?')) {
-				this.$toast.info('Optimizing', 'Database optimization in progress...')
-				try {
-					await databaseAPI.optimize()
-					this.$toast.success('Complete', 'Database has been optimized')
-					this.loadDatabaseInfo()
-				} catch (error) {
-					console.error('Database optimization failed:', error)
-					this.$toast.error('Optimization Failed', 'Could not optimize database')
-				}
-			}
-		},
-		async backupDatabase() {
-			this.$toast.info('Backing Up', 'Creating database backup...')
-			try {
-				const result = await databaseAPI.backup()
-				this.$toast.success('Backup Complete', `Database backed up to: ${result.data.backup_path}`)
-			} catch (error) {
-				console.error('Database backup failed:', error)
-				this.$toast.error('Backup Failed', 'Could not backup database')
-			}
-		},
-		async restoreDatabase() {
-			try {
-				// First, get list of available backups
-				const backupsResponse = await databaseAPI.listBackups()
-				const backups = backupsResponse.data
-
-				if (!backups || backups.length === 0) {
-					this.$toast.warning('No Backups', 'No backup files found')
-					return
-				}
-
-				// Show a simple selection (in a real app, you'd use a modal)
-				let backupList = 'Available backups:\n\n'
-				backups.forEach((backup, index) => {
-					const date = new Date(backup.timestamp).toLocaleString()
-					const size = (backup.size / 1024 / 1024).toFixed(2) + ' MB'
-					backupList += `${index + 1}. ${date} (${size})\n`
-				})
-				backupList += '\nEnter the number of the backup to restore (or cancel):'
-
-				const selection = prompt(backupList)
-				if (!selection) return
-
-				const index = parseInt(selection) - 1
-				if (index < 0 || index >= backups.length) {
-					this.$toast.error('Invalid Selection', 'Please select a valid backup number')
-					return
-				}
-
-				const selectedBackup = backups[index]
-
-				if (
-					confirm(
-						`WARNING: This will restore the database from backup and overwrite all current data.\n\nBackup: ${new Date(selectedBackup.timestamp).toLocaleString()}\n\nAre you sure you want to continue?`
-					)
-				) {
-					this.$toast.info('Restoring', 'Restoring database from backup...')
-					await databaseAPI.restore(selectedBackup.backup_path)
-					this.$toast.success('Restore Complete', 'Database has been restored successfully')
-					this.loadDatabaseInfo()
-				}
-			} catch (error) {
-				console.error('Database restore failed:', error)
-				this.$toast.error('Restore Failed', 'Could not restore database')
 			}
 		},
 	},

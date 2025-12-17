@@ -136,13 +136,40 @@ export const databaseAPI = {
 }
 
 export const aiAPI = {
+	// Performer linking
 	linkPerformers: (data) => api.post('/ai/link-performers', data),
 	applyLinks: (data) => api.post('/ai/apply-links', data),
+
+	// Smart tagging
 	suggestTags: (data) => api.post('/ai/suggest-tags', data),
 	applyTagSuggestions: (data) => api.post('/ai/apply-tag-suggestions', data),
-	chat: (data) => api.post('/ai/chat', data),
+
+	// Scene detection
+	detectScenes: (data) => api.post('/ai/detect-scenes', data),
+
+	// Content classification
+	classifyContent: (data) => api.post('/ai/classify-content', data),
+
+	// Quality analysis
+	analyzeQuality: (data) => api.post('/ai/analyze-quality', data),
+
+	// Missing metadata detection
+	detectMissingMetadata: (data) => api.post('/ai/detect-missing-metadata', data),
+
+	// Duplicate detection
+	detectDuplicates: (data) => api.post('/ai/detect-duplicates', data),
+
+	// Auto-naming
 	suggestNaming: (data) => api.post('/ai/suggest-naming', data),
-	analyzeLibrary: (data) => api.post('/ai/analyze-library', data),
+
+	// Library analytics
+	getLibraryAnalytics: () => api.get('/ai/library-analytics'),
+
+	// Thumbnail quality
+	analyzeThumbnailQuality: (data) => api.post('/ai/analyze-thumbnail-quality', data),
+
+	// Chat (placeholder)
+	chat: (data) => api.post('/ai/chat', data),
 }
 
 // Asset URL helper

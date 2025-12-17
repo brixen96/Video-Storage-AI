@@ -43,7 +43,9 @@
       "Bash(.binvideo-storage-ai.exe)",
       "Bash(timeout:*)",
       "Bash(curl:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(echo:*)",
+      "Bash(yarn build)"
     ],
     "deny": [],
     "ask": []

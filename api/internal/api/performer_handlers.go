@@ -29,14 +29,14 @@ func getPerformers(c *gin.Context) {
 
 	// Pagination parameters
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5000"))
 
 	// Ensure valid pagination values
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 200 {
-		limit = 50
+		limit = 5000
 	}
 
 	offset := (page - 1) * limit

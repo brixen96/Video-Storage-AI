@@ -339,7 +339,7 @@
 								muted
 								autoplay
 								playsinline
-								preload="auto"
+								preload="metadata"
 								@loadeddata="onPerformerPreviewLoaded(performer)"
 								@error="handlePreviewError"
 							></video>
@@ -1001,3 +1001,4 @@ export default {
 <style scoped>
 @import '@/styles/pages/videos_page.css';
 </style>
+

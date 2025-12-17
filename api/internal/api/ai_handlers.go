@@ -174,3 +174,284 @@ func applyTagSuggestions(c *gin.Context) {
 		},
 	})
 }
+
+// detectScenes analyzes videos and detects scene boundaries
+func detectScenes(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Scene detection request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.DetectScenes(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to detect scenes",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Scene detection completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// classifyContent analyzes videos and classifies content types
+func classifyContent(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Content classification request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.ClassifyContent(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to classify content",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Content classification completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// analyzeQuality analyzes video quality metrics
+func analyzeQuality(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Quality analysis request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.AnalyzeQuality(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to analyze quality",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Quality analysis completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// detectMissingMetadata finds videos with incomplete metadata
+func detectMissingMetadata(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Missing metadata detection request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.DetectMissingMetadata(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to detect missing metadata",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Missing metadata detection completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// detectDuplicates finds duplicate or similar videos
+func detectDuplicates(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Duplicate detection request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.DetectDuplicates(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to detect duplicates",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Duplicate detection completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// suggestNaming generates better filename suggestions
+func suggestNaming(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Auto-naming request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.SuggestNaming(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to suggest naming",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Naming suggestions completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}
+
+// getLibraryAnalytics provides comprehensive library statistics
+func getLibraryAnalytics(c *gin.Context) {
+	svc := ensureAIService()
+
+	log.Printf("Library analytics request")
+
+	stats, err := svc.GetLibraryAnalytics()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get library analytics",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Library analytics completed",
+		"data":    stats,
+	})
+}
+
+// analyzeThumbnailQuality evaluates thumbnail quality
+func analyzeThumbnailQuality(c *gin.Context) {
+	svc := ensureAIService()
+
+	var request struct {
+		VideoIDs []int64 `json:"video_ids"` // Empty array = all videos
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	log.Printf("Thumbnail quality analysis request: %d videos", len(request.VideoIDs))
+
+	results, err := svc.AnalyzeThumbnailQuality(request.VideoIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to analyze thumbnail quality",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Thumbnail quality analysis completed",
+		"data": gin.H{
+			"results": results,
+			"total":   len(results),
+		},
+	})
+}

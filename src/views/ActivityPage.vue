@@ -173,7 +173,9 @@
 												:style="{ width: activity.progress + '%' }"
 											></div>
 										</div>
-										<small v-if="activity.status === 'running' || activity.status === 'pending'"> Progress: {{ activity.progress }}% </small>
+										<small class="text-warning" v-if="activity.status === 'running' || activity.status === 'pending'">
+											Progress: {{ activity.progress }}%
+										</small>
 
 										<!-- Details -->
 										<div v-if="activity.details && Object.keys(activity.details).length > 0" class="details-section mt-2">

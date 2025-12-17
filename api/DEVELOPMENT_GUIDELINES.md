@@ -471,3 +471,39 @@ To completely eliminate CSS conflicts, ALL classes in `videos_page.css` were sys
 - [ ] Test with `<keep-alive>` - navigate away and back to verify styles persist
 - [ ] Consider using CSS modules or Vue's scoped styles for true isolation
 - [ ] Search codebase for class name before creating new ones to avoid conflicts
+
+---
+
+## Critical UI/Styling Rules
+
+### RULE: NEVER Use `text-muted` on Dark Backgrounds
+
+**Rule**: **NEVER** use the Bootstrap class `text-muted` on dark backgrounds. **ALWAYS** use `text-light` instead.
+
+**Why**: The `text-muted` class applies a dark gray color (`#6c757d`) which is nearly invisible on dark backgrounds. This creates poor contrast and makes text unreadable.
+
+**Correct Pattern**:
+```vue
+<!-- WRONG -->
+<p class="text-muted">This text is dark on dark background</p>
+
+<!-- CORRECT -->
+<p class="text-light">This text is light on dark background</p>
+```
+
+**When to Use Each**:
+- **`text-muted`**: Only use on light backgrounds (white, light gray)
+- **`text-light`**: Use on dark backgrounds (dark blue, black, dark gray)
+- **`text-white`**: Use when you need pure white text on dark backgrounds
+
+**Application**: This applies to ALL pages with dark backgrounds, including:
+- TasksPage
+- PerformersPage
+- VideosPage
+- Any other page using dark theme (`#0f0c29`, `#1a2942`, etc.)
+
+**Checklist for Text Styling**:
+- [ ] Check background color before choosing text class
+- [ ] Use `text-light` or `text-white` on all dark backgrounds
+- [ ] Never use `text-muted` unless background is light
+- [ ] Test visibility by viewing the actual page, not just in code

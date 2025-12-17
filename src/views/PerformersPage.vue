@@ -184,7 +184,7 @@
 							loop
 							muted
 							playsinline
-							preload="auto"
+							preload="metadata"
 							@mouseenter="playPreview"
 							@mouseleave="pausePreview"
 							@error="handleVideoError"
@@ -208,15 +208,24 @@
 					<!-- Card Info -->
 					<div class="card-info">
 						<span class="performer-name">{{ performer.name }}</span>
-						<div class="performer-meta">
-							<span v-if="getAge(performer)" class="meta-item">
-								<font-awesome-icon :icon="['fas', 'birthday-cake']" class="me-1" />
-								{{ getAge(performer) }}
-							</span>
-							<span v-if="performer.metadata?.measurements" class="meta-item">
-								{{ performer.metadata.measurements }}
-							</span>
-							<span v-if="performer.metadata?.height" class="meta-item"> {{ performer.metadata.height }} </span>
+						<div class="d-flex flex-row justify-content-between">
+							<div class="performer-meta d-flex flex-row">
+								<span v-if="getAge(performer)" class="meta-item">
+									<font-awesome-icon :icon="['fas', 'birthday-cake']" class="me-1" />
+									{{ getAge(performer) }}
+								</span>
+								<span v-if="performer.metadata?.measurements" class="meta-item">
+									{{ performer.metadata.measurements }}
+								</span>
+								<span v-if="performer.metadata?.height" class="meta-item"> {{ performer.metadata.height }}</span>
+							</div>
+							<!-- Tags -->
+							<div v-if="performerTags[performer.id] && performerTags[performer.id].length > 0" class="performer-tags d-flex justify-content-end">
+								<span v-for="tag in performerTags[performer.id].slice(0, 5)" :key="tag.id" class="tag-chip" :style="{ backgroundColor: tag.color }">
+									{{ tag.name }}
+								</span>
+								<span v-if="performerTags[performer.id].length > 5" class="tag-more">+{{ performerTags[performer.id].length - 5 }}</span>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -240,7 +249,7 @@
 							loop
 							muted
 							playsinline
-							preload="auto"
+							preload="metadata"
 							@loadedmetadata="onVideoLoaded"
 							@error="handleVideoError"
 						></video>
@@ -568,6 +577,7 @@
 
 <script>
 import { performersAPI } from '@/services/api'
+import { tagsAPI } from '@/services/api'
 import settingsService from '@/services/settingsService'
 
 export default {
@@ -679,6 +689,7 @@ export default {
 			performerMasterTags: [],
 			selectedTagId: null,
 			isSyncingTags: false,
+			performerTags: {}, // Cache for performer tags: { performerId: [tags] }
 		}
 	},
 
@@ -824,16 +835,44 @@ export default {
 					this.performers = []
 				}
 
-				// Preload previews for all performers in background (non-blocking)
-				if (this.performers.length > 0) {
-					this.preloadAllPreviews()
-				}
+				// Note: Previews are now loaded on-demand when opening details panel
+				// This prevents API spam and improves initial page load performance
+
+				// Load tags for all performers
+				this.loadAllPerformerTags()
 			} catch (err) {
 				console.error('Failed to load performers:', err)
 				this.error = 'Failed to load performers. Please try again.'
 				this.performers = [] // Ensure it's always an array even on error
 			} finally {
 				this.loading = false
+				console.log(this.performers)
+			}
+		},
+
+		async loadAllPerformerTags() {
+			// Load tags for all performers in batches to avoid API spam
+			const batchSize = 5
+			const performers = this.performers || []
+
+			for (let i = 0; i < performers.length; i += batchSize) {
+				const batch = performers.slice(i, i + batchSize)
+				await Promise.all(
+					batch.map(async (performer) => {
+						try {
+							const response = await performersAPI.getTags(performer.id)
+							// Access response.data to get the actual tags array
+							this.performerTags[performer.id] = response.data || []
+						} catch (error) {
+							console.error(`Failed to load tags for performer ${performer.id}:`, error)
+							this.performerTags[performer.id] = []
+						}
+					})
+				)
+				// Small delay between batches to avoid overwhelming the API
+				if (i + batchSize < performers.length) {
+					await new Promise((resolve) => setTimeout(resolve, 100))
+				}
 			}
 		},
 
@@ -897,20 +936,6 @@ export default {
 				localStorage.setItem('performerPreviews', JSON.stringify(this.performerPreviews))
 			} catch (e) {
 				console.error('Failed to save preview cache:', e)
-			}
-		},
-		async preloadAllPreviews() {
-			// Safety check
-			if (!Array.isArray(this.performers)) {
-				console.warn('performers is not an array, skipping preview preload')
-				return
-			}
-
-			// Preload previews for all performers in background
-			for (const performer of this.performers) {
-				if (performer && performer.id && !this.performerPreviews[performer.id]) {
-					await this.loadPerformerPreviews(performer.id)
-				}
 			}
 		},
 		playPreview(event) {
@@ -1136,14 +1161,11 @@ export default {
 		},
 		// Tag Management Methods
 		async loadPerformerTags(performerId) {
-			console.log('Loading tags for performer:', performerId)
 			try {
 				const response = await performersAPI.getTags(performerId)
-				console.log('Performer tags response:', response)
 				// Response interceptor unwraps to {success, message, data}
 				// We need to access .data to get the actual tags array
 				this.performerMasterTags = response.data || []
-				console.log('Set performerMasterTags to:', this.performerMasterTags)
 			} catch (error) {
 				console.error('Failed to load performer tags:', error)
 				this.performerMasterTags = []
@@ -1155,11 +1177,8 @@ export default {
 			const tagId = parseInt(this.selectedTagId)
 			const performerId = this.detailsPanel.performer.id
 
-			console.log('Adding tag:', { performerId, tagId })
-
 			try {
-				const response = await performersAPI.addTag(performerId, tagId)
-				console.log('Add tag response:', response)
+				await performersAPI.addTag(performerId, tagId)
 				this.$toast.success('Tag Added', 'Master tag added to performer')
 				await this.loadPerformerTags(performerId)
 				this.selectedTagId = null
@@ -1203,11 +1222,13 @@ export default {
 			}
 		},
 		async loadAllTags() {
-			try {
-				this.allTags = await this.$store.dispatch('fetchTags')
-			} catch (error) {
-				console.error('Failed to load tags:', error)
-				this.allTags = []
+			let storeTags = await this.$store.dispatch('fetchTags')
+			if (storeTags.length !== 0) {
+				this.allTags = storeTags
+				return
+			} else {
+				const response = await tagsAPI.getAll()
+				this.allTags = response || []
 			}
 		},
 		getBiosData(performer) {
