@@ -22,6 +22,11 @@ const routes = [
 		component: () => import(/* webpackChunkName: "videos" */ '@/views/VideosPage.vue'),
 	},
 	{
+		path: '/watch/:id',
+		name: 'VideoPlayer',
+		component: () => import(/* webpackChunkName: "video-player" */ '@/views/VideoPlayerPage.vue'),
+	},
+	{
 		path: '/libraries',
 		name: 'Libraries',
 		component: () => import(/* webpackChunkName: "libraries" */ '@/views/LibrariesPage.vue'),
@@ -60,6 +65,11 @@ const routes = [
 		path: '/tasks',
 		name: 'Tasks',
 		component: () => import(/* webpackChunkName: "tasks" */ '@/views/TasksPage.vue'),
+	},
+	{
+		path: '/edit-list',
+		name: 'EditList',
+		component: () => import(/* webpackChunkName: "edit-list" */ '@/views/EditListPage.vue'),
 	},
 ]
 

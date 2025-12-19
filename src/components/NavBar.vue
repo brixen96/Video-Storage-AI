@@ -72,15 +72,21 @@
 						</router-link>
 					</li>
 					<li class="nav-item">
+						<router-link to="/tasks" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'tasks']" class="me-1" />
+							Tasks
+						</router-link>
+					</li>
+					<li class="nav-item">
 						<router-link to="/ai" class="nav-link" active-class="active">
 							<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
 							AI
 						</router-link>
 					</li>
 					<li class="nav-item">
-						<router-link to="/tasks" class="nav-link" active-class="active">
-							<font-awesome-icon :icon="['fas', 'tasks']" class="me-1" />
-							Tasks
+						<router-link to="/edit-list" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'list-check']" class="me-1" />
+							Edit List
 						</router-link>
 					</li>
 				</ul>

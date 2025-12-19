@@ -97,6 +97,9 @@ import {
 	faImages,
 	faRobot,
 	faFileExport,
+	faListCheck,
+	faBroom,
+	faHdd,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -204,7 +207,10 @@ library.add(
 	faImage,
 	faImages,
 	faRobot,
-	faFileExport
+	faFileExport,
+	faListCheck,
+	faBroom,
+	faHdd
 )
 
 export default FontAwesomeIcon

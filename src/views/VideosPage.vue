@@ -198,7 +198,6 @@
 							:key="video.id"
 							:video="video"
 							:is-selected="selectedVideos.includes(video.id)"
-							@click="openVideoDetails"
 							@toggle-select="toggleVideoSelection"
 							@context-menu="showContextMenu"
 							@play="playVideo"
@@ -228,7 +227,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								<tr v-for="video in videos" :key="video.id" :class="{ selected: selectedVideos.includes(video.id) }" @click="openVideoDetails(video)">
+								<tr v-for="video in videos" :key="video.id" :class="{ selected: selectedVideos.includes(video.id) }">
 									<td @click.stop>
 										<input type="checkbox" :checked="selectedVideos.includes(video.id)" @change="toggleVideoSelection(video)" />
 									</td>
@@ -264,142 +263,6 @@
 								</li>
 							</ul>
 						</nav>
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<!-- Video Details Panel (Right Drawer) -->
-		<div v-if="selectedVideo" class="vp-video-details-panel" :class="{ open: selectedVideo }">
-			<div class="vp-panel-header">
-				<h2>{{ selectedVideo.title }}</h2>
-				<button class="btn-close" @click="selectedVideo = null"></button>
-			</div>
-			<div class="vp-panel-body">
-				<!-- Metadata -->
-				<div class="vp-detail-section">
-					<h3>Metadata</h3>
-					<div class="vp-info-grid">
-						<div class="vp-info-item"><strong>Filename:</strong> {{ getFilename(selectedVideo.file_path) }}</div>
-						<div class="vp-info-item"><strong>Path:</strong> {{ selectedVideo.file_path }}</div>
-						<div class="vp-info-item"><strong>Duration:</strong> {{ formatDuration(selectedVideo.duration) }}</div>
-						<div class="vp-info-item"><strong>Resolution:</strong> {{ selectedVideo.resolution }}</div>
-						<div class="vp-info-item"><strong>Codec:</strong> {{ selectedVideo.codec }}</div>
-						<div class="vp-info-item"><strong>Size:</strong> {{ formatFileSize(selectedVideo.file_size) }}</div>
-						<div class="vp-info-item"><strong>Bitrate:</strong> {{ formatBitrate(selectedVideo.bitrate) }}</div>
-						<div class="vp-info-item"><strong>FPS:</strong> {{ selectedVideo.fps }}</div>
-						<div class="vp-info-item"><strong>Views:</strong> {{ selectedVideo.play_count || 0 }}</div>
-					</div>
-				</div>
-
-				<!-- Actions -->
-				<div class="vp-detail-section">
-					<h3>Actions</h3>
-					<div class="vp-action-buttons">
-						<button class="btn btn-sm btn-primary" @click="playVideo(selectedVideo)">
-							<font-awesome-icon :icon="['fas', 'play']" />
-							Play
-						</button>
-						<button class="btn btn-sm btn-outline-primary" @click="editMetadata(selectedVideo)">
-							<font-awesome-icon :icon="['fas', 'edit']" />
-							Edit
-						</button>
-						<button class="btn btn-sm btn-outline-info" @click="fetchMetadata(selectedVideo)">
-							<font-awesome-icon :icon="['fas', 'download']" />
-							Fetch Metadata
-						</button>
-						<button class="btn btn-sm btn-outline-danger" @click="deleteVideo(selectedVideo)">
-							<font-awesome-icon :icon="['fas', 'trash']" />
-							Delete
-						</button>
-					</div>
-				</div>
-
-				<!-- Performers -->
-				<div v-if="selectedVideo.performers && selectedVideo.performers.length > 0" class="vp-detail-section">
-					<h3>
-						<font-awesome-icon :icon="['fas', 'users']" />
-						Performers ({{ selectedVideo.performers.length }})
-					</h3>
-					<div class="vp-performers-grid">
-						<div
-							v-for="performer in selectedVideo.performers"
-							:key="performer.id"
-							class="vp-performer-card"
-							@click="openPerformer(performer)"
-							@mouseenter="startPerformerPreview(performer)"
-							@mouseleave="stopPerformerPreview(performer)"
-						>
-							<video
-								v-if="performer.preview_path"
-								:ref="`performer-preview-${performer.id}`"
-								:src="getPerformerPreviewUrl(performer)"
-								class="vp-performer-preview-video"
-								loop
-								muted
-								autoplay
-								playsinline
-								preload="metadata"
-								@loadeddata="onPerformerPreviewLoaded(performer)"
-								@error="handlePreviewError"
-							></video>
-
-							<!-- Static Image/Placeholder -->
-							<div v-else class="vp-performer-image">
-								<img v-if="performer.metadata_obj && performer.metadata_obj.image_url" :src="performer.metadata_obj.image_url" :alt="performer.name" />
-								<div v-else class="vp-performer-placeholder">
-									<font-awesome-icon :icon="['fas', 'user']" size="3x" />
-								</div>
-							</div>
-
-							<!-- Performer Info Overlay -->
-							<div class="vp-performer-info">
-								<h4>
-									<font-awesome-icon v-if="performer.zoo" :icon="['fas', 'dog']" class="text-danger me-2" title="Zoo Content" />
-									{{ performer.name }}
-								</h4>
-								<div v-if="performer.metadata_obj" class="vp-performer-meta">
-									<span v-if="performer.metadata_obj.birthdate" class="vp-meta-item">
-										<font-awesome-icon :icon="['fas', 'birthday-cake']" />
-										{{ calculateAge(performer.metadata_obj.birthdate) }}
-									</span>
-									<span v-if="performer.metadata_obj.country" class="vp-meta-item">
-										<font-awesome-icon :icon="['fas', 'globe']" />
-										{{ performer.metadata_obj.country }}
-									</span>
-								</div>
-								<div class="vp-performer-stats">
-									<span class="vp-stat-badge">
-										<font-awesome-icon :icon="['fas', 'video']" />
-										{{ performer.scene_count || 0 }} scenes
-									</span>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Studio -->
-				<div v-if="selectedVideo.studios && selectedVideo.studios.length > 0" class="vp-detail-section">
-					<h3>Studio</h3>
-					<div class="vp-studio-item" @click="openStudio(selectedVideo.studios[0])">
-						<font-awesome-icon :icon="['fas', 'building']" />
-						{{ selectedVideo.studios[0].name }}
-					</div>
-				</div>
-
-				<!-- Tags -->
-				<div class="vp-detail-section">
-					<h3>Tags</h3>
-					<div class="vp-tags-container">
-						<span v-for="tag in selectedVideo.tags" :key="tag.id" class="vp-tag-chip" :style="{ backgroundColor: tag.color || '#6c757d' }">
-							<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" />
-							{{ tag.name }}
-						</span>
-						<button class="btn btn-sm btn-outline-primary" @click="openTagModal(selectedVideo)">
-							<font-awesome-icon :icon="['fas', 'plus']" />
-							Add Tag
-						</button>
 					</div>
 				</div>
 			</div>
@@ -520,7 +383,6 @@ export default {
 			pageSize: 60,
 			totalVideos: 0,
 			selectedVideos: [],
-			selectedVideo: null,
 			showBulkActions: false,
 			contextMenu: {
 				show: false,
@@ -716,9 +578,6 @@ export default {
 				console.error('Failed to start scan:', error)
 				this.$toast.error('Failed to start video scan: ' + (error.response?.data?.error || error.message))
 			}
-		},
-		openVideoDetails(video) {
-			this.selectedVideo = video
 		},
 		toggleVideoSelection(video) {
 			const index = this.selectedVideos.indexOf(video.id)

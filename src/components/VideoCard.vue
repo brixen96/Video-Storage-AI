@@ -55,8 +55,11 @@
 			<!-- Metadata Badges -->
 			<div class="video-badges">
 				<span v-if="video.resolution" class="badge bg-primary">{{ video.resolution }}</span>
+				<span v-if="video.fps" class="badge bg-success">{{ formatFPS(video.fps) }} FPS</span>
+				<span v-if="video.codec" class="badge bg-warning text-dark">{{ video.codec }}</span>
+				<span v-if="video.bitrate" class="badge bg-info">{{ formatBitrate(video.bitrate) }}</span>
 				<span v-if="video.file_size" class="badge bg-secondary">{{ formatFileSize(video.file_size) }}</span>
-				<span v-if="video.play_count > 0" class="badge bg-info">
+				<span v-if="video.play_count > 0" class="badge bg-dark">
 					<font-awesome-icon :icon="['fas', 'eye']" />
 					{{ video.play_count }}
 				</span>
@@ -182,6 +185,17 @@ export default {
 			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 			return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
 		},
+		formatBitrate(bitrate) {
+			if (!bitrate) return ''
+			const kbps = bitrate / 1000
+			if (kbps < 1000) return kbps.toFixed(0) + ' Kbps'
+			return (kbps / 1000).toFixed(1) + ' Mbps'
+		},
+		formatFPS(fps) {
+			if (!fps) return ''
+			// Round to 2 decimal places and remove trailing zeros
+			return parseFloat(fps.toFixed(2))
+		},
 		getInitials(name) {
 			return name
 				.split(' ')
@@ -191,7 +205,9 @@ export default {
 				.slice(0, 2)
 		},
 		handleClick() {
-			this.$emit('click', this.video)
+			// Open video player page in new tab
+			const route = this.$router.resolve(`/watch/${this.video.id}`)
+			window.open(route.href, '_blank')
 		},
 		toggleSelection() {
 			this.$emit('toggle-select', this.video)
