@@ -36,6 +36,10 @@
 	border-left-color: #00d9ff;
 }
 
+.toast-warning {
+	border-left-color: #ffc107;
+}
+
 .toast-loading {
 	border-left-color: #ffc107;
 }
@@ -55,6 +59,10 @@
 
 .toast-info .toast-icon {
 	color: #00d9ff;
+}
+
+.toast-warning .toast-icon {
+	color: #ffc107;
 }
 
 .toast-loading .toast-icon {

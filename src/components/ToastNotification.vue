@@ -6,6 +6,7 @@
 					<div class="toast-icon">
 						<font-awesome-icon v-if="toast.type === 'success'" :icon="['fas', 'check-circle']" />
 						<font-awesome-icon v-else-if="toast.type === 'error'" :icon="['fas', 'exclamation-triangle']" />
+						<font-awesome-icon v-else-if="toast.type === 'warning'" :icon="['fas', 'exclamation-circle']" />
 						<font-awesome-icon v-else-if="toast.type === 'info'" :icon="['fas', 'info-circle']" />
 						<font-awesome-icon v-else :icon="['fas', 'spinner']" spin />
 					</div>
@@ -64,6 +65,9 @@ export default {
 		},
 		info(title, message, duration) {
 			return this.show({ type: 'info', title, message, duration })
+		},
+		warning(title, message, duration) {
+			return this.show({ type: 'warning', title, message, duration })
 		},
 		loading(title, message) {
 			return this.show({ type: 'loading', title, message, duration: 0 })

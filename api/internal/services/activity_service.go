@@ -386,6 +386,27 @@ func (s *ActivityService) CleanOld(daysOld int) (int64, error) {
 	return count, nil
 }
 
+// ClearAll removes all activity logs
+func (s *ActivityService) ClearAll() (int64, error) {
+	query := "DELETE FROM activity_logs"
+
+	result, err := s.db.Exec(query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to clear all activities: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if err := s.BroadcastStatusUpdate(); err != nil {
+		log.Printf("failed to broadcast status update: %v", err)
+	}
+
+	return count, nil
+}
+
 // GetStatsByType returns activity counts grouped by task type
 func (s *ActivityService) GetStatsByType() (map[string]int, error) {
 	query := `
@@ -649,6 +670,11 @@ func (s *ActivityService) CreateLog(create *models.ActivityLogCreate) (*models.A
 	}
 
 	activity.ID = id
+
+	// Broadcast the new activity via WebSocket
+	s.BroadcastUpdateLog(activity)
+	s.BroadcastStatusUpdate()
+
 	return activity, nil
 }
 
@@ -781,6 +807,12 @@ func (s *ActivityService) UpdateLog(id int64, update *models.ActivityLogUpdate) 
 		activity.CompletedAt, activity.Details, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update activity log: %w", err)
+	}
+
+	// Broadcast the update via WebSocket
+	s.BroadcastUpdateLog(activity)
+	if update.Completed {
+		s.BroadcastStatusUpdate()
 	}
 
 	return activity, nil

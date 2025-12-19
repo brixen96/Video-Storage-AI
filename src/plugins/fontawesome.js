@@ -94,6 +94,7 @@ import {
 	faCopy,
 	faFileSignature,
 	faImage,
+	faImages,
 	faRobot,
 	faFileExport,
 } from '@fortawesome/free-solid-svg-icons'
@@ -201,6 +202,7 @@ library.add(
 	faCopy,
 	faFileSignature,
 	faImage,
+	faImages,
 	faRobot,
 	faFileExport
 )

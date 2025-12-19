@@ -80,6 +80,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.DELETE("/:id", deleteVideo)                     // Delete video
 			videos.GET("/search", searchVideos)                    // Search videos
 			videos.POST("/scan", scanVideos)                       // Scan library for videos
+			videos.POST("/scan-all-parallel", scanAllVideosParallel) // Scan all libraries in parallel
+			videos.POST("/generate-previews", generateAllPreviews) // Generate preview storyboards for all videos
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
@@ -156,15 +158,17 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			activity.PUT("/:id", updateActivity)         // Update activity
 			activity.DELETE("/:id", deleteActivity)      // Delete activity
 			activity.POST("/clean", cleanOldActivities)  // Clean old activities
+			activity.POST("/clear-all", clearAllActivities) // Clear all activities
 		}
 
 		// File operations endpoints
 		files := v1.Group("/files")
 		{
-			files.POST("/scan", scanDirectory)  // Scan directory for videos
-			files.POST("/rename", renameFile)   // Rename file
-			files.POST("/move", moveFile)       // Move file
-			files.DELETE("/delete", deleteFile) // Delete file
+			files.POST("/scan", scanDirectory)                    // Scan directory for videos
+			files.POST("/rename", renameFile)                     // Rename file
+			files.POST("/move", moveFile)                         // Move file within library
+			files.POST("/move-across-libraries", moveFileAcrossLibraries) // Move file between libraries
+			files.DELETE("/delete", deleteFile)                   // Delete file
 		}
 
 		// Database management endpoints

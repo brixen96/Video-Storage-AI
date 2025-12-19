@@ -474,6 +474,191 @@ To completely eliminate CSS conflicts, ALL classes in `videos_page.css` were sys
 
 ---
 
+## CRITICAL: Comprehensive Impact Analysis Before Code Changes
+
+### The Golden Rule
+
+**Before touching ANY code, you MUST perform a complete impact analysis and identify ALL affected files.**
+
+This application is large and complex. A single change to a database field, model, or query can break features across the entire codebase. Taking time to prepare thoroughly is ALWAYS faster than fixing preventable bugs.
+
+### Mandatory Pre-Change Analysis Process
+
+For EVERY code change, follow this process:
+
+#### 1. Identify the Exact Change
+- What am I modifying? (database schema, model field, query, API endpoint, etc.)
+- What is the scope? (one file, multiple files, entire feature?)
+- What is the data type and nullability?
+
+#### 2. Find ALL Usages (Use Grep Extensively)
+
+**If modifying a database column:**
+- [ ] Find ALL SELECT queries that include this table
+- [ ] Find ALL INSERT queries
+- [ ] Find ALL UPDATE queries
+- [ ] Find ALL `rows.Scan()` calls
+- [ ] Find ALL `db.Exec()` calls
+- [ ] Check if field is nullable (requires `sql.NullString`, `sql.NullTime`, etc.)
+
+**If modifying a model field:**
+- [ ] Find ALL places that serialize/deserialize it (JSON marshaling)
+- [ ] Find ALL API endpoints that return this model
+- [ ] Find ALL frontend components that use this field
+- [ ] Check if field is used in filters, sorts, or searches
+
+**If modifying an API endpoint:**
+- [ ] Find ALL frontend calls to this endpoint
+- [ ] Find ALL components that use the response data
+- [ ] Check response structure and ensure frontend matches
+
+**If modifying a query:**
+- [ ] Check ALL columns in SELECT match ALL fields in Scan()
+- [ ] Check column order matches Scan() order exactly
+- [ ] Verify NULL handling for nullable columns
+
+#### 3. Create a Complete Checklist
+
+Before making changes, write down ALL files that need updates:
+
+```markdown
+Files to Update:
+- [ ] api/internal/database/database.go - Add column + migration
+- [ ] api/internal/models/video.go - Add field to struct
+- [ ] api/internal/services/video_service.go - Update GetAll() SELECT and Scan
+- [ ] api/internal/services/video_service.go - Update GetByID() SELECT and Scan
+- [ ] api/internal/services/video_service.go - Update Create() INSERT
+- [ ] src/components/VideoCard.vue - Display new field
+- [ ] src/views/VideosPage.vue - Use new field in filters
+```
+
+#### 4. Update Files in Logical Order
+
+Follow this sequence to minimize errors:
+
+1. **Database Layer**: Schema changes and migrations first
+2. **Model Layer**: Update structs and type definitions
+3. **Service Layer**: Update ALL queries (SELECT, INSERT, UPDATE)
+4. **API Layer**: Update handlers if needed
+5. **Frontend Layer**: Update API calls and components
+6. **Test**: Build and test after ALL changes are complete
+
+#### 5. Verify Completeness
+
+After making changes, verify:
+- [ ] All SELECT queries include the new field
+- [ ] All Scan() calls include the new field in correct order
+- [ ] NULL handling is correct for nullable fields
+- [ ] Field ordering matches between query and Scan()
+- [ ] Frontend accesses response data correctly
+- [ ] Build succeeds without errors
+- [ ] Feature works in actual application
+
+### Real-World Example: Adding `preview_path` Field
+
+**Wrong Approach** (causes bugs):
+1. Add `preview_path` to database schema
+2. Add field to model
+3. Update one SELECT query
+4. Forget to update Scan() → **Bug #1**
+5. Update Scan() but use wrong type → **Bug #2**
+6. Waste 30 minutes fixing preventable errors
+
+**Correct Approach** (no bugs):
+1. **Analysis**:
+   - Adding nullable string field to videos table
+   - Field will be NULL for videos without previews
+   - Need to use `sql.NullString` for scanning
+   - Must update: database, model, GetAll() query, GetAll() Scan, GetByID() query, GetByID() Scan
+
+2. **Checklist**:
+   - [ ] database.go - Add column + migration
+   - [ ] video.go - Add `PreviewPath string` field
+   - [ ] video_service.go - Add to GetAll() SELECT query
+   - [ ] video_service.go - Add `var previewPath sql.NullString` before Scan
+   - [ ] video_service.go - Add `&previewPath` to Scan() args
+   - [ ] video_service.go - Add NULL check after Scan
+   - [ ] Repeat for GetByID() and any other query methods
+
+3. **Execute** all changes systematically
+
+4. **Verify** build succeeds and test in browser
+
+5. **Result**: Zero bugs, working feature on first try
+
+### Common Patterns to Remember
+
+#### Nullable String Fields
+```go
+// Declaration
+var nullableField sql.NullString
+
+// Scan
+err := rows.Scan(..., &nullableField, ...)
+
+// Assignment
+if nullableField.Valid {
+    model.Field = nullableField.String
+}
+```
+
+#### Nullable Boolean Fields
+```go
+// Declaration
+var nullableBool sql.NullBool
+
+// Scan
+err := rows.Scan(..., &nullableBool, ...)
+
+// Assignment
+if nullableBool.Valid {
+    model.Field = nullableBool.Bool
+}
+```
+
+#### Query and Scan Order MUST Match
+```go
+// Query columns
+SELECT id, name, description, preview_path FROM videos
+
+// Scan MUST match exactly
+err := rows.Scan(&v.ID, &v.Name, &description, &previewPath)
+```
+
+### Time Investment Principle
+
+**Spending 10 minutes on thorough analysis prevents 60 minutes of debugging.**
+
+- Analysis: 10 minutes
+- Implementation: 20 minutes
+- Testing: 5 minutes
+- **Total**: 35 minutes, zero bugs
+
+vs.
+
+- Rushed implementation: 10 minutes
+- Bug #1 discovered: 15 minutes debugging
+- Bug #2 discovered: 20 minutes debugging
+- Rebuild and retest: 10 minutes
+- **Total**: 55+ minutes, frustration
+
+### Summary Checklist
+
+Before making ANY code change:
+
+- [ ] I have identified the EXACT change I'm making
+- [ ] I have used Grep to find ALL usages of what I'm changing
+- [ ] I have created a complete checklist of ALL files to update
+- [ ] I have verified NULL handling for nullable fields
+- [ ] I have verified query column order matches Scan() order
+- [ ] I have checked for similar patterns in the codebase
+- [ ] I am updating files in logical order (database → model → service → API → frontend)
+- [ ] I will build and test AFTER all changes are complete
+
+**If you cannot confidently check ALL boxes, you are not ready to write code yet. Do more analysis.**
+
+---
+
 ## Critical UI/Styling Rules
 
 ### RULE: NEVER Use `text-muted` on Dark Backgrounds

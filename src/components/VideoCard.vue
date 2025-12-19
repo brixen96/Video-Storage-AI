@@ -13,35 +13,14 @@
 				<font-awesome-icon :icon="['fas', 'video']" size="3x" />
 			</div>
 
-			<!-- Video Preview (plays on hover) -->
-			<video
-				v-if="hasPreview"
-				ref="previewVideo"
-				:src="getPreviewURL(video)"
-				class="preview-video"
-				:class="{ active: isPreviewPlaying }"
-				loop
-				muted
-				@loadeddata="onPreviewLoaded"
-			></video>
-
-			<!-- Hover Overlay -->
-			<div class="hover-overlay">
-				<button class="btn-play" @click.stop="playVideo">
-					<font-awesome-icon :icon="['fas', 'play']" />
-				</button>
-				<div class="quick-actions">
-					<button class="btn-quick-action" @click.stop="$emit('add-tag', video)" title="Add Tag">
-						<font-awesome-icon :icon="['fas', 'tag']" />
-					</button>
-					<button class="btn-quick-action" @click.stop="$emit('edit-metadata', video)" title="Edit Metadata">
-						<font-awesome-icon :icon="['fas', 'edit']" />
-					</button>
-					<button class="btn-quick-action" @click.stop="openInExplorer" title="Open in Explorer">
-						<font-awesome-icon :icon="['fas', 'folder-open']" />
-					</button>
-				</div>
-			</div>
+			<!-- Storyboard Preview (cycles through frames on hover) -->
+			<img
+				v-if="hasPreview && isPreviewPlaying && currentPreviewFrame"
+				:src="currentPreviewFrame"
+				class="preview-video active"
+				:alt="`${video.title} - Preview`"
+				loading="lazy"
+			/>
 
 			<!-- Status Badges -->
 			<div class="status-badges">
@@ -124,11 +103,18 @@ export default {
 			isPreviewPlaying: false,
 			previewLoaded: false,
 			hoverTimeout: null,
+			previewFrameIndex: 0,
+			previewInterval: null,
+			previewFrames: [], // Array of frame URLs
 		}
 	},
 	computed: {
 		hasPreview() {
-			return this.video.preview_path || (this.video.previews && this.video.previews.length > 0)
+			return this.video.preview_path && this.video.preview_path !== ''
+		},
+		currentPreviewFrame() {
+			if (this.previewFrames.length === 0) return null
+			return this.previewFrames[this.previewFrameIndex]
 		},
 	},
 	methods: {
@@ -139,23 +125,32 @@ export default {
 			}
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
 		},
-		getPreviewURL(video) {
-			if (video.preview_path) {
-				return getAssetURL(video.preview_path)
+		loadPreviewFrames() {
+			if (!this.video.preview_path) {
+				this.previewFrames = []
+				return
 			}
-			if (video.previews && video.previews.length > 0) {
-				return getAssetURL(video.previews[0])
+
+			// Generate URLs for all 10 preview frames
+			// preview_path is like "1/someFolder/videoName" (directory containing frames)
+			const frames = []
+			for (let i = 1; i <= 10; i++) {
+				const framePath = `previews/${this.video.preview_path}/frame_${i.toString().padStart(3, '0')}.jpg`
+				frames.push(getAssetURL(framePath))
 			}
-			return null
+			this.previewFrames = frames
 		},
 		startPreview() {
 			// Delay preview start by 300ms to avoid loading on quick hovers
 			this.hoverTimeout = setTimeout(() => {
-				if (this.hasPreview && this.$refs.previewVideo) {
+				if (this.hasPreview) {
 					this.isPreviewPlaying = true
-					this.$refs.previewVideo.play().catch(() => {
-						// Ignore play errors (e.g., if user navigates away quickly)
-					})
+					this.previewFrameIndex = 0
+
+					// Cycle through frames every 200ms for smooth timelapse effect
+					this.previewInterval = setInterval(() => {
+						this.previewFrameIndex = (this.previewFrameIndex + 1) % this.previewFrames.length
+					}, 200)
 				}
 			}, 300)
 		},
@@ -166,15 +161,15 @@ export default {
 				this.hoverTimeout = null
 			}
 
-			// Stop preview if playing
-			if (this.isPreviewPlaying && this.$refs.previewVideo) {
-				this.$refs.previewVideo.pause()
-				this.$refs.previewVideo.currentTime = 0
-				this.isPreviewPlaying = false
+			// Stop preview cycling
+			if (this.previewInterval) {
+				clearInterval(this.previewInterval)
+				this.previewInterval = null
 			}
-		},
-		onPreviewLoaded() {
-			this.previewLoaded = true
+
+			// Reset preview state
+			this.isPreviewPlaying = false
+			this.previewFrameIndex = 0
 		},
 		formatDuration(seconds) {
 			const mins = Math.floor(seconds / 60)
@@ -204,18 +199,24 @@ export default {
 		showContextMenu(event) {
 			this.$emit('context-menu', { video: this.video, x: event.clientX, y: event.clientY })
 		},
-		playVideo() {
-			this.$emit('play', this.video)
-		},
-		openInExplorer() {
-			// This would need native integration or electron
-			console.log('Open in explorer:', this.video.file_path)
+	},
+	mounted() {
+		// Load preview frames on mount
+		this.loadPreviewFrames()
+	},
+	watch: {
+		'video.preview_path'() {
+			// Reload frames if preview_path changes
+			this.loadPreviewFrames()
 		},
 	},
 	beforeUnmount() {
-		// Clean up timeout on component destroy
+		// Clean up timeout and interval on component destroy
 		if (this.hoverTimeout) {
 			clearTimeout(this.hoverTimeout)
+		}
+		if (this.previewInterval) {
+			clearInterval(this.previewInterval)
 		}
 	},
 }

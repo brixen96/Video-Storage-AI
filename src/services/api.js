@@ -72,6 +72,8 @@ export const videosAPI = {
 	update: (id, data, signal) => api.put(`/videos/${id}`, data, { signal }),
 	delete: (id, signal) => api.delete(`/videos/${id}`, { signal }),
 	scan: (libraryId, signal) => api.post('/videos/scan', { library_id: libraryId }, { signal }),
+	scanAllParallel: (config = {}, signal) => api.post('/videos/scan-all-parallel', config, { signal }),
+	generatePreviews: (config = {}, signal) => api.post('/videos/generate-previews', config, { signal }),
 	fetchMetadata: (id, signal) => api.post(`/videos/${id}/fetch`, {}, { signal }),
 	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
 	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),
@@ -112,6 +114,7 @@ export const filesAPI = {
 	scan: (data) => api.post('/files/scan', data),
 	rename: (data) => api.post('/files/rename', data),
 	move: (data) => api.post('/files/move', data),
+	moveAcrossLibraries: (data) => api.post('/files/move-across-libraries', data),
 	delete: (data) => api.delete('/files/delete', { data }),
 }
 
@@ -125,6 +128,7 @@ export const activityAPI = {
 	update: (id, data) => api.put(`/activity/${id}`, data),
 	delete: (id) => api.delete(`/activity/${id}`),
 	cleanOld: (days = 30) => api.post('/activity/clean', null, { params: { days } }),
+	clearAll: () => api.post('/activity/clear-all'),
 }
 
 export const databaseAPI = {

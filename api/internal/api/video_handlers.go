@@ -198,6 +198,98 @@ func scanVideos(c *gin.Context) {
 	})
 }
 
+// scanAllVideosParallel handles POST /api/v1/videos/scan-all-parallel
+// Scans all libraries in parallel with drive-aware optimization
+func scanAllVideosParallel(c *gin.Context) {
+	videoSvc := ensureVideoService()
+
+	// Get configuration from request body
+	var request struct {
+		ServerDrives    []string `json:"server_drives"`    // e.g., ["Z:", "Y:"]
+		LocalDrives     []string `json:"local_drives"`     // e.g., ["C:", "D:"]
+		ServerMaxConcurrent int  `json:"server_max_concurrent"` // Max parallel scans for server drives
+		LocalMaxConcurrent  int  `json:"local_max_concurrent"`  // Max parallel scans for local drives
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		// Use defaults if not provided
+		request.ServerDrives = []string{"Z:", "Y:"}
+		request.LocalDrives = []string{"C:", "D:"}
+		request.ServerMaxConcurrent = 2  // Conservative for server
+		request.LocalMaxConcurrent = 8   // Aggressive for local PC
+	}
+
+	// Start parallel scanning in background
+	go func() {
+		err := videoSvc.ScanAllLibrariesParallel(services.ParallelScanConfig{
+			ServerDrives:        request.ServerDrives,
+			LocalDrives:         request.LocalDrives,
+			ServerMaxConcurrent: request.ServerMaxConcurrent,
+			LocalMaxConcurrent:  request.LocalMaxConcurrent,
+		})
+		if err != nil {
+			log.Printf("Failed to scan libraries in parallel: %v", err)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Parallel library scan started",
+		"status":  "scanning",
+		"config": gin.H{
+			"server_drives":         request.ServerDrives,
+			"local_drives":          request.LocalDrives,
+			"server_max_concurrent": request.ServerMaxConcurrent,
+			"local_max_concurrent":  request.LocalMaxConcurrent,
+		},
+	})
+}
+
+// generateAllPreviews handles POST /api/v1/videos/generate-previews
+// Generates preview storyboards for all videos with drive-aware optimization
+func generateAllPreviews(c *gin.Context) {
+	videoSvc := ensureVideoService()
+
+	// Get configuration from request body
+	var request struct {
+		ServerDrives        []string `json:"server_drives"`
+		LocalDrives         []string `json:"local_drives"`
+		ServerMaxConcurrent int      `json:"server_max_concurrent"`
+		LocalMaxConcurrent  int      `json:"local_max_concurrent"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		// Use defaults if not provided
+		request.ServerDrives = []string{"Z:", "Y:"}
+		request.LocalDrives = []string{"C:", "D:"}
+		request.ServerMaxConcurrent = 2 // Conservative for server
+		request.LocalMaxConcurrent = 8  // Aggressive for local PC
+	}
+
+	// Start preview generation in background
+	go func() {
+		err := videoSvc.GenerateAllPreviews(services.ParallelScanConfig{
+			ServerDrives:        request.ServerDrives,
+			LocalDrives:         request.LocalDrives,
+			ServerMaxConcurrent: request.ServerMaxConcurrent,
+			LocalMaxConcurrent:  request.LocalMaxConcurrent,
+		})
+		if err != nil {
+			log.Printf("Failed to generate previews: %v", err)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Preview generation started",
+		"status":  "generating",
+		"config": gin.H{
+			"server_drives":         request.ServerDrives,
+			"local_drives":          request.LocalDrives,
+			"server_max_concurrent": request.ServerMaxConcurrent,
+			"local_max_concurrent":  request.LocalMaxConcurrent,
+		},
+	})
+}
+
 // openInExplorer handles POST /api/v1/videos/:id/open-in-explorer
 func openInExplorer(c *gin.Context) {
 	svc := ensureVideoService()

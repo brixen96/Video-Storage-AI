@@ -45,7 +45,10 @@
       "Bash(curl:*)",
       "Bash(powershell -Command:*)",
       "Bash(echo:*)",
-      "Bash(yarn build)"
+      "Bash(yarn build)",
+      "Bash(copy:*)",
+      "Bash(move:*)",
+      "Bash(start /B binvideo-storage-ai.exe)"
     ],
     "deny": [],
     "ask": []

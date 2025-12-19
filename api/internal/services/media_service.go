@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -373,4 +374,148 @@ func (s *MediaService) GetThumbnailPath(config ThumbnailConfig) *ThumbnailResult
 func (s *MediaService) ThumbnailExists(thumbnailPath string) bool {
 	_, err := os.Stat(thumbnailPath)
 	return err == nil
+}
+
+// PreviewConfig holds configuration for preview generation
+type PreviewConfig struct {
+	LibraryID      int64   // Library ID for folder hierarchy
+	LibraryPath    string  // Base library path
+	VideoFilePath  string  // Full path to video file
+	Duration       float64 // Video duration
+	PreviewDir     string  // Base preview directory (e.g., "./assets/previews")
+	FrameCount     int     // Number of preview frames to generate (default: 10)
+	ThumbnailWidth int     // Width of each preview thumbnail (default: 320)
+}
+
+// PreviewResult holds the result of preview generation
+type PreviewResult struct {
+	RelativePath string   // Relative path to preview directory
+	FullPath     string   // Full filesystem path to preview directory
+	Frames       []string // List of frame filenames (e.g., ["frame_001.jpg", "frame_002.jpg", ...])
+	FrameCount   int      // Number of frames generated
+	Interval     float64  // Time interval between frames in seconds
+}
+
+// GeneratePreviewStoryboard generates a series of thumbnail images at intervals throughout the video
+// This creates a "storyboard" of preview images for hover effects
+func (s *MediaService) GeneratePreviewStoryboard(config PreviewConfig) (*PreviewResult, error) {
+	// Set defaults
+	if config.FrameCount == 0 {
+		config.FrameCount = 10 // Default to 10 frames
+	}
+	if config.ThumbnailWidth == 0 {
+		config.ThumbnailWidth = 320 // Default width
+	}
+
+	// Calculate relative path from library to video file
+	relativeVideoPath, err := filepath.Rel(config.LibraryPath, config.VideoFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate relative path: %w", err)
+	}
+
+	// Get the directory path and filename
+	relativeDir := filepath.Dir(relativeVideoPath)
+	videoFileName := filepath.Base(config.VideoFilePath)
+	videoExt := filepath.Ext(videoFileName)
+	videoBaseName := strings.TrimSuffix(videoFileName, videoExt)
+
+	// Build the hierarchical preview directory structure
+	// Format: {previewDir}/{libraryID}/{relativeDir}/{videoBaseName}/
+	var libraryPreviewDir string
+	if relativeDir == "." || relativeDir == "" {
+		// Video is in root of library
+		libraryPreviewDir = filepath.Join(config.PreviewDir, fmt.Sprintf("%d", config.LibraryID), videoBaseName)
+	} else {
+		// Video is in subdirectory
+		libraryPreviewDir = filepath.Join(config.PreviewDir, fmt.Sprintf("%d", config.LibraryID), relativeDir, videoBaseName)
+	}
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(libraryPreviewDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create preview directory: %w", err)
+	}
+
+	// Calculate interval between frames
+	// Skip first and last 5% to avoid black frames, logos, or credits
+	startOffset := config.Duration * 0.05
+	endOffset := config.Duration * 0.95
+	usableDuration := endOffset - startOffset
+	interval := usableDuration / float64(config.FrameCount)
+
+	if interval < 1.0 {
+		interval = 1.0 // Minimum 1 second between frames
+	}
+
+	// Check if ffmpeg is available
+	_, err = exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg not found in PATH: %w", err)
+	}
+
+	// Generate frames using simple software encoding (hardware acceleration disabled due to reliability issues)
+	frames := []string{}
+	for i := 0; i < config.FrameCount; i++ {
+		timestamp := startOffset + (float64(i) * interval)
+		frameName := fmt.Sprintf("frame_%03d.jpg", i+1)
+		framePath := filepath.Join(libraryPreviewDir, frameName)
+
+		// Simple, reliable ffmpeg command with software encoding
+		// -loglevel error: Show only errors
+		// -ss before -i: Faster seeking
+		// -vframes 1: Extract single frame
+		// -q:v 3: Good JPEG quality (2-5 range, lower = better)
+		args := []string{
+			"-loglevel", "error",
+			"-ss", fmt.Sprintf("%.2f", timestamp),
+			"-i", config.VideoFilePath,
+			"-vframes", "1",
+			"-vf", fmt.Sprintf("scale=%d:-1", config.ThumbnailWidth),
+			"-q:v", "3",
+			"-y",
+			framePath,
+		}
+
+		// Check if input file exists
+		if _, err := os.Stat(config.VideoFilePath); os.IsNotExist(err) {
+			log.Printf("Input video file does not exist: %s", config.VideoFilePath)
+			continue
+		}
+
+		cmd := exec.Command("ffmpeg", args...)
+
+		// Capture stderr to see actual ffmpeg errors
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			// Log the exact command for debugging
+			cmdStr := fmt.Sprintf("ffmpeg %s", strings.Join(args, " "))
+			log.Printf("Failed to generate preview frame %d\nVideo: %s\nCommand: %s\nError: %v\nFFmpeg stderr: %s",
+				i+1, config.VideoFilePath, cmdStr, err, stderr.String())
+			continue // Skip this frame but continue with others
+		}
+
+		frames = append(frames, frameName)
+	}
+
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("failed to generate any preview frames")
+	}
+
+	// Calculate relative path for database storage
+	relativePath := filepath.ToSlash(filepath.Join(fmt.Sprintf("%d", config.LibraryID), relativeDir, videoBaseName))
+	if relativeDir == "." || relativeDir == "" {
+		relativePath = filepath.ToSlash(filepath.Join(fmt.Sprintf("%d", config.LibraryID), videoBaseName))
+	}
+
+	result := &PreviewResult{
+		RelativePath: relativePath,
+		FullPath:     libraryPreviewDir,
+		Frames:       frames,
+		FrameCount:   len(frames),
+		Interval:     interval,
+	}
+
+	log.Printf("Generated %d preview frames for %s (interval: %.2fs)", len(frames), videoFileName, interval)
+	return result, nil
 }

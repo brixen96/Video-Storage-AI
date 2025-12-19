@@ -427,7 +427,7 @@
 				<font-awesome-icon :icon="['fas', 'folder-open']" />
 				Open in Explorer
 			</div>
-			<div class="context-menu-item danger" @click="deleteVideo(contextMenu.video)">
+			<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
 				<font-awesome-icon :icon="['fas', 'trash']" />
 				Delete
 			</div>
@@ -980,6 +980,8 @@ export default {
 			// If path already starts with /assets/, just prepend the base URL
 			if (performer.preview_path.startsWith('/assets/') || performer.preview_path.startsWith('assets/')) {
 				const cleanPath = performer.preview_path.startsWith('/') ? performer.preview_path.slice(1) : performer.preview_path
+				console.log(cleanPath)
+
 				return `http://localhost:8080/${cleanPath}`
 			}
 			// Otherwise use getAssetURL for full path conversion
@@ -1001,4 +1003,3 @@ export default {
 <style scoped>
 @import '@/styles/pages/videos_page.css';
 </style>
-

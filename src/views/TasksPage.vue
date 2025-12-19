@@ -30,6 +30,17 @@
 									{{ scanning ? 'Scanning...' : 'Scan Libraries' }}
 								</button>
 							</div>
+							<hr class="my-4" />
+							<div class="task-item">
+								<div class="task-info">
+									<h6>Generate Previews</h6>
+									<p class="text-light mb-0">Generate hover preview storyboards for all videos (10 frames per video)</p>
+								</div>
+								<button class="btn btn-info mt-3" @click="generatePreviews" :disabled="generatingPreviews">
+									<font-awesome-icon :icon="['fas', generatingPreviews ? 'spinner' : 'images']" :spin="generatingPreviews" class="me-2" />
+									{{ generatingPreviews ? 'Generating...' : 'Generate Previews' }}
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -146,7 +157,7 @@
 									<h6>Database Operations</h6>
 									<p class="text-light mb-0">Maintain, backup, and restore your database</p>
 								</div>
-								<div class="d-flex gap-2">
+								<div class="d-flex gap-2 flex-wrap">
 									<button class="btn btn-warning" @click="optimizeDatabase">
 										<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
 										Optimize
@@ -158,6 +169,10 @@
 									<button class="btn btn-info" @click="restoreDatabase">
 										<font-awesome-icon :icon="['fas', 'upload']" class="me-2" />
 										Restore
+									</button>
+									<button class="btn btn-danger" @click="confirmClearLogs" :disabled="clearingLogs">
+										<font-awesome-icon :icon="['fas', clearingLogs ? 'spinner' : 'trash']" :spin="clearingLogs" class="me-2" />
+										{{ clearingLogs ? 'Clearing...' : 'Clear Activity Logs' }}
 									</button>
 								</div>
 							</div>
@@ -190,7 +205,7 @@
 </template>
 
 <script>
-import { librariesAPI, performersAPI, databaseAPI, videosAPI } from '@/services/api'
+import { librariesAPI, performersAPI, databaseAPI, videosAPI, activityAPI } from '@/services/api'
 
 export default {
 	name: 'TasksPage',
@@ -198,6 +213,8 @@ export default {
 		return {
 			scanning: false,
 			fetchingMetadata: false,
+			generatingPreviews: false,
+			clearingLogs: false,
 			databaseInfo: {
 				location: 'C:\\Repos\\Video Storage AI\\api\\video-storage.db',
 				size: 'Loading...',
@@ -241,10 +258,10 @@ export default {
 			if (this.scanning) return
 
 			this.scanning = true
-			this.showProgress('Scanning Libraries', 'Loading libraries...', 0)
+			this.showProgress('Scanning Libraries', 'Starting parallel scan with drive-aware optimization...', 0)
 
 			try {
-				// Get all libraries
+				// Get all libraries to show count
 				const libResponse = await librariesAPI.getAll()
 				const libraries = (libResponse && libResponse.data) || []
 
@@ -255,36 +272,151 @@ export default {
 					return
 				}
 
-				this.updateProgress('Scanning Libraries', `Found ${libraries.length} libraries`, 10)
+				// Group libraries for display
+				const serverLibs = libraries.filter((lib) => lib.path.startsWith('Z:') || lib.path.startsWith('Y:'))
+				const localLibs = libraries.filter((lib) => lib.path.startsWith('C:') || lib.path.startsWith('D:'))
 
-				// Scan each library
-				for (let i = 0; i < libraries.length; i++) {
-					const library = libraries[i]
-					const progress = 10 + Math.floor((i / libraries.length) * 80)
+				this.updateProgress(
+					'Scanning Libraries',
+					`Starting parallel scan: ${serverLibs.length} server libraries, ${localLibs.length} local libraries`,
+					10,
+					'Using multi-threaded scanning optimized for your hardware'
+				)
 
-					this.updateProgress('Scanning Libraries', `Scanning: ${library.name}`, progress, `Library ${i + 1} of ${libraries.length}`)
-
-					try {
-						await videosAPI.scan(library.id)
-					} catch (error) {
-						console.error(`Failed to scan library ${library.name}:`, error)
-						this.$toast.error('Scan Failed', `Failed to scan library: ${library.name}`)
-					}
+				// Configure parallel scanning with smart defaults
+				const config = {
+					server_drives: ['Z:', 'Y:'],
+					local_drives: ['C:', 'D:'],
+					server_max_concurrent: 2, // Conservative for server (avoid overload)
+					local_max_concurrent: 8, // Aggressive for local PC (you said it's turbo fast!)
 				}
 
-				this.updateProgress('Scanning Libraries', 'Scan complete!', 100)
-				this.$toast.success('Scan Complete', `Successfully scanned ${libraries.length} libraries`)
+				// Start parallel scan
+				await videosAPI.scanAllParallel(config)
 
+				this.updateProgress('Scanning Libraries', 'Parallel scan in progress...', 50, 'Libraries are being scanned simultaneously')
+
+				// Simulate progress updates (actual progress happens in background)
+				const progressInterval = setInterval(() => {
+					if (this.taskProgress.percent < 90) {
+						this.taskProgress.percent += 5
+						this.updateProgress(
+							'Scanning Libraries',
+							'Processing videos in parallel...',
+							this.taskProgress.percent,
+							`Server: ${serverLibs.length} libs | Local: ${localLibs.length} libs | Running concurrently`
+						)
+					}
+				}, 3000)
+
+				// Wait a bit for scanning to complete (you can adjust this or implement websocket updates)
 				setTimeout(() => {
-					this.hideProgress()
-					this.loadDatabaseInfo()
-				}, 1500)
+					clearInterval(progressInterval)
+					this.updateProgress('Scanning Libraries', 'Scan initiated!', 100, 'Check Activity page for detailed progress')
+					this.$toast.success(
+						'Parallel Scan Started',
+						`${libraries.length} libraries are being scanned in parallel. Server: ${serverLibs.length} @ 50% CPU | Local: ${localLibs.length} @ max speed`
+					)
+
+					setTimeout(() => {
+						this.hideProgress()
+						this.loadDatabaseInfo()
+					}, 2000)
+				}, 5000)
 			} catch (error) {
 				console.error('Failed to scan libraries:', error)
-				this.$toast.error('Scan Failed', 'Could not scan libraries')
+				this.$toast.error('Scan Failed', 'Could not start parallel scan')
 				this.hideProgress()
 			} finally {
-				this.scanning = false
+				setTimeout(() => {
+					this.scanning = false
+				}, 5000)
+			}
+		},
+
+		async generatePreviews() {
+			console.log('Generate Previews button clicked!')
+			if (this.generatingPreviews) {
+				console.log('Already generating, skipping...')
+				return
+			}
+
+			this.generatingPreviews = true
+			console.log('Starting preview generation...')
+			this.showProgress('Generating Previews', 'Starting preview generation with drive-aware optimization...', 0)
+
+			try {
+				// Get video count for display
+				console.log('Fetching database stats...')
+				const statsResponse = await databaseAPI.getStats()
+				console.log('Stats response:', statsResponse)
+				const videoCount = (statsResponse.data && statsResponse.data.video_count) || 0
+				console.log('Video count:', videoCount)
+
+				if (videoCount === 0) {
+					this.$toast.warning('No Videos', 'No videos found to generate previews for')
+					this.hideProgress()
+					this.generatingPreviews = false
+					return
+				}
+
+				this.updateProgress(
+					'Generating Previews',
+					`Preparing to generate previews for ${videoCount} videos`,
+					10,
+					'Using multi-threaded processing optimized for your hardware'
+				)
+
+				// Configure preview generation with VERY conservative defaults to prevent system freeze
+				// Each concurrent library spawns multiple ffmpeg processes with hardware acceleration
+				const config = {
+					server_drives: ['Z:', 'Y:'],
+					local_drives: ['C:', 'D:'],
+					server_max_concurrent: 1, // Very conservative for server (1 library at a time)
+					local_max_concurrent: 2, // Conservative for local PC (2 libraries at a time max)
+				}
+
+				// Start preview generation
+				console.log('Calling API with config:', config)
+				const response = await videosAPI.generatePreviews(config)
+				console.log('API response:', response)
+
+				this.updateProgress('Generating Previews', 'Preview generation in progress...', 50, 'Generating 10 frames per video')
+
+				// Simulate progress updates
+				const progressInterval = setInterval(() => {
+					if (this.taskProgress.percent < 90) {
+						this.taskProgress.percent += 3
+						this.updateProgress(
+							'Generating Previews',
+							'Processing videos in parallel...',
+							this.taskProgress.percent,
+							`Generating storyboard thumbnails for hover effects`
+						)
+					}
+				}, 4000)
+
+				// Wait and complete
+				setTimeout(() => {
+					clearInterval(progressInterval)
+					this.updateProgress('Generating Previews', 'Preview generation started!', 100, 'Check Activity page for detailed progress')
+					this.$toast.success(
+						'Preview Generation Started',
+						`Generating ${videoCount} video previews in parallel. Each video gets 10 thumbnail frames for hover effects!`
+					)
+
+					setTimeout(() => {
+						this.hideProgress()
+					}, 2000)
+				}, 5000)
+			} catch (error) {
+				console.error('Failed to generate previews:', error)
+				this.$toast.error('Generation Failed', 'Could not start preview generation')
+				this.hideProgress()
+			} finally {
+				setTimeout(() => {
+					this.generatingPreviews = false
+				}, 5000)
 			}
 		},
 
@@ -421,6 +553,31 @@ export default {
 			} catch (error) {
 				console.error('Database restore failed:', error)
 				this.$toast.error('Restore Failed', 'Could not restore database')
+			}
+		},
+
+		confirmClearLogs() {
+			if (
+				confirm(
+					'WARNING: This will permanently delete all activity logs. This cannot be undone.\n\nAre you sure you want to continue?'
+				)
+			) {
+				this.clearLogs()
+			}
+		},
+
+		async clearLogs() {
+			this.clearingLogs = true
+			try {
+				const response = await activityAPI.clearAll()
+				const deletedCount = response.data?.deleted_count || 0
+				this.$toast.success('Logs Cleared', `All ${deletedCount} activity logs have been deleted`)
+				this.loadDatabaseInfo()
+			} catch (error) {
+				console.error('Failed to clear logs:', error)
+				this.$toast.error('Clear Failed', 'Could not clear activity logs')
+			} finally {
+				this.clearingLogs = false
 			}
 		},
 

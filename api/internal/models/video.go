@@ -15,6 +15,7 @@ type Video struct {
 	Bitrate       int64      `json:"bitrate" db:"bitrate"`
 	FPS           float64    `json:"fps" db:"fps"`
 	ThumbnailPath string     `json:"thumbnail_path" db:"thumbnail_path"`
+	PreviewPath   string     `json:"preview_path" db:"preview_path"`
 	Date          string     `json:"date" db:"date"`
 	Rating        int        `json:"rating" db:"rating"`
 	Description   string     `json:"description" db:"description"`

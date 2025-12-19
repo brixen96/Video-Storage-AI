@@ -96,6 +96,7 @@ func createTables() error {
 		bitrate INTEGER,
 		fps REAL,
 		thumbnail_path TEXT,
+		preview_path TEXT,
 		date TEXT,
 		rating INTEGER DEFAULT 0,
 		description TEXT,
@@ -330,6 +331,8 @@ func runMigrations() error {
 		`ALTER TABLE videos ADD COLUMN is_favorite BOOLEAN DEFAULT 0`,
 		// Migration 11: Add is_pinned column to videos table
 		`ALTER TABLE videos ADD COLUMN is_pinned BOOLEAN DEFAULT 0`,
+		// Migration 12: Add preview_path column to videos table
+		`ALTER TABLE videos ADD COLUMN preview_path TEXT`,
 	}
 
 	for _, migration := range migrations {

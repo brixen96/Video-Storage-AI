@@ -144,6 +144,46 @@ func moveFile(c *gin.Context) {
 	))
 }
 
+// MoveFileAcrossLibrariesRequest represents a request to move a file between libraries
+type MoveFileAcrossLibrariesRequest struct {
+	SourceLibraryID int64  `json:"source_library_id" binding:"required"`
+	SourcePath      string `json:"source_path" binding:"required"`
+	TargetLibraryID int64  `json:"target_library_id" binding:"required"`
+	TargetPath      string `json:"target_path"` // Relative path in target library (empty string = root)
+}
+
+// moveFileAcrossLibraries moves a file from one library to another
+func moveFileAcrossLibraries(c *gin.Context) {
+	svc := ensureFileService()
+
+	var req MoveFileAcrossLibrariesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request body",
+			err.Error(),
+		))
+		return
+	}
+
+	if err := svc.MoveFileAcrossLibraries(req.SourceLibraryID, req.SourcePath, req.TargetLibraryID, req.TargetPath); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to move file across libraries",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		gin.H{
+			"source_library_id": req.SourceLibraryID,
+			"source_path":       req.SourcePath,
+			"target_library_id": req.TargetLibraryID,
+			"target_path":       req.TargetPath,
+		},
+		"File moved across libraries successfully",
+	))
+}
+
 // DeleteFileRequest represents a request to delete a file
 type DeleteFileRequest struct {
 	LibraryID int64  `json:"library_id" binding:"required"`

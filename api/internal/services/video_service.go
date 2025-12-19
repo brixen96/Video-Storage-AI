@@ -44,12 +44,20 @@ type thumbnailJobHierarchical struct {
 	config  ThumbnailConfig
 }
 
+// ParallelScanConfig holds configuration for parallel library scanning
+type ParallelScanConfig struct {
+	ServerDrives        []string
+	LocalDrives         []string
+	ServerMaxConcurrent int
+	LocalMaxConcurrent  int
+}
+
 // GetAll retrieves all videos with optional filters
 func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, int, error) {
 	// Build base query - include library_id in SELECT
 	baseQuery := `
 		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec,
-		       v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.date, v.rating, v.description,
+		       v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.preview_path, v.date, v.rating, v.description,
 		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.created_at, v.updated_at, v.last_played_at, v.play_count
 		FROM videos v
 	`
@@ -253,9 +261,10 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		var lastPlayedAt sql.NullTime
 		var date sql.NullString
 		var description sql.NullString
+		var previewPath sql.NullString
 		err := rows.Scan(
 			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
-			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
+			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath, &previewPath,
 			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 		)
@@ -272,6 +281,9 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		}
 		if description.Valid {
 			video.Description = description.String
+		}
+		if previewPath.Valid {
+			video.PreviewPath = previewPath.String
 		}
 
 		videos = append(videos, video)
@@ -703,6 +715,136 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	return nil
 }
 
+// ScanAllLibrariesParallel scans all libraries in parallel with drive-aware optimization
+func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error {
+	log.Println("Starting parallel library scan with drive-aware optimization...")
+
+	// Get all libraries
+	libraries, err := s.libraryService.GetAll()
+	if err != nil {
+		return fmt.Errorf("failed to get libraries: %w", err)
+	}
+
+	if len(libraries) == 0 {
+		log.Println("No libraries found to scan")
+		return nil
+	}
+
+	// Group libraries by drive type
+	serverLibraries := []models.Library{}
+	localLibraries := []models.Library{}
+
+	for _, lib := range libraries {
+		if s.isServerDrive(lib.Path, config.ServerDrives) {
+			serverLibraries = append(serverLibraries, lib)
+		} else if s.isLocalDrive(lib.Path, config.LocalDrives) {
+			localLibraries = append(localLibraries, lib)
+		} else {
+			// Default to local for unknown drives
+			localLibraries = append(localLibraries, lib)
+		}
+	}
+
+	log.Printf("Grouped libraries - Server: %d, Local: %d", len(serverLibraries), len(localLibraries))
+
+	// Create wait group for all scans
+	var wg sync.WaitGroup
+
+	// Scan server libraries with limited concurrency
+	if len(serverLibraries) > 0 {
+		log.Printf("Starting server library scans (max concurrent: %d)...", config.ServerMaxConcurrent)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.scanLibrariesConcurrent(serverLibraries, config.ServerMaxConcurrent, "SERVER")
+		}()
+	}
+
+	// Scan local libraries with higher concurrency
+	if len(localLibraries) > 0 {
+		log.Printf("Starting local library scans (max concurrent: %d)...", config.LocalMaxConcurrent)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.scanLibrariesConcurrent(localLibraries, config.LocalMaxConcurrent, "LOCAL")
+		}()
+	}
+
+	// Wait for all scans to complete
+	wg.Wait()
+	log.Println("All parallel library scans completed")
+
+	return nil
+}
+
+// scanLibrariesConcurrent scans multiple libraries with controlled concurrency
+func (s *VideoService) scanLibrariesConcurrent(libraries []models.Library, maxConcurrent int, driveType string) {
+	// Create semaphore to limit concurrency
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for _, library := range libraries {
+		wg.Add(1)
+		sem <- struct{}{} // Acquire semaphore
+
+		go func(lib models.Library) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
+
+			log.Printf("[%s] Scanning library: %s (ID: %d, Path: %s)", driveType, lib.Name, lib.ID, lib.Path)
+			startTime := time.Now()
+
+			err := s.ScanLibrary(lib.ID)
+			duration := time.Since(startTime)
+
+			if err != nil {
+				log.Printf("[%s] Failed to scan library %s: %v (Duration: %s)", driveType, lib.Name, err, duration)
+			} else {
+				log.Printf("[%s] Successfully scanned library %s (Duration: %s)", driveType, lib.Name, duration)
+			}
+		}(library)
+	}
+
+	wg.Wait()
+	log.Printf("[%s] All %d library scans completed", driveType, len(libraries))
+}
+
+// isServerDrive checks if a path is on a server drive
+func (s *VideoService) isServerDrive(path string, serverDrives []string) bool {
+	if len(path) < 2 {
+		return false
+	}
+
+	// Get drive letter (e.g., "C:", "Z:")
+	drive := strings.ToUpper(path[:2])
+
+	for _, serverDrive := range serverDrives {
+		if strings.ToUpper(serverDrive) == drive {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isLocalDrive checks if a path is on a local drive
+func (s *VideoService) isLocalDrive(path string, localDrives []string) bool {
+	if len(path) < 2 {
+		return false
+	}
+
+	// Get drive letter (e.g., "C:", "D:")
+	drive := strings.ToUpper(path[:2])
+
+	for _, localDrive := range localDrives {
+		if strings.ToUpper(localDrive) == drive {
+			return true
+		}
+	}
+
+	return false
+}
+
 // findVideoFiles recursively finds all video files in a directory
 func (s *VideoService) findVideoFiles(dir string) ([]string, error) {
 	var videoFiles []string
@@ -749,6 +891,263 @@ func (s *VideoService) updateVideoThumbnailPath(videoID int64, thumbnailPath str
 		log.Printf("Failed to update thumbnail path for video %d: %v", videoID, err)
 		return err
 	}
+	return nil
+}
+
+// updateVideoPreviewPath updates the preview path for a video
+func (s *VideoService) updateVideoPreviewPath(videoID int64, previewPath string) error {
+	query := `UPDATE videos SET preview_path = ? WHERE id = ?`
+	_, err := s.db.Exec(query, previewPath, videoID)
+	if err != nil {
+		log.Printf("Failed to update preview path for video %d: %v", videoID, err)
+		return err
+	}
+	return nil
+}
+
+// GenerateAllPreviews generates preview storyboards for all videos in all libraries
+func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
+	log.Println("Starting preview generation for all videos...")
+
+	// Get all libraries
+	libraries, err := s.libraryService.GetAll()
+	if err != nil {
+		return fmt.Errorf("failed to get libraries: %w", err)
+	}
+
+	if len(libraries) == 0 {
+		log.Println("No libraries found")
+		return nil
+	}
+
+	// Get preview base directory
+	previewDir := os.Getenv("PREVIEW_DIR")
+	if previewDir == "" {
+		previewDir = filepath.Join("assets", "previews")
+	}
+
+	// Create wait group for all library processing
+	var wg sync.WaitGroup
+
+	// Group libraries by drive type
+	serverLibraries := []models.Library{}
+	localLibraries := []models.Library{}
+
+	for _, lib := range libraries {
+		if s.isServerDrive(lib.Path, config.ServerDrives) {
+			serverLibraries = append(serverLibraries, lib)
+		} else if s.isLocalDrive(lib.Path, config.LocalDrives) {
+			localLibraries = append(localLibraries, lib)
+		} else {
+			localLibraries = append(localLibraries, lib)
+		}
+	}
+
+	log.Printf("Grouped libraries - Server: %d, Local: %d", len(serverLibraries), len(localLibraries))
+
+	// Process server libraries with limited concurrency
+	if len(serverLibraries) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.generatePreviewsForLibraries(serverLibraries, config.ServerMaxConcurrent, previewDir, "SERVER")
+		}()
+	}
+
+	// Process local libraries with higher concurrency
+	if len(localLibraries) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.generatePreviewsForLibraries(localLibraries, config.LocalMaxConcurrent, previewDir, "LOCAL")
+		}()
+	}
+
+	wg.Wait()
+	log.Println("All preview generation completed")
+
+	return nil
+}
+
+// generatePreviewsForLibraries generates previews for all videos in the given libraries with controlled concurrency
+func (s *VideoService) generatePreviewsForLibraries(libraries []models.Library, maxConcurrent int, previewDir string, driveType string) {
+	// Create semaphore to limit concurrency
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+
+	for _, library := range libraries {
+		wg.Add(1)
+		sem <- struct{}{} // Acquire semaphore
+
+		go func(lib models.Library) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
+
+			log.Printf("[%s] Generating previews for library: %s (ID: %d)", driveType, lib.Name, lib.ID)
+			startTime := time.Now()
+
+			err := s.generatePreviewsForLibrary(lib.ID, previewDir)
+			duration := time.Since(startTime)
+
+			if err != nil {
+				log.Printf("[%s] Failed to generate previews for library %s: %v (Duration: %s)", driveType, lib.Name, err, duration)
+			} else {
+				log.Printf("[%s] Successfully generated previews for library %s (Duration: %s)", driveType, lib.Name, duration)
+			}
+		}(library)
+	}
+
+	wg.Wait()
+	log.Printf("[%s] All %d library preview generations completed", driveType, len(libraries))
+}
+
+// generatePreviewsForLibrary generates previews for all videos in a specific library
+func (s *VideoService) generatePreviewsForLibrary(libraryID int64, previewDir string) error {
+	// Get library
+	library, err := s.libraryService.GetByID(libraryID)
+	if err != nil {
+		return fmt.Errorf("library not found: %w", err)
+	}
+
+	// Get all videos in this library
+	query := models.VideoSearchQuery{
+		LibraryID: libraryID,
+		Limit:     10000, // Process all videos
+	}
+	videos, _, err := s.GetAll(&query)
+	if err != nil {
+		return fmt.Errorf("failed to get videos: %w", err)
+	}
+
+	if len(videos) == 0 {
+		log.Printf("No videos found in library %s", library.Name)
+		return nil
+	}
+
+	log.Printf("Generating previews for %d videos in library: %s", len(videos), library.Name)
+
+	// Create activity log for this library
+	activityService := NewActivityService()
+	activityLog, err := activityService.CreateLog(&models.ActivityLogCreate{
+		TaskType: "preview_generation",
+		Status:   models.TaskStatusRunning,
+		Message:  fmt.Sprintf("Generating previews for library: %s", library.Name),
+		Progress: 0,
+		Details:  map[string]interface{}{"library_id": libraryID, "library_name": library.Name, "total_videos": len(videos)},
+	})
+	if err != nil {
+		log.Printf("Failed to create activity log: %v", err)
+	}
+
+	// Create media service
+	mediaService := NewMediaService()
+
+	// Setup parallel preview generation with worker pool
+	// CONSERVATIVE: Use only 2-4 workers to prevent system overload
+	// Each worker runs ffmpeg which is resource-intensive
+	numWorkers := 2
+	if runtime.NumCPU() >= 8 {
+		numWorkers = 3 // Maximum 3 workers even on powerful systems
+	}
+	log.Printf("Using %d workers for preview generation (CPU cores: %d)", numWorkers, runtime.NumCPU())
+
+	previewJobs := make(chan struct {
+		video   models.Video
+		library models.Library
+	}, numWorkers*2)
+	var wg sync.WaitGroup
+	var previewMutex sync.Mutex
+
+	generated := 0
+	skipped := 0
+
+	// Start preview worker pool
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for job := range previewJobs {
+				// Skip if preview already exists
+				if job.video.PreviewPath != "" {
+					previewMutex.Lock()
+					skipped++
+					previewMutex.Unlock()
+					continue
+				}
+
+				// Skip if video has no duration
+				if job.video.Duration <= 0 {
+					previewMutex.Lock()
+					skipped++
+					previewMutex.Unlock()
+					log.Printf("Worker %d: Skipping video %s - no duration", workerID, job.video.Title)
+					continue
+				}
+
+				// Generate preview
+				previewConfig := PreviewConfig{
+					LibraryID:      job.library.ID,
+					LibraryPath:    job.library.Path,
+					VideoFilePath:  job.video.FilePath,
+					Duration:       job.video.Duration,
+					PreviewDir:     previewDir,
+					FrameCount:     10,
+					ThumbnailWidth: 320,
+				}
+
+				result, err := mediaService.GeneratePreviewStoryboard(previewConfig)
+				if err != nil {
+					log.Printf("Worker %d: Failed to generate preview for video ID %d: %v", workerID, job.video.ID, err)
+					previewMutex.Lock()
+					skipped++
+					previewMutex.Unlock()
+				} else {
+					// Update video preview path in database
+					previewMutex.Lock()
+					err := s.updateVideoPreviewPath(job.video.ID, result.RelativePath)
+					if err == nil {
+						generated++
+						if generated%10 == 0 {
+							log.Printf("Progress: Generated %d previews, skipped %d", generated, skipped)
+							// Update activity progress every 10 videos
+							if activityLog != nil {
+								progress := int((float64(generated+skipped) / float64(len(videos))) * 100)
+								activityService.UpdateProgressLog(activityLog.ID, progress,
+									fmt.Sprintf("Generated %d/%d previews", generated, len(videos)))
+							}
+						}
+					} else {
+						skipped++
+					}
+					previewMutex.Unlock()
+				}
+
+				// Small delay to prevent overwhelming the system
+				time.Sleep(100 * time.Millisecond)
+			}
+		}(i)
+	}
+
+	// Queue videos for preview generation
+	for _, video := range videos {
+		previewJobs <- struct {
+			video   models.Video
+			library models.Library
+		}{video: video, library: *library}
+	}
+
+	// Close jobs channel and wait for all workers to finish
+	close(previewJobs)
+	wg.Wait()
+
+	log.Printf("Preview generation complete for library %s: %d generated, %d skipped", library.Name, generated, skipped)
+
+	// Mark activity as complete
+	if activityLog != nil {
+		activityService.CompleteTaskLog(activityLog.ID,
+			fmt.Sprintf("Completed: Generated %d previews, skipped %d", generated, skipped))
+	}
+
 	return nil
 }
 

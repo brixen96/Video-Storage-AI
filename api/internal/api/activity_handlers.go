@@ -227,6 +227,30 @@ func cleanOldActivities(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(result, "Old activities cleaned successfully"))
 }
 
+// clearAllActivities removes all activity logs
+func clearAllActivities(c *gin.Context) {
+	svc := ensureActivityService()
+
+	count, err := svc.ClearAll()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to clear all activities",
+			err.Error(),
+		))
+		return
+	}
+
+	if err := svc.BroadcastStatusUpdate(); err != nil {
+		log.Printf("Error broadcasting status update: %v", err)
+	}
+
+	result := map[string]interface{}{
+		"deleted_count": count,
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(result, "All activities cleared successfully"))
+}
+
 // getRecentActivities retrieves the most recent activities
 func getRecentActivities(c *gin.Context) {
 	svc := ensureActivityService()

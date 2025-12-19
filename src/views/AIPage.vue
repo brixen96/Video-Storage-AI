@@ -89,7 +89,7 @@
 							</button>
 							<div class="form-check mt-3">
 								<input v-model="autoApplyLinks" type="checkbox" class="form-check-input" id="autoApply" />
-								<label class="form-check-label" for="autoApply"> Auto-apply high confidence matches (90%+) </label>
+								<label class="form-check-label" for="autoApply"> Auto-apply 100% matches </label>
 							</div>
 							<div v-if="suggestions.length > 0" class="confidence-slider mt-3">
 								<label class="form-label">
@@ -1179,11 +1179,11 @@ const startAutoLink = async () => {
 		}
 
 		if (autoApplyLinks.value) {
-			const autoApplied = suggestions.value.filter((s) => s.matches.some((m) => m.confidence >= 0.9)).length
+			const autoApplied = suggestions.value.filter((s) => s.matches.some((m) => m.confidence === 1.0)).length
 
 			toast.success(
 				'Analysis Complete',
-				`Found ${linkStats.value.matchesFound} matches across ${linkStats.value.videosAnalyzed} videos. Auto-applied ${autoApplied} high-confidence links.`
+				`Found ${linkStats.value.matchesFound} matches across ${linkStats.value.videosAnalyzed} videos. Auto-applied ${autoApplied} 100% matches.`
 			)
 		} else {
 			toast.success('Analysis Complete', `Found ${linkStats.value.matchesFound} potential matches across ${linkStats.value.videosAnalyzed} videos.`)
