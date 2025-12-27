@@ -20,7 +20,7 @@ type LibraryService struct {
 // NewLibraryService creates a new library service
 func NewLibraryService() *LibraryService {
 	return &LibraryService{
-		db: database.DB,
+		db: database.GetDB(),
 	}
 }
 

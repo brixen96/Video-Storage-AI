@@ -18,7 +18,7 @@ type AIService struct {
 
 func NewAIService() *AIService {
 	return &AIService{
-		db: database.DB,
+		db: database.GetDB(),
 	}
 }
 
@@ -212,11 +212,16 @@ func (s *AIService) calculateMatch(filename, performerName string) (float64, str
 
 // applyHighConfidenceMatches automatically applies matches with high confidence
 func (s *AIService) applyHighConfidenceMatches(videoID int64, matches []PerformerMatch) {
+	appliedCount := 0
+	skippedLowConfidence := 0
+	skippedAlreadyExists := 0
+
 	for _, match := range matches {
 		if match.Confidence >= 0.90 {
 			// Check if link already exists
 			exists, err := s.performerLinkExists(videoID, match.PerformerID)
 			if err != nil || exists {
+				skippedAlreadyExists++
 				continue
 			}
 
@@ -226,8 +231,16 @@ func (s *AIService) applyHighConfidenceMatches(videoID int64, matches []Performe
 				log.Printf("Failed to auto-link performer %d to video %d: %v", match.PerformerID, videoID, err)
 			} else {
 				log.Printf("Auto-linked performer '%s' to video %d (confidence: %.2f)", match.PerformerName, videoID, match.Confidence)
+				appliedCount++
 			}
+		} else {
+			skippedLowConfidence++
 		}
+	}
+
+	if appliedCount > 0 || skippedLowConfidence > 0 || skippedAlreadyExists > 0 {
+		log.Printf("Video %d: Applied %d links, Skipped %d (low confidence), Skipped %d (already exists)",
+			videoID, appliedCount, skippedLowConfidence, skippedAlreadyExists)
 	}
 }
 
@@ -322,8 +335,16 @@ func (s *AIService) performerLinkExists(videoID, performerID int64) (bool, error
 }
 
 func (s *AIService) linkPerformerToVideo(videoID, performerID int64) error {
+	// Insert the link
 	query := `INSERT INTO video_performers (video_id, performer_id) VALUES (?, ?)`
 	_, err := s.db.Exec(query, videoID, performerID)
+	if err != nil {
+		return err
+	}
+
+	// Update the performer's video count
+	updateQuery := `UPDATE performers SET video_count = video_count + 1 WHERE id = ?`
+	_, err = s.db.Exec(updateQuery, performerID)
 	return err
 }
 
@@ -937,13 +958,6 @@ func abs(n int64) int64 {
 }
 
 func max(a, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}

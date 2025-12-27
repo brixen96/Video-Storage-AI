@@ -382,3 +382,20 @@ func updateVideoMarksByPath(c *gin.Context) {
 
 	c.JSON(http.StatusOK, updatedVideo)
 }
+
+// generateVideoThumbnails generates thumbnails for all videos that don't have them
+func generateVideoThumbnails(c *gin.Context) {
+	svc := ensureVideoService()
+
+	// Start thumbnail generation asynchronously
+	go func() {
+		if err := svc.GenerateAllThumbnails(); err != nil {
+			log.Printf("Failed to generate video thumbnails: %v", err)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, models.SuccessResponse(
+		nil,
+		"Video thumbnail generation started",
+	))
+}

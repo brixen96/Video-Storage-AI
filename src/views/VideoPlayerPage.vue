@@ -142,7 +142,7 @@
 												{{ performer.name }}
 											</div>
 											<div class="performer-stats">
-												{{ performer.scene_count || 0 }} videos
+												{{ performer.video_count || 0 }} videos
 											</div>
 										</div>
 									</div>

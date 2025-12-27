@@ -61,6 +61,11 @@ func main() {
 	hub := api.InitWebSocket()
 	services.SetWebSocketHub(hub)
 
+	// Initialize AI Companion Service
+	log.Println("Initializing AI Companion...")
+	api.InitAICompanion()
+	log.Println("AI Companion initialized successfully")
+
 	// Create HTTP server
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
@@ -86,6 +91,13 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
+
+	// Stop AI Companion
+	if companion := api.GetAICompanionService(); companion != nil {
+		if err := companion.Stop(); err != nil {
+			log.Printf("Error stopping AI Companion: %v", err)
+		}
+	}
 
 	// Graceful shutdown with 5 second timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -156,6 +156,7 @@ func createTables() error {
 		name TEXT UNIQUE NOT NULL,
 		color TEXT,
 		icon TEXT,
+		category TEXT DEFAULT 'regular',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -333,6 +334,83 @@ func runMigrations() error {
 		`ALTER TABLE videos ADD COLUMN is_pinned BOOLEAN DEFAULT 0`,
 		// Migration 12: Add preview_path column to videos table
 		`ALTER TABLE videos ADD COLUMN preview_path TEXT`,
+		// Migration 13: Create memories table for AI Companion
+		`CREATE TABLE IF NOT EXISTS memories (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			key TEXT UNIQUE NOT NULL,
+			value TEXT NOT NULL,
+			category TEXT NOT NULL,
+			importance INTEGER DEFAULT 5,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)`,
+		`CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance)`,
+		`CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key)`,
+		// Migration 14: Add category column to tags table
+		`ALTER TABLE tags ADD COLUMN category TEXT DEFAULT 'regular'`,
+		// Migration 15: Add category to performers and migrate zoo data
+		`ALTER TABLE performers ADD COLUMN category TEXT DEFAULT 'regular'`,
+		`UPDATE performers SET category = 'zoo' WHERE zoo = 1`,
+		`UPDATE performers SET category = 'regular' WHERE zoo = 0 OR zoo IS NULL`,
+		// Migration 16: Add category to studios
+		`ALTER TABLE studios ADD COLUMN category TEXT DEFAULT 'regular'`,
+		// Migration 17: Add category to groups
+		`ALTER TABLE groups ADD COLUMN category TEXT DEFAULT 'regular'`,
+		// Migration 18: Add indexes for category fields
+		`CREATE INDEX IF NOT EXISTS idx_performers_category ON performers(category)`,
+		`CREATE INDEX IF NOT EXISTS idx_studios_category ON studios(category)`,
+		`CREATE INDEX IF NOT EXISTS idx_groups_category ON groups(category)`,
+		// Migration 19: Update tags table to allow duplicate names across categories
+		// Step 1: Create new tags table with composite unique constraint
+		`CREATE TABLE IF NOT EXISTS tags_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			color TEXT,
+			icon TEXT,
+			category TEXT DEFAULT 'regular',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(name, category)
+		)`,
+		// Step 2: Copy data from old table
+		`INSERT INTO tags_new (id, name, color, icon, category, created_at, updated_at)
+		 SELECT id, name, color, icon, category, created_at, updated_at FROM tags`,
+		// Step 3: Drop old table
+		`DROP TABLE tags`,
+		// Step 4: Rename new table
+		`ALTER TABLE tags_new RENAME TO tags`,
+		// Step 5: Recreate index
+		`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category)`,
+		// Migration 20: Add video_count to performers and populate from existing data
+		`ALTER TABLE performers ADD COLUMN video_count INTEGER DEFAULT 0`,
+		// Update video_count based on actual video relationships
+		`UPDATE performers SET video_count = (
+			SELECT COUNT(*) FROM video_performers WHERE performer_id = performers.id
+		)`,
+		// Migration 21: Remove scene_count column (deprecated, use video_count)
+		// SQLite doesn't support DROP COLUMN, so we recreate the table
+		`CREATE TABLE IF NOT EXISTS performers_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL UNIQUE,
+			preview_path TEXT,
+			folder_path TEXT,
+			video_count INTEGER DEFAULT 0,
+			category TEXT DEFAULT 'regular' CHECK(category IN ('regular', 'zoo', '3d')),
+			metadata TEXT DEFAULT '{}',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`INSERT INTO performers_new (id, name, preview_path, folder_path, video_count, category, metadata, created_at, updated_at)
+		 SELECT id, name, preview_path, folder_path, video_count, category, metadata, created_at, updated_at FROM performers`,
+		`DROP TABLE performers`,
+		`ALTER TABLE performers_new RENAME TO performers`,
+		// Recreate indexes
+		`CREATE INDEX IF NOT EXISTS idx_performers_name ON performers(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_performers_category ON performers(category)`,
+		// Migration 22: Add thumbnail_path to performers
+		`ALTER TABLE performers ADD COLUMN thumbnail_path TEXT DEFAULT ''`,
 	}
 
 	for _, migration := range migrations {

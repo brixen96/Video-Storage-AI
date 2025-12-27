@@ -7,27 +7,28 @@
 			</keep-alive>
 		</router-view>
 		<ActivityTracker />
-		<CacheDebugPanel />
+		<AICompanionChat />
 	</div>
 </template>
 
 <script>
 import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
-import CacheDebugPanel from '@/components/CacheDebugPanel.vue'
+import AICompanionChat from '@/components/AICompanionChat.vue'
 
 export default {
 	name: 'App',
 	components: {
 		NavBar,
 		ActivityTracker,
-		CacheDebugPanel,
+		AICompanionChat,
 	},
 }
 </script>
 
 <style>
 @import 'bootstrap/dist/css/bootstrap.min.css';
+@import './styles/components/category_badge.css';
 
 * {
 	margin: 0;

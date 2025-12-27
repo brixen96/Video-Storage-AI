@@ -12,6 +12,7 @@ type Group struct {
 	Name        string    `json:"name" db:"name" binding:"required"`
 	LogoPath    string    `json:"logo_path" db:"logo_path"`
 	Description string    `json:"description" db:"description"`
+	Category    string    `json:"category" db:"category"` // NEW: 'regular', 'zoo', or '3d'
 	Metadata    string    `json:"-" db:"metadata"` // JSON string in DB
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
@@ -37,6 +38,7 @@ type GroupCreate struct {
 	Name        string         `json:"name" binding:"required"`
 	LogoPath    string         `json:"logo_path"`
 	Description string         `json:"description"`
+	Category    string         `json:"category"` // 'regular', 'zoo', or '3d'
 	Metadata    *GroupMetadata `json:"metadata,omitempty"`
 }
 
@@ -45,6 +47,7 @@ type GroupUpdate struct {
 	Name        *string        `json:"name,omitempty"`
 	LogoPath    *string        `json:"logo_path,omitempty"`
 	Description *string        `json:"description,omitempty"`
+	Category    *string        `json:"category,omitempty"` // 'regular', 'zoo', or '3d'
 	Metadata    *GroupMetadata `json:"metadata,omitempty"`
 }
 

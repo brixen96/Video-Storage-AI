@@ -1,0 +1,90 @@
+/* Category Badge Styles */
+.category-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+/* Category Colors */
+.category-regular {
+	background-color: #3498db;
+	color: white;
+}
+
+.category-zoo {
+	background-color: #2ecc71;
+	color: white;
+}
+
+.category-3d {
+	background-color: #f39c12;
+	color: white;
+}
+
+/* Hover states */
+.category-badge:hover {
+	opacity: 0.9;
+}
+
+/* Context Menu Label */
+.context-menu-label {
+	padding: 8px 12px;
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	color: #888;
+	font-weight: 600;
+	letter-spacing: 0.5px;
+	border-bottom: 1px solid #333;
+}
+
+/* Context Menu Section */
+.context-menu-section {
+	padding: 4px 0;
+}
+
+/* Context Menu Divider */
+.context-menu-divider {
+	height: 1px;
+	background-color: #333;
+	margin: 4px 0;
+}
+
+/* For PerformersPage specific styles */
+.zoo-badge {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	background-color: #2ecc71;
+	color: white;
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	z-index: 1;
+}
+
+.zoo-icon {
+	color: #2ecc71;
+}
+
+/* Category icons in different contexts */
+.category-icon {
+	font-size: 1rem;
+}
+
+.category-icon.category-regular {
+	color: #3498db;
+}
+
+.category-icon.category-zoo {
+	color: #2ecc71;
+}
+
+.category-icon.category-3d {
+	color: #f39c12;
+}

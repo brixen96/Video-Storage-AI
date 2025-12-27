@@ -10,9 +10,10 @@ type Performer struct {
 	ID             int64       `json:"id"`
 	Name           string      `json:"name"`
 	PreviewPath    string      `json:"preview_path"`
+	ThumbnailPath  string      `json:"thumbnail_path"` // Static thumbnail from preview video
 	FolderPath     string      `json:"folder_path"`
-	SceneCount     int         `json:"scene_count"`
-	Zoo            bool        `json:"zoo"`
+	VideoCount     int         `json:"video_count"` // Number of videos linked to this performer
+	Category       string      `json:"category" db:"category"` // 'regular', 'zoo', or '3d'
 	Metadata       string      `json:"-"` // Raw JSON from DB
 	MetadataObj    *PerformerMetadata `json:"metadata,omitempty"`
 	CreatedAt      time.Time   `json:"created_at"`
@@ -25,17 +26,18 @@ type PerformerCreate struct {
 	Name        string      `json:"name" binding:"required"`
 	PreviewPath string      `json:"preview_path"`
 	FolderPath  string      `json:"folder_path"`
+	Category    string      `json:"category"` // 'regular', 'zoo', or '3d'
 	Metadata    *PerformerMetadata `json:"metadata,omitempty"`
 }
 
 // PerformerUpdate represents the data that can be updated for a performer
 type PerformerUpdate struct {
-	Name        *string     `json:"name,omitempty"`
-	PreviewPath *string     `json:"preview_path,omitempty"`
-	FolderPath  *string     `json:"folder_path,omitempty"`
-	SceneCount  *int        `json:"scene_count,omitempty"`
-	Zoo         *bool       `json:"zoo,omitempty"`
-	Metadata    *PerformerMetadata `json:"metadata,omitempty"`
+	Name          *string     `json:"name,omitempty"`
+	PreviewPath   *string     `json:"preview_path,omitempty"`
+	ThumbnailPath *string     `json:"thumbnail_path,omitempty"`
+	FolderPath    *string     `json:"folder_path,omitempty"`
+	Category      *string     `json:"category,omitempty"` // 'regular', 'zoo', or '3d'
+	Metadata      *PerformerMetadata `json:"metadata,omitempty"`
 }
 
 // PerformerMetadata represents additional performer information, often from external sources

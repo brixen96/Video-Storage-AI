@@ -13,6 +13,7 @@ type Studio struct {
 	Description string    `json:"description" db:"description"`
 	FoundedDate string    `json:"founded_date" db:"founded_date"` // Store as string for flexibility
 	Country     string    `json:"country" db:"country"`
+	Category    string    `json:"category" db:"category"` // NEW: 'regular', 'zoo', or '3d'
 	Metadata    string    `json:"-" db:"metadata"` // JSON string in DB
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
@@ -37,6 +38,7 @@ type StudioCreate struct {
 	Description string          `json:"description"`
 	FoundedDate string          `json:"founded_date"`
 	Country     string          `json:"country"`
+	Category    string          `json:"category"` // 'regular', 'zoo', or '3d'
 	Metadata    *StudioMetadata `json:"metadata,omitempty"`
 }
 
@@ -47,6 +49,7 @@ type StudioUpdate struct {
 	Description *string         `json:"description,omitempty"`
 	FoundedDate *string         `json:"founded_date,omitempty"`
 	Country     *string         `json:"country,omitempty"`
+	Category    *string         `json:"category,omitempty"` // 'regular', 'zoo', or '3d'
 	Metadata    *StudioMetadata `json:"metadata,omitempty"`
 }
 

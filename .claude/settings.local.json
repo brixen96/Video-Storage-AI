@@ -48,7 +48,18 @@
       "Bash(yarn build)",
       "Bash(copy:*)",
       "Bash(move:*)",
-      "Bash(start /B binvideo-storage-ai.exe)"
+      "Bash(start /B binvideo-storage-ai.exe)",
+      "Bash(go get:*)",
+      "Bash(go env:*)",
+      "Bash(start /B go run:*)",
+      "Bash(del:*)",
+      "Bash(cmd /c \"taskkill /F /IM video-storage-ai.exe\")",
+      "Bash(cmd /c \"tasklist | findstr go.exe\")",
+      "Bash(ls:*)",
+      "Bash(cmd /c \"timeout /t 3 /nobreak & bin\\\\video-storage-ai.exe\")",
+      "Bash(cmd /c \"tasklist | findstr video-storage-ai\")",
+      "Bash(\"C:\\\\Repos\\\\Video Storage AI\\\\bin\\\\video-storage-ai.exe\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\Repos\\\\Video Storage AI && bin\\\\video-storage-ai.exe\")"
     ],
     "deny": [],
     "ask": []

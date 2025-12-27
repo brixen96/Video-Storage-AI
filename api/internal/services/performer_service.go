@@ -18,14 +18,14 @@ type PerformerService struct {
 // NewPerformerService creates a new performer service
 func NewPerformerService() *PerformerService {
 	return &PerformerService{
-		db: database.DB,
+		db: database.GetDB(),
 	}
 }
 
 // GetAll retrieves all performers
 func (s *PerformerService) GetAll() ([]models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
 		ORDER BY name ASC
 	`
@@ -43,23 +43,12 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
-		var zooVal interface{}
 		err := rows.Scan(
-			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+			&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan performer: %w", err)
-		}
-
-		// Convert to bool - handle both int64 and bool types
-		switch v := zooVal.(type) {
-		case int64:
-			p.Zoo = v != 0
-		case bool:
-			p.Zoo = v
-		default:
-			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -76,16 +65,15 @@ func (s *PerformerService) GetAll() ([]models.Performer, error) {
 // GetByID retrieves a performer by ID
 func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
 		WHERE id = ?
 	`
 
 	var p models.Performer
-	var zooVal interface{}
 	err := s.db.QueryRow(query, id).Scan(
-		&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-		&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+		&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -93,16 +81,6 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query performer: %w", err)
-	}
-
-	// Convert to bool - handle both int64 and bool types
-	switch v := zooVal.(type) {
-	case int64:
-		p.Zoo = v != 0
-	case bool:
-		p.Zoo = v
-	default:
-		p.Zoo = false
 	}
 
 	// Parse metadata JSON
@@ -116,15 +94,15 @@ func (s *PerformerService) GetByID(id int64) (*models.Performer, error) {
 // GetPerformerByName retrieves a performer by name
 func (s *PerformerService) GetPerformerByName(name string) (*models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
 		WHERE name = ?
 	`
 
 	var p models.Performer
 	err := s.db.QueryRow(query, name).Scan(
-		&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-		&p.SceneCount, &p.Zoo, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+		&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+		&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -155,7 +133,7 @@ func (s *PerformerService) Create(create *models.PerformerCreate) (*models.Perfo
 		Name:        create.Name,
 		PreviewPath: create.PreviewPath,
 		FolderPath:  create.FolderPath,
-		SceneCount:  0,
+		VideoCount:  0,
 		MetadataObj: create.Metadata,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -166,16 +144,21 @@ func (s *PerformerService) Create(create *models.PerformerCreate) (*models.Perfo
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	// Default category to 'regular' if not provided
+	if performer.Category == "" {
+		performer.Category = "regular"
+	}
+
 	// Insert into database
 	query := `
-		INSERT INTO performers (name, preview_path, folder_path, scene_count, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO performers (name, preview_path, folder_path, video_count, category, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := s.db.Exec(
 		query,
 		performer.Name, performer.PreviewPath, performer.FolderPath,
-		performer.SceneCount, performer.Metadata, performer.CreatedAt, performer.UpdatedAt,
+		performer.VideoCount, performer.Category, performer.Metadata, performer.CreatedAt, performer.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert performer: %w", err)
@@ -205,14 +188,14 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 	if update.PreviewPath != nil {
 		performer.PreviewPath = *update.PreviewPath
 	}
+	if update.ThumbnailPath != nil {
+		performer.ThumbnailPath = *update.ThumbnailPath
+	}
 	if update.FolderPath != nil {
 		performer.FolderPath = *update.FolderPath
 	}
-	if update.SceneCount != nil {
-		performer.SceneCount = *update.SceneCount
-	}
-	if update.Zoo != nil {
-		performer.Zoo = *update.Zoo
+	if update.Category != nil {
+		performer.Category = *update.Category
 	}
 	if update.Metadata != nil {
 		performer.MetadataObj = update.Metadata
@@ -228,22 +211,14 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 	// Update database
 	query := `
 		UPDATE performers
-		SET name = ?, preview_path = ?, folder_path = ?, scene_count = ?, zoo = ?, metadata = ?, updated_at = ?
+		SET name = ?, preview_path = ?, thumbnail_path = ?, folder_path = ?, category = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`
 
-	// Convert bool to int for SQLite
-	var zooInt int
-	if performer.Zoo {
-		zooInt = 1
-	} else {
-		zooInt = 0
-	}
-
 	_, err = s.db.Exec(
 		query,
-		performer.Name, performer.PreviewPath, performer.FolderPath,
-		performer.SceneCount, zooInt, performer.Metadata, performer.UpdatedAt, id,
+		performer.Name, performer.PreviewPath, performer.ThumbnailPath, performer.FolderPath,
+		performer.Category, performer.Metadata, performer.UpdatedAt, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update performer: %w", err)
@@ -272,7 +247,7 @@ func (s *PerformerService) Delete(id int64) error {
 // Search searches performers by name
 func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
 		WHERE name LIKE ?
 		ORDER BY name ASC
@@ -291,23 +266,12 @@ func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error)
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
-		var zooVal interface{}
 		err := rows.Scan(
-			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+			&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan performer: %w", err)
-		}
-
-		// Convert to bool - handle both int64 and bool types
-		switch v := zooVal.(type) {
-		case int64:
-			p.Zoo = v != 0
-		case bool:
-			p.Zoo = v
-		default:
-			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -319,24 +283,6 @@ func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error)
 	}
 
 	return performers, nil
-}
-
-// UpdateSceneCount updates the scene count for a performer
-func (s *PerformerService) UpdateSceneCount(id int64) error {
-	query := `
-		UPDATE performers
-		SET scene_count = (
-			SELECT COUNT(*) FROM video_performers WHERE performer_id = ?
-		)
-		WHERE id = ?
-	`
-
-	_, err := s.db.Exec(query, id, id)
-	if err != nil {
-		return fmt.Errorf("failed to update scene count: %w", err)
-	}
-
-	return nil
 }
 
 // ResetMetadata clears all metadata for a performer
@@ -367,7 +313,7 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 
 	// Get paginated results
 	query := `
-        SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+        SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
         FROM performers
         ORDER BY name ASC
         LIMIT ? OFFSET ?
@@ -386,23 +332,12 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
-		var zooVal interface{}
 		err := rows.Scan(
-			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+			&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
-		}
-
-		// Convert to bool - handle both int64 and bool types
-		switch v := zooVal.(type) {
-		case int64:
-			p.Zoo = v != 0
-		case bool:
-			p.Zoo = v
-		default:
-			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -434,7 +369,7 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 
 	// Get paginated results
 	query := `
-        SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+        SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
         FROM performers
         WHERE name LIKE ?
         ORDER BY name ASC
@@ -454,23 +389,12 @@ func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int)
 	var performers []models.Performer
 	for rows.Next() {
 		var p models.Performer
-		var zooVal interface{}
 		err := rows.Scan(
-			&p.ID, &p.Name, &p.PreviewPath, &p.FolderPath,
-			&p.SceneCount, &zooVal, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
+			&p.ID, &p.Name, &p.PreviewPath, &p.ThumbnailPath, &p.FolderPath,
+			&p.VideoCount, &p.Category, &p.Metadata, &p.CreatedAt, &p.UpdatedAt,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan performer: %w", err)
-		}
-
-		// Convert to bool - handle both int64 and bool types
-		switch v := zooVal.(type) {
-		case int64:
-			p.Zoo = v != 0
-		case bool:
-			p.Zoo = v
-		default:
-			p.Zoo = false
 		}
 
 		// Parse metadata JSON
@@ -647,5 +571,59 @@ func (s *PerformerService) ApplyMasterTagsToVideo(performerID, videoID int64) er
 		}
 	}
 
+	return nil
+}
+
+// UpdateVideoCount updates the video_count for a performer based on actual video relationships
+func (s *PerformerService) UpdateVideoCount(performerID int64) error {
+	query := `
+		UPDATE performers
+		SET video_count = (
+			SELECT COUNT(*) FROM video_performers WHERE performer_id = ?
+		)
+		WHERE id = ?
+	`
+	_, err := s.db.Exec(query, performerID, performerID)
+	if err != nil {
+		return fmt.Errorf("failed to update video count: %w", err)
+	}
+	return nil
+}
+
+// RecalculateAllVideoCounts recalculates video_count for all performers
+func (s *PerformerService) RecalculateAllVideoCounts() error {
+	query := `
+		UPDATE performers
+		SET video_count = (
+			SELECT COUNT(*) FROM video_performers WHERE performer_id = performers.id
+		)
+	`
+	result, err := s.db.Exec(query)
+	if err != nil {
+		return fmt.Errorf("failed to recalculate video counts: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("Recalculated video counts for %d performers", rowsAffected)
+	return nil
+}
+
+// IncrementVideoCount increments the video_count for a performer
+func (s *PerformerService) IncrementVideoCount(performerID int64) error {
+	query := `UPDATE performers SET video_count = video_count + 1 WHERE id = ?`
+	_, err := s.db.Exec(query, performerID)
+	if err != nil {
+		return fmt.Errorf("failed to increment video count: %w", err)
+	}
+	return nil
+}
+
+// DecrementVideoCount decrements the video_count for a performer
+func (s *PerformerService) DecrementVideoCount(performerID int64) error {
+	query := `UPDATE performers SET video_count = MAX(0, video_count - 1) WHERE id = ?`
+	_, err := s.db.Exec(query, performerID)
+	if err != nil {
+		return fmt.Errorf("failed to decrement video count: %w", err)
+	}
 	return nil
 }

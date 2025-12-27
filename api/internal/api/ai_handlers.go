@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -10,6 +11,7 @@ import (
 )
 
 var aiService *services.AIService
+var aiCompanionService *services.AICompanionService
 
 // ensureAIService initializes the service if needed
 func ensureAIService() *services.AIService {
@@ -453,5 +455,257 @@ func analyzeThumbnailQuality(c *gin.Context) {
 			"results": results,
 			"total":   len(results),
 		},
+	})
+}
+
+// ================== AI Companion Endpoints ==================
+
+// InitAICompanion initializes the global AI Companion service
+func InitAICompanion() *services.AICompanionService {
+	if aiCompanionService == nil {
+		aiCompanionService = services.NewAICompanionService()
+		if err := aiCompanionService.Start(); err != nil {
+			log.Printf("Failed to start AI Companion: %v", err)
+		}
+	}
+	return aiCompanionService
+}
+
+// GetAICompanionService returns the global AI Companion instance
+func GetAICompanionService() *services.AICompanionService {
+	return aiCompanionService
+}
+
+// aiCompanionChat handles chat messages to the AI Companion
+func aiCompanionChat(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	var request struct {
+		Message string              `json:"message"`
+		History []map[string]string `json:"history"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	response, err := aiCompanionService.Chat(request.Message, request.History)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Chat failed",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": response,
+	})
+}
+
+// getAICompanionStatus returns the AI Companion status
+func getAICompanionStatus(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"running": false,
+			"message": "AI Companion not initialized",
+		})
+		return
+	}
+
+	status := aiCompanionService.GetStatus()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    status,
+	})
+}
+
+// saveAIMemory stores a new memory
+func saveAIMemory(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	var memory models.Memory
+	if err := c.ShouldBindJSON(&memory); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	if err := aiCompanionService.SaveMemory(&memory); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to save memory",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Memory saved successfully",
+		"data":    memory,
+	})
+}
+
+// getAIMemories retrieves memories with filters
+func getAIMemories(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	category := c.Query("category")
+	limit := 50
+	if l := c.Query("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+
+	memories, err := aiCompanionService.GetMemories(category, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get memories",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    memories,
+		"count":   len(memories),
+	})
+}
+
+// searchAIMemories searches memories by query
+func searchAIMemories(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	query := c.Query("query")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			"Query parameter is required",
+		))
+		return
+	}
+
+	memories, err := aiCompanionService.SearchMemories(query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to search memories",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    memories,
+		"count":   len(memories),
+	})
+}
+
+// updateAIMemory updates an existing memory
+func updateAIMemory(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	var id int64
+	if err := c.ShouldBindUri(&struct{ ID int64 }{ID: id}); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid ID",
+			err.Error(),
+		))
+		return
+	}
+
+	var request struct {
+		Value string `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	if err := aiCompanionService.UpdateMemory(id, request.Value); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to update memory",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Memory updated successfully",
+	})
+}
+
+// deleteAIMemory deletes a memory
+func deleteAIMemory(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	var id int64
+	if err := c.ShouldBindUri(&struct{ ID int64 }{ID: id}); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid ID",
+			err.Error(),
+		))
+		return
+	}
+
+	if err := aiCompanionService.DeleteMemory(id); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to delete memory",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Memory deleted successfully",
 	})
 }

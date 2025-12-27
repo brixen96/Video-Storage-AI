@@ -25,7 +25,7 @@ func NewGroupService() *GroupService {
 // GetAll retrieves all groups
 func (s *GroupService) GetAll() ([]models.Group, error) {
 	query := `
-		SELECT id, studio_id, name, logo_path, description, metadata, created_at, updated_at
+		SELECT id, studio_id, name, logo_path, description, category, metadata, created_at, updated_at
 		FROM groups
 		ORDER BY name ASC
 	`
@@ -41,7 +41,7 @@ func (s *GroupService) GetAll() ([]models.Group, error) {
 		var group models.Group
 		err := rows.Scan(
 			&group.ID, &group.StudioID, &group.Name, &group.LogoPath,
-			&group.Description, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
+			&group.Description, &group.Category, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
 		)
 		if err != nil {
 			log.Printf("Failed to scan group: %v", err)
@@ -62,7 +62,7 @@ func (s *GroupService) GetAll() ([]models.Group, error) {
 // GetByID retrieves a single group by ID
 func (s *GroupService) GetByID(id int64) (*models.Group, error) {
 	query := `
-		SELECT id, studio_id, name, logo_path, description, metadata, created_at, updated_at
+		SELECT id, studio_id, name, logo_path, description, category, metadata, created_at, updated_at
 		FROM groups
 		WHERE id = ?
 	`
@@ -70,7 +70,7 @@ func (s *GroupService) GetByID(id int64) (*models.Group, error) {
 	var group models.Group
 	err := s.db.QueryRow(query, id).Scan(
 		&group.ID, &group.StudioID, &group.Name, &group.LogoPath,
-		&group.Description, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
+		&group.Description, &group.Category, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -91,7 +91,7 @@ func (s *GroupService) GetByID(id int64) (*models.Group, error) {
 // GetByStudioID retrieves all groups for a studio
 func (s *GroupService) GetByStudioID(studioID int64) ([]models.Group, error) {
 	query := `
-		SELECT id, studio_id, name, logo_path, description, metadata, created_at, updated_at
+		SELECT id, studio_id, name, logo_path, description, category, metadata, created_at, updated_at
 		FROM groups
 		WHERE studio_id = ?
 		ORDER BY name ASC
@@ -108,7 +108,7 @@ func (s *GroupService) GetByStudioID(studioID int64) ([]models.Group, error) {
 		var group models.Group
 		err := rows.Scan(
 			&group.ID, &group.StudioID, &group.Name, &group.LogoPath,
-			&group.Description, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
+			&group.Description, &group.Category, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
 		)
 		if err != nil {
 			log.Printf("Failed to scan group: %v", err)
@@ -130,6 +130,12 @@ func (s *GroupService) GetByStudioID(studioID int64) ([]models.Group, error) {
 func (s *GroupService) Create(create *models.GroupCreate) (*models.Group, error) {
 	now := time.Now()
 
+	// Default category to 'regular' if not provided
+	category := create.Category
+	if category == "" {
+		category = "regular"
+	}
+
 	// Marshal metadata if provided
 	metadataJSON := "{}"
 	if create.Metadata != nil {
@@ -141,11 +147,11 @@ func (s *GroupService) Create(create *models.GroupCreate) (*models.Group, error)
 	}
 
 	query := `
-		INSERT INTO groups (studio_id, name, logo_path, description, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO groups (studio_id, name, logo_path, description, category, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query, create.StudioID, create.Name, create.LogoPath,
-		create.Description, metadataJSON, now, now)
+		create.Description, category, metadataJSON, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create group: %w", err)
 	}
@@ -176,6 +182,9 @@ func (s *GroupService) Update(id int64, update *models.GroupUpdate) (*models.Gro
 	if update.Description != nil {
 		group.Description = *update.Description
 	}
+	if update.Category != nil {
+		group.Category = *update.Category
+	}
 	if update.Metadata != nil {
 		group.MetadataObj = update.Metadata
 	}
@@ -189,11 +198,11 @@ func (s *GroupService) Update(id int64, update *models.GroupUpdate) (*models.Gro
 
 	query := `
 		UPDATE groups
-		SET name = ?, logo_path = ?, description = ?, metadata = ?, updated_at = ?
+		SET name = ?, logo_path = ?, description = ?, category = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`
 	_, err = s.db.Exec(query, group.Name, group.LogoPath, group.Description,
-		group.Metadata, group.UpdatedAt, id)
+		group.Category, group.Metadata, group.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update group: %w", err)
 	}

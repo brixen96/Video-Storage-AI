@@ -57,120 +57,175 @@
 			<!-- Left Sidebar (Filters) -->
 			<div v-if="showFilters" class="vp-filter-sidebar" :class="{ collapsed: !showFilters }">
 				<div class="vp-filter-panel">
-					<h3>Filters</h3>
-
-					<!-- Sort -->
-					<div class="vp-filter-group">
-						<label>Sort By</label>
-						<select v-model="sortBy" class="form-select form-select-sm" @change="loadVideos">
-							<option value="created_at">Date Added</option>
-							<option value="title">Title</option>
-							<option value="duration">Duration</option>
-							<option value="play_count">Views</option>
-						</select>
-						<select v-model="sortOrder" class="form-select form-select-sm mt-2" @change="loadVideos">
-							<option value="desc">Descending</option>
-							<option value="asc">Ascending</option>
-						</select>
+					<div class="vp-filter-header">
+						<div class="vp-filter-title-group">
+							<h3>
+								<font-awesome-icon :icon="['fas', 'sliders-h']" />
+								Filters & Sort
+							</h3>
+							<span v-if="activeFiltersCount > 0" class="vp-active-filters-badge">{{ activeFiltersCount }}</span>
+						</div>
+						<button class="vp-clear-filters-btn" @click="clearFilters" title="Clear all filters">
+							<font-awesome-icon :icon="['fas', 'times-circle']" />
+						</button>
 					</div>
 
-					<!-- Duration Range -->
-					<div class="vp-filter-group">
-						<label>Duration (minutes)</label>
-						<div class="d-flex gap-2">
-							<input v-model.number="filters.minDuration" type="number" class="form-control form-control-sm" placeholder="Min" @change="loadVideos" />
-							<input v-model.number="filters.maxDuration" type="number" class="form-control form-control-sm" placeholder="Max" @change="loadVideos" />
+					<!-- Sort Section -->
+					<div class="vp-filter-section">
+						<div class="vp-section-header">
+							<font-awesome-icon :icon="['fas', 'sort']" />
+							<span>Sort</span>
+						</div>
+						<div class="vp-sort-controls">
+							<select v-model="sortBy" class="form-select form-select-sm" @change="loadVideos">
+								<option value="created_at">📅 Date Added</option>
+								<option value="title">🔤 Title</option>
+								<option value="duration">⏱️ Duration</option>
+								<option value="play_count">👁️ Views</option>
+							</select>
+							<div class="vp-sort-order-toggle">
+								<button :class="{ active: sortOrder === 'desc' }" @click=";(sortOrder = 'desc'), loadVideos()" title="Descending">
+									<font-awesome-icon :icon="['fas', 'sort-amount-down']" />
+								</button>
+								<button :class="{ active: sortOrder === 'asc' }" @click=";(sortOrder = 'asc'), loadVideos()" title="Ascending">
+									<font-awesome-icon :icon="['fas', 'sort-amount-up']" />
+								</button>
+							</div>
 						</div>
 					</div>
 
-					<!-- Resolution -->
-					<div class="vp-filter-group">
-						<label>Resolution</label>
-						<select v-model="filters.resolution" class="form-select form-select-sm" @change="loadVideos">
-							<option value="">All</option>
-							<option value="1920x1080">1080p</option>
-							<option value="1280x720">720p</option>
-							<option value="3840x2160">4K</option>
-						</select>
-					</div>
+					<!-- Content Filters -->
+					<div class="vp-filter-section">
+						<div class="vp-section-header">
+							<font-awesome-icon :icon="['fas', 'filter']" />
+							<span>Content</span>
+						</div>
 
-					<!-- Performers -->
-					<div v-if="performers.length > 0" class="vp-filter-group">
-						<label>Performers</label>
-						<select v-model="filters.performerId" class="form-select form-select-sm" @change="loadVideos">
-							<option :value="null">All</option>
-							<option v-for="performer in performers" :key="performer.id" :value="performer.id">{{ performer.name }}</option>
-						</select>
-					</div>
+						<div v-if="performers.length > 0" class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'user']" />
+								Performers
+								<span v-if="filteredPerformers.length !== performers.length" class="vp-filter-note">({{ filteredPerformers.length }})</span>
+							</label>
+							<select v-model="filters.performerId" class="form-select form-select-sm" @change="loadVideos">
+								<option :value="null">All Performers</option>
+								<option v-for="performer in filteredPerformers" :key="performer.id" :value="performer.id">{{ performer.name }}</option>
+							</select>
+						</div>
 
-					<!-- Studios -->
-					<div v-if="studios.length > 0" class="vp-filter-group">
-						<label>Studios</label>
-						<select v-model="filters.studioId" class="form-select form-select-sm" @change="onStudioChange">
-							<option :value="null">All</option>
-							<option v-for="studio in studios" :key="studio.id" :value="studio.id">{{ studio.name }}</option>
-						</select>
-					</div>
+						<div v-if="studios.length > 0" class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'building']" />
+								Studios
+							</label>
+							<select v-model="filters.studioId" class="form-select form-select-sm" @change="onStudioChange">
+								<option :value="null">All Studios</option>
+								<option v-for="studio in studios" :key="studio.id" :value="studio.id">{{ studio.name }}</option>
+							</select>
+						</div>
 
-					<!-- Groups -->
-					<div v-if="filteredGroups.length > 0" class="vp-filter-group">
-						<label>Groups</label>
-						<select v-model="filters.groupId" class="form-select form-select-sm" @change="loadVideos">
-							<option :value="null">All</option>
-							<option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
-						</select>
-					</div>
+						<div v-if="filteredGroups.length > 0" class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'layer-group']" />
+								Groups
+							</label>
+							<select v-model="filters.groupId" class="form-select form-select-sm" @change="loadVideos">
+								<option :value="null">All Groups</option>
+								<option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+							</select>
+						</div>
 
-					<!-- Tags -->
-					<div v-if="tags.length > 0" class="vp-filter-group">
-						<label>Tags</label>
-						<select v-model="filters.tagId" class="form-select form-select-sm" @change="loadVideos">
-							<option :value="null">All</option>
-							<option v-for="tag in tags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
-						</select>
-					</div>
+						<div v-if="filteredTags.length > 0" class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'tags']" />
+								Tags
+								<span v-if="filters.selectedTags.length > 0" class="vp-filter-value">{{ filters.selectedTags.length }} selected</span>
+							</label>
+							<div class="vp-tags-multiselect">
+								<div
+									v-for="tag in filteredTags"
+									:key="tag.id"
+									class="vp-tag-item"
+									:class="{ selected: filters.selectedTags.includes(tag.id) }"
+									@click="toggleTag(tag.id)"
+								>
+									<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" />
+									<span>{{ tag.name }}</span>
+								</div>
+							</div>
+						</div>
 
-					<!-- Zoo Filter -->
-					<div class="vp-filter-group">
-						<label>Content Type</label>
-						<select v-model="filters.zoo" class="form-select form-select-sm" @change="loadVideos">
-							<option :value="null">All</option>
-							<option :value="false">Regular</option>
-							<option :value="true">Zoo</option>
-						</select>
-					</div>
+						<div class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'list']" />
+								Content Type
+							</label>
+							<select v-model="filters.contentType" class="form-select form-select-sm" @change="loadVideos">
+								<option :value="null">All Types</option>
+								<option value="regular">Regular</option>
+								<option value="zoo">Zoo</option>
+								<option value="3d">3D</option>
+							</select>
+						</div>
 
-					<!-- File Size Range -->
-					<div class="vp-filter-group">
-						<label>File Size (MB)</label>
-						<div class="d-flex gap-2">
-							<input v-model.number="filters.minSize" type="number" class="form-control form-control-sm" placeholder="Min" @change="loadVideos" />
-							<input v-model.number="filters.maxSize" type="number" class="form-control form-control-sm" placeholder="Max" @change="loadVideos" />
+						<div class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'calendar']" />
+								Date Range
+							</label>
+							<input v-model="filters.dateFrom" type="date" class="form-control form-control-sm mb-2" placeholder="From" @change="loadVideos" />
+							<input v-model="filters.dateTo" type="date" class="form-control form-control-sm" placeholder="To" @change="loadVideos" />
 						</div>
 					</div>
 
-					<!-- Date Range -->
-					<div class="vp-filter-group">
-						<label>Date Range</label>
-						<input v-model="filters.dateFrom" type="date" class="form-control form-control-sm mb-2" @change="loadVideos" />
-						<input v-model="filters.dateTo" type="date" class="form-control form-control-sm" @change="loadVideos" />
-					</div>
-
-					<!-- Toggle Filters -->
-					<div class="vp-filter-group">
-						<label>Quick Filters</label>
-						<div class="form-check">
-							<input id="hasPreview" v-model="filters.hasPreview" type="checkbox" class="form-check-input" @change="loadVideos" />
-							<label class="form-check-label" for="hasPreview">Has Preview</label>
+					<!-- Media Properties -->
+					<div class="vp-filter-section">
+						<div class="vp-section-header">
+							<font-awesome-icon :icon="['fas', 'cog']" />
+							<span>Media Properties</span>
 						</div>
-						<div class="form-check">
-							<input id="missingMetadata" v-model="filters.missingMetadata" type="checkbox" class="form-check-input" @change="loadVideos" />
-							<label class="form-check-label" for="missingMetadata">Missing Metadata</label>
+
+						<div class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'clock']" />
+								Duration
+								<span v-if="filters.minDuration || filters.maxDuration" class="vp-filter-value">
+									{{ filters.minDuration || 0 }}m - {{ filters.maxDuration || 180 }}m
+								</span>
+							</label>
+							<div class="vp-range-slider">
+								<input v-model.number="filters.minDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-min" @input="loadVideos" />
+								<input v-model.number="filters.maxDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-max" @input="loadVideos" />
+								<div class="vp-slider-track"></div>
+							</div>
+						</div>
+
+						<div class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'expand']" />
+								Resolution
+							</label>
+							<select v-model="filters.resolution" class="form-select form-select-sm" @change="loadVideos">
+								<option value="">All Resolutions</option>
+								<option value="3840x2160">🎬 4K (2160p)</option>
+								<option value="1920x1080">📺 1080p (Full HD)</option>
+								<option value="1280x720">📱 720p (HD)</option>
+							</select>
+						</div>
+
+						<div class="vp-filter-group">
+							<label>
+								<font-awesome-icon :icon="['fas', 'hdd']" />
+								File Size
+								<span v-if="filters.minSize || filters.maxSize" class="vp-filter-value"> {{ filters.minSize || 0 }}MB - {{ filters.maxSize || 10000 }}MB </span>
+							</label>
+							<div class="vp-range-slider">
+								<input v-model.number="filters.minSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-min" @input="loadVideos" />
+								<input v-model.number="filters.maxSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-max" @input="loadVideos" />
+								<div class="vp-slider-track"></div>
+							</div>
 						</div>
 					</div>
-
-					<!-- Clear Filters -->
-					<button class="btn btn-sm btn-outline-secondary w-100 mt-3" @click="clearFilters">Clear All</button>
 				</div>
 			</div>
 
@@ -178,17 +233,26 @@
 			<div class="vp-main-content p-0 m-0" :class="{ 'full-width': !showFilters }">
 				<div class="container-fluid px-0">
 					<!-- Loading State -->
-					<div v-if="loading" class="text-center py-5">
-						<div class="spinner-border text-primary" role="status">
-							<span class="visually-hidden">Loading...</span>
+					<div v-if="loading" class="vp-loading-state">
+						<div class="vp-loading-spinner">
+							<div class="spinner"></div>
+							<p>Loading your videos...</p>
 						</div>
 					</div>
 
 					<!-- Empty State -->
-					<div v-else-if="videos.length === 0" class="text-center py-5">
-						<font-awesome-icon :icon="['fas', 'video']" size="3x" class="mb-3" />
-						<p>No videos found</p>
-						<button class="btn btn-primary" @click="scanVideos">Scan for Videos</button>
+					<div v-else-if="videos.length === 0" class="vp-empty-state">
+						<div class="vp-empty-content">
+							<div class="vp-empty-icon">
+								<font-awesome-icon :icon="['fas', 'video']" />
+							</div>
+							<h3>No Videos Found</h3>
+							<p>Start by scanning your libraries to discover videos</p>
+							<button class="btn btn-success btn-lg" @click="scanVideos">
+								<font-awesome-icon :icon="['fas', 'database']" />
+								Scan for Videos
+							</button>
+						</div>
 					</div>
 
 					<!-- Grid View -->
@@ -371,7 +435,8 @@ export default {
 				studioId: null,
 				groupId: null,
 				tagId: null,
-				zoo: null,
+				selectedTags: [],
+				contentType: null,
 				hasPreview: null,
 				missingMetadata: null,
 				dateFrom: '',
@@ -417,9 +482,54 @@ export default {
 			}
 			return pages
 		},
+		activeFiltersCount() {
+			let count = 0
+			if (this.filters.minDuration) count++
+			if (this.filters.maxDuration) count++
+			if (this.filters.resolution) count++
+			if (this.filters.performerId) count++
+			if (this.filters.studioId) count++
+			if (this.filters.groupId) count++
+			if (this.filters.tagId) count++
+			if (this.filters.selectedTags.length > 0) count += this.filters.selectedTags.length
+			if (this.filters.contentType !== null) count++
+			if (this.filters.hasPreview) count++
+			if (this.filters.missingMetadata) count++
+			if (this.filters.dateFrom) count++
+			if (this.filters.dateTo) count++
+			if (this.filters.minSize) count++
+			if (this.filters.maxSize) count++
+			if (this.searchQuery) count++
+			if (this.selectedLibrary) count++
+			return count
+		},
+		filteredPerformers() {
+			if (this.filters.contentType === null) {
+				return this.performers
+			}
+			return this.performers.filter(p => p.category === this.filters.contentType)
+		},
+		filteredStudios() {
+			if (this.filters.contentType === null) {
+				return this.studios
+			}
+			return this.studios.filter(s => s.category === this.filters.contentType)
+		},
 		filteredGroups() {
-			if (!this.filters.studioId) return this.groups
-			return this.groups.filter((g) => g.studio_id === this.filters.studioId)
+			let groups = this.groups
+			if (this.filters.studioId) {
+				groups = groups.filter(g => g.studio_id === this.filters.studioId)
+			}
+			if (this.filters.contentType) {
+				groups = groups.filter(g => g.category === this.filters.contentType)
+			}
+			return groups
+		},
+		filteredTags() {
+			if (this.filters.contentType === null) {
+				return this.tags
+			}
+			return this.tags.filter(t => t.category === this.filters.contentType)
 		},
 	},
 	mounted() {
@@ -435,6 +545,15 @@ export default {
 	beforeUnmount() {
 		document.removeEventListener('click', this.hideContextMenu)
 		document.removeEventListener('keydown', this.handleKeyPress)
+	},
+	watch: {
+		'filters.contentType'() {
+			// Reset performer, studio, group, and tag filters when content type changes
+			this.filters.performerId = null
+			this.filters.studioId = null
+			this.filters.groupId = null
+			this.filters.selectedTags = []
+		},
 	},
 	methods: {
 		getAssetURL,
@@ -455,7 +574,8 @@ export default {
 					studio_id: this.filters.studioId || undefined,
 					group_id: this.filters.groupId || undefined,
 					tag_id: this.filters.tagId || undefined,
-					zoo: this.filters.zoo !== null ? this.filters.zoo : undefined,
+					tag_ids: this.filters.selectedTags.length > 0 ? this.filters.selectedTags : undefined,
+					category: this.filters.contentType || undefined,
 					has_preview: this.filters.hasPreview || undefined,
 					missing_metadata: this.filters.missingMetadata || undefined,
 					date_from: this.filters.dateFrom || undefined,
@@ -503,7 +623,7 @@ export default {
 		},
 		async loadTags() {
 			try {
-				this.tags = await this.$store.dispatch('fetchTags')
+				this.tags = await this.$store.dispatch('fetchTags', true)
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 			}
@@ -534,6 +654,15 @@ export default {
 		toggleFilters() {
 			this.showFilters = !this.showFilters
 		},
+		toggleTag(tagId) {
+			const index = this.filters.selectedTags.indexOf(tagId)
+			if (index > -1) {
+				this.filters.selectedTags.splice(index, 1)
+			} else {
+				this.filters.selectedTags.push(tagId)
+			}
+			this.loadVideos()
+		},
 		clearFilters() {
 			this.filters = {
 				minDuration: null,
@@ -543,7 +672,8 @@ export default {
 				studioId: null,
 				groupId: null,
 				tagId: null,
-				zoo: null,
+				selectedTags: [],
+				contentType: null,
 				hasPreview: null,
 				missingMetadata: null,
 				dateFrom: '',

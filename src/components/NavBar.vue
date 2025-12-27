@@ -78,12 +78,6 @@
 						</router-link>
 					</li>
 					<li class="nav-item">
-						<router-link to="/ai" class="nav-link" active-class="active">
-							<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
-							AI
-						</router-link>
-					</li>
-					<li class="nav-item">
 						<router-link to="/edit-list" class="nav-link" active-class="active">
 							<font-awesome-icon :icon="['fas', 'list-check']" class="me-1" />
 							Edit List

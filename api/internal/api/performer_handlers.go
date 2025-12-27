@@ -150,7 +150,8 @@ func updatePerformer(c *gin.Context) {
 		return
 	}
 
-	performer, err := svc.Update(id, &update)
+	// Use UpdateWithThumbnailCheck to automatically regenerate thumbnail if preview changes
+	performer, err := svc.UpdateWithThumbnailCheck(id, &update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to update performer",
@@ -632,5 +633,101 @@ func syncPerformerTags(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(
 		gin.H{"videos_updated": videosUpdated},
 		fmt.Sprintf("Synced master tags to %d videos", videosUpdated),
+	))
+}
+
+// generatePerformerThumbnails generates thumbnails for all performers with preview videos
+func generatePerformerThumbnails(c *gin.Context) {
+	// Create services
+	mediaService := services.NewMediaService()
+	activityService := services.NewActivityService()
+	thumbnailService := services.NewPerformerThumbnailService(mediaService, activityService)
+
+	// Start thumbnail generation (runs asynchronously)
+	err := thumbnailService.GenerateAllThumbnails()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to start thumbnail generation",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusAccepted, models.SuccessResponse(
+		nil,
+		"Performer thumbnail generation started",
+	))
+}
+
+// generatePerformerThumbnail generates a thumbnail for a specific performer
+func generatePerformerThumbnail(c *gin.Context) {
+	idStr := c.Param("id")
+	performerID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Create services
+	mediaService := services.NewMediaService()
+	activityService := services.NewActivityService()
+	thumbnailService := services.NewPerformerThumbnailService(mediaService, activityService)
+
+	// Generate thumbnail for this specific performer
+	thumbnailPath, err := thumbnailService.GenerateThumbnailForPerformer(performerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to generate thumbnail",
+			err.Error(),
+		))
+		return
+	}
+
+	if thumbnailPath == "" {
+		c.JSON(http.StatusOK, models.SuccessResponse(
+			nil,
+			"Performer has no preview video, skipping",
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		gin.H{"thumbnail_path": thumbnailPath},
+		"Thumbnail generated successfully",
+	))
+}
+
+// getPerformerVideos retrieves all videos featuring a specific performer
+func getPerformerVideos(c *gin.Context) {
+	idStr := c.Param("id")
+	performerID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid performer ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get videos featuring this performer
+	activityService := services.NewActivityService()
+	libraryService := services.NewLibraryService()
+	performerService := services.NewPerformerService()
+	videoService := services.NewVideoService(activityService, libraryService, performerService)
+	videos, err := videoService.GetByPerformer(performerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to retrieve performer videos",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		videos,
+		"Performer videos retrieved successfully",
 	))
 }

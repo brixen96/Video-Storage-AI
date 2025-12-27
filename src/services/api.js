@@ -7,6 +7,9 @@ const api = axios.create({
 		'Content-Type': 'application/json',
 	},
 	timeout: 600000, // Increase to 60 seconds
+	paramsSerializer: {
+		indexes: null, // Use repeat format for arrays: tag_ids=1&tag_ids=2
+	},
 })
 
 // Request interceptor
@@ -58,10 +61,13 @@ export const performersAPI = {
 	fetchMetadata: (id) => api.post(`/performers/${id}/fetch-metadata`),
 	resetMetadata: (id) => api.post(`/performers/${id}/reset-metadata`),
 	resetPreviews: (id) => api.post(`/performers/${id}/reset-previews`),
+	generateThumbnails: () => api.post('/performers/generate-thumbnails'),
+	generateThumbnail: (id) => api.post(`/performers/${id}/generate-thumbnail`),
 	getTags: (id) => api.get(`/performers/${id}/tags`),
 	addTag: (id, tagId) => api.post(`/performers/${id}/tags`, { tag_id: tagId }),
 	removeTag: (id, tagId) => api.delete(`/performers/${id}/tags/${tagId}`),
 	syncTags: (id) => api.post(`/performers/${id}/sync-tags`),
+	getVideos: (id) => api.get(`/performers/${id}/videos`),
 }
 
 export const videosAPI = {
@@ -74,6 +80,7 @@ export const videosAPI = {
 	scan: (libraryId, signal) => api.post('/videos/scan', { library_id: libraryId }, { signal }),
 	scanAllParallel: (config = {}, signal) => api.post('/videos/scan-all-parallel', config, { signal }),
 	generatePreviews: (config = {}, signal) => api.post('/videos/generate-previews', config, { signal }),
+	generateThumbnails: (signal) => api.post('/videos/generate-thumbnails', {}, { signal }),
 	fetchMetadata: (id, signal) => api.post(`/videos/${id}/fetch`, {}, { signal }),
 	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
 	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),
@@ -174,6 +181,51 @@ export const aiAPI = {
 
 	// Chat (placeholder)
 	chat: (data) => api.post('/ai/chat', data),
+
+	// Memory management
+	saveMemory: (data) => api.post('/ai/memories', data),
+	getMemories: (params) => api.get('/ai/memories', { params }),
+	searchMemories: (query) => api.get('/ai/memories/search', { params: { query } }),
+	deleteMemory: (id) => api.delete(`/ai/memories/${id}`),
+	updateMemory: (id, data) => api.put(`/ai/memories/${id}`, data),
+}
+
+// LM Studio AI Companion API
+const lmStudioAPI = axios.create({
+	baseURL: 'http://localhost:1234/v1',
+	headers: {
+		'Content-Type': 'application/json',
+	},
+	timeout: 1200000, // 2 minutes for tool calling iterations
+})
+
+export const aiCompanionAPI = {
+	chat: async (messages, options = {}) => {
+		try {
+			const requestBody = {
+				messages,
+				temperature: options.temperature || 0.7,
+				max_tokens: options.max_tokens || 2000,
+				stream: false,
+			}
+
+			// Add tools if provided
+			if (options.tools) {
+				requestBody.tools = options.tools
+			}
+
+			// Add tool_choice if provided
+			if (options.tool_choice) {
+				requestBody.tool_choice = options.tool_choice
+			}
+
+			const response = await lmStudioAPI.post('/chat/completions', requestBody)
+			return response.data
+		} catch (error) {
+			console.error('LM Studio API Error:', error)
+			throw error
+		}
+	},
 }
 
 // Asset URL helper

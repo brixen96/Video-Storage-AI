@@ -82,10 +82,10 @@
 ### 🧩 Hardware
 
 -   **CPU:** Intel Core i7-14700K
--   **Memory:** 32 GB DDR5
+-   **Memory:** 64 GB DDR5
 -   **Storage:** Samsung 990 PRO 2 TB NVMe M.2
 -   **Network:** 1 Gbit Ethernet
--   **GPU:** NVIDIA RTX 4080 Super (latest Game Ready Drivers)
+-   **GPU:** NVIDIA RTX 4080 Super (latest Studio Drivers)
 
 ### ⚙️ Software
 
@@ -160,15 +160,57 @@ There is a clear need for a **dedicated, performance-optimized solution** that c
 -   Fast video scrubbing with preview thumbnails
 -   Resume playback and bookmarking support
 
-### 🧠 AI Assistant
+### 🧠 AI Companion (Your Personal Assistant)
 
--   Acts as a **personal organizing companion**
--   Suggests **naming conventions**, **folder structures**, and **metadata corrections**
--   Identifies **duplicates**, **unfinished edits**, or **misplaced files**
--   Provides **optimization insights** for better scalability
--   Offers **auto-tagging** suggestions for videos during import or metadata refresh
--   Integrates with **AdultDataLink API** for fetching performer and scene metadata (configuration in `adultdatalinkapi.json`)
--   Engages in **live chat-style communication** with the user
+**Architecture:** A persistent, always-running AI agent built into the Go backend that serves as your personal intelligent assistant.
+
+#### Core Capabilities:
+
+-   **Always-On Monitoring**: Runs 24/7 in the background, continuously monitoring all libraries
+-   **File System Watchers**: Real-time detection of new files, changes, and deletions across all library paths
+-   **Full System Access**: Complete access to database, file system, network drives, and application state
+-   **Autonomous Decision Making**: Thinks independently and takes proactive actions without user input
+-   **Intelligent Notifications**: Alerts you only when something important requires attention
+
+#### AI Architecture:
+
+-   **Primary Intelligence**: Custom Go-based AI agent with rule-based reasoning and pattern matching
+-   **External LLM Integration**: Connects to LM Studio (localhost:1234) only when advanced natural language processing is needed
+-   **Hybrid Approach**: Handles 80% of tasks with built-in intelligence, delegates complex reasoning to LLM when necessary
+-   **Memory System**: Persistent knowledge base that learns your preferences and patterns over time
+
+#### Functions:
+
+-   **Library Management**:
+    -   Auto-organizes new files based on learned patterns
+    -   Suggests **naming conventions** and **folder structures**
+    -   Identifies **duplicates**, **unfinished edits**, or **misplaced files**
+    -   Monitors disk space and library health
+-   **Metadata Intelligence**:
+    -   Auto-fetches metadata for new performers/videos
+    -   Integrates with **AdultDataLink API** (config: `adultdatalinkapi.json`)
+    -   Suggests metadata corrections and improvements
+    -   Auto-tags videos during import
+-   **Proactive Optimization**:
+    -   Analyzes library growth trends
+    -   Recommends cleanup operations
+    -   Identifies quality issues
+    -   Suggests performance improvements
+-   **Interactive Chat**: Conversational interface for questions, commands, and assistance
+-   **Task Automation**: Can execute any task or job in the application autonomously
+
+#### Technical Implementation:
+
+-   **Backend Service**: Goroutine-based background service in Go API
+-   **Event System**: Pub/sub architecture for real-time event processing
+-   **File Watchers**: `fsnotify` library for monitoring all library directories
+-   **WebSocket**: Real-time bidirectional communication with frontend
+-   **API Endpoints**:
+    -   `POST /api/v1/ai/chat` - Chat with the AI
+    -   `GET /api/v1/ai/status` - Get AI companion status
+    -   `GET /api/v1/ai/events` - Stream real-time events
+    -   `POST /api/v1/ai/memories` - Memory management
+-   **LLM Fallback**: HTTP client to LM Studio OpenAI-compatible API when needed
 
 ### 🧍 Performer Presentation & Management
 

@@ -45,7 +45,7 @@ func (s *AdultDataLinkService) FetchPerformerData(performerName string) (*models
 	}
 
 	// Add authorization header
-	req.Header.Set("Authorization", s.apiKey)
+	req.Header.Set("Authorization", "Bearer " + s.apiKey)
 
 	// Make request
 	resp, err := s.httpClient.Do(req)

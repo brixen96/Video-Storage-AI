@@ -6,6 +6,34 @@
 					<font-awesome-icon :icon="['fas', 'tasks']" class="me-3" />
 					Task Center
 				</h1>
+				<p class="text-light">Real-time task monitoring with instant feedback</p>
+			</div>
+
+			<!-- Active Tasks Monitor - ULTRA HIGH PRIORITY -->
+			<div v-if="activeTasks.length > 0" class="active-tasks-monitor mb-4">
+				<h5 class="section-title mb-3">
+					<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
+					Active Tasks ({{ activeTasks.length }})
+				</h5>
+				<div class="row g-3">
+					<div v-for="task in activeTasks" :key="task.id" class="col-md-6">
+						<div class="card task-progress-card">
+							<div class="card-body">
+								<div class="d-flex justify-content-between align-items-start mb-2">
+									<h6 class="mb-0">{{ task.message }}</h6>
+									<span class="badge bg-primary">{{ task.status }}</span>
+								</div>
+								<div class="progress mb-2" style="height: 8px">
+									<div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: task.progress + '%' }" role="progressbar"></div>
+								</div>
+								<div class="d-flex justify-content-between">
+									<small class="text-light">{{ task.progress }}%</small>
+									<small class="text-light">{{ formatTaskType(task.task_type) }}</small>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 
 			<!-- Task Categories -->
@@ -20,26 +48,72 @@
 							</h5>
 						</div>
 						<div class="card-body">
+							<!-- Scan All Libraries -->
 							<div class="task-item">
 								<div class="task-info">
 									<h6>Scan All Libraries</h6>
 									<p class="text-light mb-0">Scan all libraries for new or changed videos</p>
 								</div>
-								<button class="btn btn-primary mt-3" @click="scanAllLibraries" :disabled="scanning">
-									<font-awesome-icon :icon="['fas', scanning ? 'spinner' : 'sync']" :spin="scanning" class="me-2" />
-									{{ scanning ? 'Scanning...' : 'Scan Libraries' }}
+								<button class="btn btn-primary mt-3" @click="scanAllLibraries" :disabled="isTaskRunning('library_scan_all')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('library_scan_all') ? 'spinner' : 'sync']"
+										:spin="isTaskRunning('library_scan_all')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('library_scan_all') ? 'Scanning...' : 'Scan Libraries' }}
 								</button>
+								<div v-if="getTaskProgress('library_scan_all')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-primary" :style="{ width: getTaskProgress('library_scan_all') + '%' }"></div>
+									</div>
+									<small class="text-primary">{{ getTaskProgress('library_scan_all') }}%</small>
+								</div>
 							</div>
 							<hr class="my-4" />
+
+							<!-- Generate Previews -->
 							<div class="task-item">
 								<div class="task-info">
 									<h6>Generate Previews</h6>
-									<p class="text-light mb-0">Generate hover preview storyboards for all videos (10 frames per video)</p>
+									<p class="text-light mb-0">Generate hover preview storyboards for all videos</p>
 								</div>
-								<button class="btn btn-info mt-3" @click="generatePreviews" :disabled="generatingPreviews">
-									<font-awesome-icon :icon="['fas', generatingPreviews ? 'spinner' : 'images']" :spin="generatingPreviews" class="me-2" />
-									{{ generatingPreviews ? 'Generating...' : 'Generate Previews' }}
+								<button class="btn btn-info mt-3" @click="generatePreviews" :disabled="isTaskRunning('preview_generation')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('preview_generation') ? 'spinner' : 'images']"
+										:spin="isTaskRunning('preview_generation')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('preview_generation') ? 'Generating...' : 'Generate Previews' }}
 								</button>
+								<div v-if="getTaskProgress('preview_generation')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-info" :style="{ width: getTaskProgress('preview_generation') + '%' }"></div>
+									</div>
+									<small class="text-info">{{ getTaskProgress('preview_generation') }}%</small>
+								</div>
+							</div>
+							<hr class="my-4" />
+
+							<!-- Generate Video Thumbnails -->
+							<div class="task-item">
+								<div class="task-info">
+									<h6>Generate Video Thumbnails</h6>
+									<p class="text-light mb-0">Generate static thumbnails for all videos</p>
+								</div>
+								<button class="btn btn-success mt-3" @click="generateVideoThumbnails" :disabled="isTaskRunning('video_thumbnail_generation')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('video_thumbnail_generation') ? 'spinner' : 'file-image']"
+										:spin="isTaskRunning('video_thumbnail_generation')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('video_thumbnail_generation') ? 'Generating...' : 'Generate Video Thumbnails' }}
+								</button>
+								<div v-if="getTaskProgress('video_thumbnail_generation')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-success" :style="{ width: getTaskProgress('video_thumbnail_generation') + '%' }"></div>
+									</div>
+									<small class="text-success">{{ getTaskProgress('video_thumbnail_generation') }}%</small>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -55,125 +129,71 @@
 							</h5>
 						</div>
 						<div class="card-body">
+							<!-- Scan Performers -->
 							<div class="task-item">
 								<div class="task-info">
-									<h6>Fetch Missing Metadata</h6>
-									<p class="text-light mb-0">Fetch metadata from AdultDataLink for performers without metadata (excludes Zoo performers)</p>
+									<h6>Scan Performers</h6>
+									<p class="text-light mb-0">Scan performer folders and create previews</p>
 								</div>
-								<button class="btn btn-success mt-3" @click="fetchMissingMetadata" :disabled="fetchingMetadata">
-									<font-awesome-icon :icon="['fas', fetchingMetadata ? 'spinner' : 'download']" :spin="fetchingMetadata" class="me-2" />
-									{{ fetchingMetadata ? 'Fetching...' : 'Fetch Metadata' }}
+								<button class="btn btn-primary mt-3" @click="scanPerformers" :disabled="isTaskRunning('performer_scan')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('performer_scan') ? 'spinner' : 'user-plus']"
+										:spin="isTaskRunning('performer_scan')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('performer_scan') ? 'Scanning...' : 'Scan Performers' }}
 								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Database Tasks -->
-				<div class="col-md-12">
-					<div class="card task-card">
-						<div class="card-header">
-							<h5 class="mb-0">
-								<font-awesome-icon :icon="['fas', 'database']" class="me-2" />
-								Database Management
-							</h5>
-						</div>
-						<div class="card-body">
-							<!-- Database Stats -->
-							<div class="row g-3 mb-4">
-								<div class="col-md-3">
-									<div class="card stat-card h-100">
-										<div class="card-body">
-											<div class="d-flex justify-content-between align-items-center">
-												<div>
-													<h6 class="mb-1 text-primary">Videos</h6>
-													<h2 class="mb-0">{{ databaseInfo.videoCount }}</h2>
-												</div>
-												<font-awesome-icon :icon="['fas', 'video']" size="2x" class="text-primary" />
-											</div>
-										</div>
+								<div v-if="getTaskProgress('performer_scan')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-primary" :style="{ width: getTaskProgress('performer_scan') + '%' }"></div>
 									</div>
-								</div>
-								<div class="col-md-3">
-									<div class="card stat-card h-100">
-										<div class="card-body">
-											<div class="d-flex justify-content-between align-items-center">
-												<div>
-													<h6 class="mb-1 text-primary">Performers</h6>
-													<h2 class="mb-0">{{ databaseInfo.performerCount }}</h2>
-												</div>
-												<font-awesome-icon :icon="['fas', 'user']" size="2x" class="text-success" />
-											</div>
-										</div>
-									</div>
-								</div>
-								<div class="col-md-3">
-									<div class="card stat-card h-100">
-										<div class="card-body">
-											<div class="d-flex justify-content-between align-items-center">
-												<div>
-													<h6 class="mb-1 text-primary">Studios</h6>
-													<h2 class="mb-0">{{ databaseInfo.studioCount }}</h2>
-												</div>
-												<font-awesome-icon :icon="['fas', 'building']" size="2x" class="text-warning" />
-											</div>
-										</div>
-									</div>
-								</div>
-								<div class="col-md-3">
-									<div class="card stat-card h-100">
-										<div class="card-body">
-											<div class="d-flex justify-content-between align-items-center">
-												<div>
-													<h6 class="mb-1 text-primary">Tags</h6>
-													<h2 class="mb-0">{{ databaseInfo.tagCount }}</h2>
-												</div>
-												<font-awesome-icon :icon="['fas', 'tags']" size="2x" class="text-info" />
-											</div>
-										</div>
-									</div>
+									<small class="text-primary">{{ getTaskProgress('performer_scan') }}%</small>
 								</div>
 							</div>
+							<hr class="my-4" />
 
-							<!-- Database Info -->
-							<div class="row g-3 mb-4">
-								<div class="col-md-6">
-									<div class="info-item">
-										<strong>Database Size:</strong>
-										<span class="text-light ms-2">{{ databaseInfo.size }}</span>
-									</div>
-								</div>
-								<div class="col-md-6">
-									<div class="info-item">
-										<strong>Location:</strong>
-										<span class="text-light ms-2" style="font-family: monospace; font-size: 0.9em">{{ databaseInfo.location }}</span>
-									</div>
-								</div>
-							</div>
-
-							<!-- Database Operations -->
+							<!-- Generate Performer Thumbnails -->
 							<div class="task-item">
-								<div class="task-info mb-3">
-									<h6>Database Operations</h6>
-									<p class="text-light mb-0">Maintain, backup, and restore your database</p>
+								<div class="task-info">
+									<h6>Generate Performer Thumbnails</h6>
+									<p class="text-light mb-0">Generate thumbnails from performer preview videos</p>
 								</div>
-								<div class="d-flex gap-2 flex-wrap">
-									<button class="btn btn-warning" @click="optimizeDatabase">
-										<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
-										Optimize
-									</button>
-									<button class="btn btn-success" @click="backupDatabase">
-										<font-awesome-icon :icon="['fas', 'save']" class="me-2" />
-										Backup
-									</button>
-									<button class="btn btn-info" @click="restoreDatabase">
-										<font-awesome-icon :icon="['fas', 'upload']" class="me-2" />
-										Restore
-									</button>
-									<button class="btn btn-danger" @click="confirmClearLogs" :disabled="clearingLogs">
-										<font-awesome-icon :icon="['fas', clearingLogs ? 'spinner' : 'trash']" :spin="clearingLogs" class="me-2" />
-										{{ clearingLogs ? 'Clearing...' : 'Clear Activity Logs' }}
-									</button>
+								<button class="btn btn-success mt-3" @click="generatePerformerThumbnails" :disabled="isTaskRunning('performer_thumbnail_generation')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('performer_thumbnail_generation') ? 'spinner' : 'image']"
+										:spin="isTaskRunning('performer_thumbnail_generation')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('performer_thumbnail_generation') ? 'Generating...' : 'Generate Thumbnails' }}
+								</button>
+								<div v-if="getTaskProgress('performer_thumbnail_generation')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-success" :style="{ width: getTaskProgress('performer_thumbnail_generation') + '%' }"></div>
+									</div>
+									<small class="text-success">{{ getTaskProgress('performer_thumbnail_generation') }}%</small>
+								</div>
+							</div>
+							<hr class="my-4" />
+
+							<!-- Fetch Metadata -->
+							<div class="task-item">
+								<div class="task-info">
+									<h6>Fetch Metadata</h6>
+									<p class="text-light mb-0">Fetch metadata for all performers from AdultDataLink</p>
+								</div>
+								<button class="btn btn-warning mt-3" @click="fetchAllMetadata" :disabled="isTaskRunning('metadata_fetch')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('metadata_fetch') ? 'spinner' : 'download']"
+										:spin="isTaskRunning('metadata_fetch')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('metadata_fetch') ? 'Fetching...' : 'Fetch Metadata' }}
+								</button>
+								<div v-if="getTaskProgress('metadata_fetch')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-warning" :style="{ width: getTaskProgress('metadata_fetch') + '%' }"></div>
+									</div>
+									<small class="text-warning">{{ getTaskProgress('metadata_fetch') }}%</small>
 								</div>
 							</div>
 						</div>
@@ -181,22 +201,44 @@
 				</div>
 			</div>
 
-			<!-- Task Progress Modal -->
-			<div v-if="taskProgress.show" class="task-progress-modal">
-				<div class="task-progress-content">
-					<h4>{{ taskProgress.title }}</h4>
-					<p>{{ taskProgress.message }}</p>
-					<div class="progress">
-						<div
-							class="progress-bar progress-bar-striped progress-bar-animated"
-							:style="{ width: taskProgress.percent + '%' }"
-							role="progressbar"
-						>
-							{{ taskProgress.percent }}%
+			<!-- Database Info -->
+			<div class="row g-3 mt-3">
+				<div class="col-12">
+					<div class="card task-card">
+						<div class="card-header">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'database']" class="me-2" />
+								Database Information
+							</h5>
 						</div>
-					</div>
-					<div class="task-progress-details mt-2">
-						<small>{{ taskProgress.details }}</small>
+						<div class="card-body">
+							<div class="row g-3">
+								<div class="col-md-3">
+									<div class="stat-item">
+										<label>Videos</label>
+										<h4>{{ databaseInfo.videoCount.toLocaleString() }}</h4>
+									</div>
+								</div>
+								<div class="col-md-3">
+									<div class="stat-item">
+										<label>Performers</label>
+										<h4>{{ databaseInfo.performerCount.toLocaleString() }}</h4>
+									</div>
+								</div>
+								<div class="col-md-3">
+									<div class="stat-item">
+										<label>Studios</label>
+										<h4>{{ databaseInfo.studioCount.toLocaleString() }}</h4>
+									</div>
+								</div>
+								<div class="col-md-3">
+									<div class="stat-item">
+										<label>Tags</label>
+										<h4>{{ databaseInfo.tagCount.toLocaleString() }}</h4>
+									</div>
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -205,37 +247,103 @@
 </template>
 
 <script>
-import { librariesAPI, performersAPI, databaseAPI, videosAPI, activityAPI } from '@/services/api'
+import { performersAPI, databaseAPI, videosAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 export default {
 	name: 'TasksPage',
 	data() {
 		return {
-			scanning: false,
-			fetchingMetadata: false,
-			generatingPreviews: false,
-			clearingLogs: false,
+			activeTasks: [],
 			databaseInfo: {
-				location: 'C:\\Repos\\Video Storage AI\\api\\video-storage.db',
-				size: 'Loading...',
 				videoCount: 0,
 				performerCount: 0,
 				studioCount: 0,
 				tagCount: 0,
 			},
-			taskProgress: {
-				show: false,
-				title: '',
-				message: '',
-				percent: 0,
-				details: '',
-			},
+			wsUnsubscribe: null,
 		}
 	},
 	mounted() {
 		this.loadDatabaseInfo()
+		this.connectWebSocket()
+		this.loadActiveTasks()
+
+		// Refresh active tasks every 2 seconds as backup
+		this.refreshInterval = setInterval(() => {
+			this.loadActiveTasks()
+		}, 2000)
+	},
+	beforeUnmount() {
+		if (this.wsUnsubscribe) {
+			this.wsUnsubscribe()
+		}
+		if (this.refreshInterval) {
+			clearInterval(this.refreshInterval)
+		}
 	},
 	methods: {
+		connectWebSocket() {
+			console.log('TasksPage: Connecting to WebSocket...')
+
+			// Subscribe to activity updates
+			this.wsUnsubscribe = websocketService.on('activity_update', (data) => {
+				console.log('TasksPage: Activity update received:', data)
+				this.handleActivityUpdate(data)
+			})
+
+			// Connect if not already connected
+			if (!websocketService.isConnected()) {
+				websocketService.connect()
+			}
+		},
+
+		handleActivityUpdate(activity) {
+			// Find existing task in activeTasks
+			const index = this.activeTasks.findIndex((t) => t.id === activity.id)
+
+			if (activity.status === 'completed' || activity.status === 'failed') {
+				// Remove completed/failed tasks
+				if (index > -1) {
+					this.activeTasks.splice(index, 1)
+				}
+
+				// Show toast notification
+				if (activity.status === 'completed') {
+					this.$toast.success('Task Completed', activity.message || `${this.formatTaskType(activity.task_type)} completed successfully`)
+				} else {
+					this.$toast.error('Task Failed', activity.message || `${this.formatTaskType(activity.task_type)} failed`)
+				}
+
+				// Reload database info after task completion
+				this.loadDatabaseInfo()
+			} else {
+				// Update or add active task
+				if (index > -1) {
+					this.activeTasks[index] = { ...this.activeTasks[index], ...activity }
+				} else {
+					this.activeTasks.push(activity)
+				}
+			}
+		},
+
+		async loadActiveTasks() {
+			try {
+				const response = await fetch('http://localhost:8080/api/v1/activity?status=running')
+				const data = await response.json()
+
+				if (data.success && data.data) {
+					// Only update if different to avoid flicker
+					const newTasks = data.data
+					if (JSON.stringify(newTasks) !== JSON.stringify(this.activeTasks)) {
+						this.activeTasks = newTasks
+					}
+				}
+			} catch (error) {
+				console.error('Failed to load active tasks:', error)
+			}
+		},
+
 		async loadDatabaseInfo() {
 			try {
 				const statsResponse = await databaseAPI.getStats()
@@ -245,361 +353,116 @@ export default {
 				this.databaseInfo.performerCount = stats.performer_count || 0
 				this.databaseInfo.studioCount = stats.studio_count || 0
 				this.databaseInfo.tagCount = stats.tag_count || 0
-
-				const sizeInMB = stats.size / 1024 / 1024
-				this.databaseInfo.size = sizeInMB > 1 ? `${sizeInMB.toFixed(2)} MB` : `${(stats.size / 1024).toFixed(2)} KB`
 			} catch (error) {
 				console.error('Failed to load database info:', error)
-				this.databaseInfo.size = 'Unknown'
 			}
 		},
 
+		isTaskRunning(taskType) {
+			return this.activeTasks.some((task) => task.task_type === taskType && (task.status === 'running' || task.status === 'pending'))
+		},
+
+		getTaskProgress(taskType) {
+			const task = this.activeTasks.find((t) => t.task_type === taskType)
+			return task ? task.progress : null
+		},
+
+		formatTaskType(taskType) {
+			return taskType
+				.split('_')
+				.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+				.join(' ')
+		},
+
 		async scanAllLibraries() {
-			if (this.scanning) return
-
-			this.scanning = true
-			this.showProgress('Scanning Libraries', 'Starting parallel scan with drive-aware optimization...', 0)
-
 			try {
-				// Get all libraries to show count
-				const libResponse = await librariesAPI.getAll()
-				const libraries = (libResponse && libResponse.data) || []
-
-				if (libraries.length === 0) {
-					this.$toast.warning('No Libraries', 'No libraries found to scan')
-					this.hideProgress()
-					this.scanning = false
-					return
-				}
-
-				// Group libraries for display
-				const serverLibs = libraries.filter((lib) => lib.path.startsWith('Z:') || lib.path.startsWith('Y:'))
-				const localLibs = libraries.filter((lib) => lib.path.startsWith('C:') || lib.path.startsWith('D:'))
-
-				this.updateProgress(
-					'Scanning Libraries',
-					`Starting parallel scan: ${serverLibs.length} server libraries, ${localLibs.length} local libraries`,
-					10,
-					'Using multi-threaded scanning optimized for your hardware'
-				)
-
-				// Configure parallel scanning with smart defaults
 				const config = {
 					server_drives: ['Z:', 'Y:'],
 					local_drives: ['C:', 'D:'],
-					server_max_concurrent: 2, // Conservative for server (avoid overload)
-					local_max_concurrent: 8, // Aggressive for local PC (you said it's turbo fast!)
+					server_max_concurrent: 2,
+					local_max_concurrent: 8,
 				}
 
-				// Start parallel scan
-				await videosAPI.scanAllParallel(config)
+				const response = await videosAPI.scanAllParallel(config)
 
-				this.updateProgress('Scanning Libraries', 'Parallel scan in progress...', 50, 'Libraries are being scanned simultaneously')
-
-				// Simulate progress updates (actual progress happens in background)
-				const progressInterval = setInterval(() => {
-					if (this.taskProgress.percent < 90) {
-						this.taskProgress.percent += 5
-						this.updateProgress(
-							'Scanning Libraries',
-							'Processing videos in parallel...',
-							this.taskProgress.percent,
-							`Server: ${serverLibs.length} libs | Local: ${localLibs.length} libs | Running concurrently`
-						)
-					}
-				}, 3000)
-
-				// Wait a bit for scanning to complete (you can adjust this or implement websocket updates)
-				setTimeout(() => {
-					clearInterval(progressInterval)
-					this.updateProgress('Scanning Libraries', 'Scan initiated!', 100, 'Check Activity page for detailed progress')
-					this.$toast.success(
-						'Parallel Scan Started',
-						`${libraries.length} libraries are being scanned in parallel. Server: ${serverLibs.length} @ 50% CPU | Local: ${localLibs.length} @ max speed`
-					)
-
-					setTimeout(() => {
-						this.hideProgress()
-						this.loadDatabaseInfo()
-					}, 2000)
-				}, 5000)
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Scan Started', 'Library scan has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
+				}
 			} catch (error) {
 				console.error('Failed to scan libraries:', error)
-				this.$toast.error('Scan Failed', 'Could not start parallel scan')
-				this.hideProgress()
-			} finally {
-				setTimeout(() => {
-					this.scanning = false
-				}, 5000)
+				this.$toast.error('Scan Failed', error.response?.data?.error || 'Failed to start library scan')
 			}
 		},
 
 		async generatePreviews() {
-			console.log('Generate Previews button clicked!')
-			if (this.generatingPreviews) {
-				console.log('Already generating, skipping...')
-				return
-			}
-
-			this.generatingPreviews = true
-			console.log('Starting preview generation...')
-			this.showProgress('Generating Previews', 'Starting preview generation with drive-aware optimization...', 0)
-
 			try {
-				// Get video count for display
-				console.log('Fetching database stats...')
-				const statsResponse = await databaseAPI.getStats()
-				console.log('Stats response:', statsResponse)
-				const videoCount = (statsResponse.data && statsResponse.data.video_count) || 0
-				console.log('Video count:', videoCount)
+				const response = await videosAPI.generatePreviews()
 
-				if (videoCount === 0) {
-					this.$toast.warning('No Videos', 'No videos found to generate previews for')
-					this.hideProgress()
-					this.generatingPreviews = false
-					return
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Preview Generation Started', 'Preview generation has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
 				}
-
-				this.updateProgress(
-					'Generating Previews',
-					`Preparing to generate previews for ${videoCount} videos`,
-					10,
-					'Using multi-threaded processing optimized for your hardware'
-				)
-
-				// Configure preview generation with VERY conservative defaults to prevent system freeze
-				// Each concurrent library spawns multiple ffmpeg processes with hardware acceleration
-				const config = {
-					server_drives: ['Z:', 'Y:'],
-					local_drives: ['C:', 'D:'],
-					server_max_concurrent: 1, // Very conservative for server (1 library at a time)
-					local_max_concurrent: 2, // Conservative for local PC (2 libraries at a time max)
-				}
-
-				// Start preview generation
-				console.log('Calling API with config:', config)
-				const response = await videosAPI.generatePreviews(config)
-				console.log('API response:', response)
-
-				this.updateProgress('Generating Previews', 'Preview generation in progress...', 50, 'Generating 10 frames per video')
-
-				// Simulate progress updates
-				const progressInterval = setInterval(() => {
-					if (this.taskProgress.percent < 90) {
-						this.taskProgress.percent += 3
-						this.updateProgress(
-							'Generating Previews',
-							'Processing videos in parallel...',
-							this.taskProgress.percent,
-							`Generating storyboard thumbnails for hover effects`
-						)
-					}
-				}, 4000)
-
-				// Wait and complete
-				setTimeout(() => {
-					clearInterval(progressInterval)
-					this.updateProgress('Generating Previews', 'Preview generation started!', 100, 'Check Activity page for detailed progress')
-					this.$toast.success(
-						'Preview Generation Started',
-						`Generating ${videoCount} video previews in parallel. Each video gets 10 thumbnail frames for hover effects!`
-					)
-
-					setTimeout(() => {
-						this.hideProgress()
-					}, 2000)
-				}, 5000)
 			} catch (error) {
 				console.error('Failed to generate previews:', error)
-				this.$toast.error('Generation Failed', 'Could not start preview generation')
-				this.hideProgress()
-			} finally {
-				setTimeout(() => {
-					this.generatingPreviews = false
-				}, 5000)
+				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start preview generation')
 			}
 		},
 
-		async fetchMissingMetadata() {
-			if (this.fetchingMetadata) return
-
-			this.fetchingMetadata = true
-			this.showProgress('Fetching Metadata', 'Loading performers...', 0)
-
+		async generateVideoThumbnails() {
 			try {
-				// Get all performers
-				const perfResponse = await performersAPI.getAll()
-				const allPerformers = (perfResponse && perfResponse.data) || []
+				const response = await videosAPI.generateThumbnails()
 
-				// Filter performers without metadata and exclude zoo performers
-				const performersNeedingMetadata = allPerformers.filter((p) => {
-					return !p.zoo && (!p.metadata || Object.keys(p.metadata).length === 0)
-				})
-
-				if (performersNeedingMetadata.length === 0) {
-					this.$toast.info('No Performers', 'All non-zoo performers already have metadata')
-					this.hideProgress()
-					this.fetchingMetadata = false
-					return
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Thumbnail Generation Started', 'Video thumbnail generation has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
 				}
+			} catch (error) {
+				console.error('Failed to generate video thumbnails:', error)
+				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start video thumbnail generation')
+			}
+		},
 
-				this.updateProgress('Fetching Metadata', `Found ${performersNeedingMetadata.length} performers needing metadata`, 10)
+		async scanPerformers() {
+			try {
+				const response = await performersAPI.scan()
 
-				let successCount = 0
-				let failCount = 0
-
-				// Fetch metadata for each performer
-				for (let i = 0; i < performersNeedingMetadata.length; i++) {
-					const performer = performersNeedingMetadata[i]
-					const progress = 10 + Math.floor((i / performersNeedingMetadata.length) * 80)
-
-					this.updateProgress(
-						'Fetching Metadata',
-						`Fetching: ${performer.name}`,
-						progress,
-						`Performer ${i + 1} of ${performersNeedingMetadata.length} | Success: ${successCount} | Failed: ${failCount}`
-					)
-
-					try {
-						await performersAPI.fetchMetadata(performer.id)
-						successCount++
-						// Small delay to avoid rate limiting
-						await new Promise((resolve) => setTimeout(resolve, 500))
-					} catch (error) {
-						console.error(`Failed to fetch metadata for ${performer.name}:`, error)
-						failCount++
-					}
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Performer Scan Started', 'Performer scan has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
 				}
+			} catch (error) {
+				console.error('Failed to scan performers:', error)
+				this.$toast.error('Scan Failed', error.response?.data?.error || 'Failed to start performer scan')
+			}
+		},
 
-				this.updateProgress('Fetching Metadata', 'Complete!', 100, `Success: ${successCount} | Failed: ${failCount}`)
-				this.$toast.success('Metadata Fetched', `Successfully fetched ${successCount} performers. Failed: ${failCount}`)
+		async generatePerformerThumbnails() {
+			try {
+				const response = await performersAPI.generateThumbnails()
 
-				setTimeout(() => {
-					this.hideProgress()
-				}, 2000)
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Thumbnail Generation Started', 'Performer thumbnail generation has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
+				}
+			} catch (error) {
+				console.error('Failed to generate performer thumbnails:', error)
+				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start thumbnail generation')
+			}
+		},
+
+		async fetchAllMetadata() {
+			try {
+				const response = await performersAPI.fetchAllMetadata()
+
+				if (response.status === 202 || response.status === 200) {
+					this.$toast.success('Metadata Fetch Started', 'Metadata fetching has been initiated. Watch the progress above!')
+					this.loadActiveTasks()
+				}
 			} catch (error) {
 				console.error('Failed to fetch metadata:', error)
-				this.$toast.error('Fetch Failed', 'Could not fetch performer metadata')
-				this.hideProgress()
-			} finally {
-				this.fetchingMetadata = false
+				this.$toast.error('Fetch Failed', error.response?.data?.error || 'Failed to start metadata fetch')
 			}
-		},
-
-		async optimizeDatabase() {
-			if (confirm('This will optimize the database. This may take a few moments. Continue?')) {
-				this.$toast.info('Optimizing', 'Database optimization in progress...')
-				try {
-					await databaseAPI.optimize()
-					this.$toast.success('Complete', 'Database has been optimized')
-					this.loadDatabaseInfo()
-				} catch (error) {
-					console.error('Database optimization failed:', error)
-					this.$toast.error('Optimization Failed', 'Could not optimize database')
-				}
-			}
-		},
-
-		async backupDatabase() {
-			this.$toast.info('Backing Up', 'Creating database backup...')
-			try {
-				const result = await databaseAPI.backup()
-				this.$toast.success('Backup Complete', `Database backed up to: ${result.data.backup_path}`)
-			} catch (error) {
-				console.error('Database backup failed:', error)
-				this.$toast.error('Backup Failed', 'Could not backup database')
-			}
-		},
-
-		async restoreDatabase() {
-			try {
-				const backupsResponse = await databaseAPI.listBackups()
-				const backups = backupsResponse.data
-
-				if (!backups || backups.length === 0) {
-					this.$toast.warning('No Backups', 'No backup files found')
-					return
-				}
-
-				let backupList = 'Available backups:\n\n'
-				backups.forEach((backup, index) => {
-					const date = new Date(backup.timestamp).toLocaleString()
-					const size = (backup.size / 1024 / 1024).toFixed(2) + ' MB'
-					backupList += `${index + 1}. ${date} (${size})\n`
-				})
-				backupList += '\nEnter the number of the backup to restore (or cancel):'
-
-				const selection = prompt(backupList)
-				if (!selection) return
-
-				const index = parseInt(selection) - 1
-				if (index < 0 || index >= backups.length) {
-					this.$toast.error('Invalid Selection', 'Please select a valid backup number')
-					return
-				}
-
-				const selectedBackup = backups[index]
-
-				if (
-					confirm(
-						`WARNING: This will restore the database from backup and overwrite all current data.\n\nBackup: ${new Date(selectedBackup.timestamp).toLocaleString()}\n\nAre you sure you want to continue?`
-					)
-				) {
-					this.$toast.info('Restoring', 'Restoring database from backup...')
-					await databaseAPI.restore(selectedBackup.backup_path)
-					this.$toast.success('Restore Complete', 'Database has been restored successfully')
-					this.loadDatabaseInfo()
-				}
-			} catch (error) {
-				console.error('Database restore failed:', error)
-				this.$toast.error('Restore Failed', 'Could not restore database')
-			}
-		},
-
-		confirmClearLogs() {
-			if (
-				confirm(
-					'WARNING: This will permanently delete all activity logs. This cannot be undone.\n\nAre you sure you want to continue?'
-				)
-			) {
-				this.clearLogs()
-			}
-		},
-
-		async clearLogs() {
-			this.clearingLogs = true
-			try {
-				const response = await activityAPI.clearAll()
-				const deletedCount = response.data?.deleted_count || 0
-				this.$toast.success('Logs Cleared', `All ${deletedCount} activity logs have been deleted`)
-				this.loadDatabaseInfo()
-			} catch (error) {
-				console.error('Failed to clear logs:', error)
-				this.$toast.error('Clear Failed', 'Could not clear activity logs')
-			} finally {
-				this.clearingLogs = false
-			}
-		},
-
-		showProgress(title, message, percent) {
-			this.taskProgress = {
-				show: true,
-				title,
-				message,
-				percent,
-				details: '',
-			}
-		},
-
-		updateProgress(title, message, percent, details = '') {
-			this.taskProgress.title = title
-			this.taskProgress.message = message
-			this.taskProgress.percent = percent
-			this.taskProgress.details = details
-		},
-
-		hideProgress() {
-			this.taskProgress.show = false
 		},
 	},
 }
@@ -608,140 +471,126 @@ export default {
 <style scoped>
 .tasks-page {
 	min-height: 100vh;
-	background: #0f0c29;
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
 }
 
 .page-header h1 {
-	color: white;
+	color: #00d9ff;
+	font-weight: 700;
+	text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
+}
+
+.section-title {
+	color: #00d9ff;
 	font-weight: 600;
-	font-size: 2rem;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+}
+
+.active-tasks-monitor {
+	background: rgba(0, 217, 255, 0.05);
+	border: 1px solid rgba(0, 217, 255, 0.2);
+	border-radius: 12px;
+	padding: 1.5rem;
+	animation: pulse-border 2s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+	0%,
+	100% {
+		border-color: rgba(0, 217, 255, 0.2);
+	}
+	50% {
+		border-color: rgba(0, 217, 255, 0.5);
+	}
+}
+
+.task-progress-card {
+	background: rgba(0, 0, 0, 0.4);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	transition: all 0.3s ease;
+}
+
+.task-progress-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 217, 255, 0.2);
 }
 
 .task-card {
-	background: rgba(255, 255, 255, 0.05);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.3s;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(0, 217, 255, 0.2);
+	backdrop-filter: blur(10px);
+	transition: all 0.3s ease;
 }
 
 .task-card:hover {
-	background: rgba(255, 255, 255, 0.08);
-	border-color: rgba(255, 255, 255, 0.2);
+	border-color: rgba(0, 217, 255, 0.4);
+	box-shadow: 0 8px 24px rgba(0, 217, 255, 0.15);
 }
 
 .task-card .card-header {
-	background: rgba(255, 255, 255, 0.03);
-	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	background: rgba(0, 217, 255, 0.1);
+	border-bottom: 1px solid rgba(0, 217, 255, 0.2);
 	padding: 1rem 1.5rem;
 }
 
 .task-card .card-header h5 {
-	color: white;
+	color: #00d9ff;
 	font-weight: 600;
-}
-
-.task-card .card-body {
-	padding: 1.5rem;
+	margin: 0;
 }
 
 .task-item {
-	color: white;
+	padding: 1rem 0;
 }
 
-.task-info h6 {
-	color: white;
+.task-item h6 {
+	color: #fff;
 	font-weight: 600;
 	margin-bottom: 0.5rem;
 }
 
-.stat-card {
-	background: rgba(255, 255, 255, 0.03);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.3s;
+.task-item .btn {
+	width: 100%;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	transition: all 0.3s ease;
 }
 
-.stat-card:hover {
-	background: rgba(255, 255, 255, 0.06);
+.task-item .btn:hover:not(:disabled) {
 	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(0, 217, 255, 0.3);
 }
 
-.stat-card h6 {
-	font-size: 0.85rem;
+.task-feedback {
+	background: rgba(0, 0, 0, 0.3);
+	padding: 0.5rem;
+	border-radius: 6px;
+	border: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.progress {
+	background: rgba(0, 0, 0, 0.3);
+}
+
+.stat-item {
+	text-align: center;
+	padding: 1rem;
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 8px;
+}
+
+.stat-item label {
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 0.875rem;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 }
 
-.stat-card h2 {
-	color: white;
-	font-weight: 700;
-}
-
-.info-item {
-	color: white;
-	padding: 0.5rem 0;
-}
-
-.task-progress-modal {
-	position: fixed;
-	top: 0;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	background: rgba(0, 0, 0, 0.8);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 9999;
-}
-
-.task-progress-content {
-	background: #1a1a2e;
-	padding: 2rem;
-	border-radius: 15px;
-	min-width: 500px;
-	max-width: 600px;
-	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.task-progress-content h4 {
-	margin-bottom: 1rem;
-	color: white;
+.stat-item h4 {
+	color: #00d9ff;
+	margin-top: 0.5rem;
 	font-weight: 600;
-}
-
-.task-progress-content p {
-	margin-bottom: 1rem;
-	color: rgba(255, 255, 255, 0.8);
-}
-
-.progress {
-	height: 30px;
-	border-radius: 15px;
-	overflow: hidden;
-	background: rgba(255, 255, 255, 0.1);
-}
-
-.progress-bar {
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	font-weight: 600;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: white;
-}
-
-.task-progress-details {
-	text-align: center;
-	color: rgba(255, 255, 255, 0.6);
-	margin-top: 0.75rem;
-}
-
-.btn {
-	transition: all 0.3s;
-}
-
-.btn:disabled {
-	opacity: 0.6;
-	cursor: not-allowed;
 }
 </style>

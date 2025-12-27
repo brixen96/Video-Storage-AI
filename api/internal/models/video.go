@@ -77,7 +77,8 @@ type VideoSearchQuery struct {
 	GroupID       int64   `json:"group_id" form:"group_id"`
 	TagID         int64   `json:"tag_id" form:"tag_id"`
 	TagIDs        []int64 `json:"tag_ids" form:"tag_ids"`
-	Zoo           *bool   `json:"zoo" form:"zoo"`
+	Category      string  `json:"category" form:"category"` // 'regular', 'zoo', '3d'
+	Zoo           *bool   `json:"zoo" form:"zoo"`           // DEPRECATED - use Category instead
 	Resolution    string  `json:"resolution" form:"resolution"`
 	MinDuration   float64 `json:"min_duration" form:"min_duration"`
 	MaxDuration   float64 `json:"max_duration" form:"max_duration"`
@@ -92,5 +93,5 @@ type VideoSearchQuery struct {
 	SortBy        string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
 	SortOrder     string  `json:"sort_order" form:"sort_order"` // asc, desc
 	Page          int     `json:"page" form:"page"`
-	Limit         int     `json:"limit" form:"limit"`
+	Limit          int     `json:"limit" form:"limit"`
 }

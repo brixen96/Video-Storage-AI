@@ -25,7 +25,7 @@ func NewTagService() *TagService {
 // GetAll retrieves all tags with video counts
 func (s *TagService) GetAll() ([]models.TagWithCount, error) {
 	query := `
-		SELECT t.id, t.name, t.color, t.icon, t.created_at, t.updated_at,
+		SELECT t.id, t.name, t.color, t.icon, t.category, t.created_at, t.updated_at,
 		       COALESCE(COUNT(vt.video_id), 0) as video_count
 		FROM tags t
 		LEFT JOIN video_tags vt ON t.id = vt.tag_id
@@ -43,7 +43,7 @@ func (s *TagService) GetAll() ([]models.TagWithCount, error) {
 	for rows.Next() {
 		var tag models.TagWithCount
 		err := rows.Scan(
-			&tag.ID, &tag.Name, &tag.Color, &tag.Icon,
+			&tag.ID, &tag.Name, &tag.Color, &tag.Icon, &tag.Category,
 			&tag.CreatedAt, &tag.UpdatedAt, &tag.VideoCount,
 		)
 		if err != nil {
@@ -58,11 +58,11 @@ func (s *TagService) GetAll() ([]models.TagWithCount, error) {
 
 // GetByID retrieves a single tag by ID
 func (s *TagService) GetByID(id int64) (*models.Tag, error) {
-	query := `SELECT id, name, color, icon, created_at, updated_at FROM tags WHERE id = ?`
+	query := `SELECT id, name, color, icon, category, created_at, updated_at FROM tags WHERE id = ?`
 
 	var tag models.Tag
 	err := s.db.QueryRow(query, id).Scan(
-		&tag.ID, &tag.Name, &tag.Color, &tag.Icon,
+		&tag.ID, &tag.Name, &tag.Color, &tag.Icon, &tag.Category,
 		&tag.CreatedAt, &tag.UpdatedAt,
 	)
 
@@ -80,8 +80,14 @@ func (s *TagService) GetByID(id int64) (*models.Tag, error) {
 func (s *TagService) Create(create *models.TagCreate) (*models.Tag, error) {
 	now := time.Now()
 
-	query := `INSERT INTO tags (name, color, icon, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
-	result, err := s.db.Exec(query, create.Name, create.Color, create.Icon, now, now)
+	// Default to 'regular' if category is empty
+	category := create.Category
+	if category == "" {
+		category = "regular"
+	}
+
+	query := `INSERT INTO tags (name, color, icon, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+	result, err := s.db.Exec(query, create.Name, create.Color, create.Icon, category, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tag: %w", err)
 	}
@@ -112,11 +118,14 @@ func (s *TagService) Update(id int64, update *models.TagUpdate) (*models.Tag, er
 	if update.Icon != nil {
 		tag.Icon = *update.Icon
 	}
+	if update.Category != nil {
+		tag.Category = *update.Category
+	}
 
 	tag.UpdatedAt = time.Now()
 
-	query := `UPDATE tags SET name = ?, color = ?, icon = ?, updated_at = ? WHERE id = ?`
-	_, err = s.db.Exec(query, tag.Name, tag.Color, tag.Icon, tag.UpdatedAt, id)
+	query := `UPDATE tags SET name = ?, color = ?, icon = ?, category = ?, updated_at = ? WHERE id = ?`
+	_, err = s.db.Exec(query, tag.Name, tag.Color, tag.Icon, tag.Category, tag.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update tag: %w", err)
 	}

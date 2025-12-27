@@ -18,7 +18,7 @@ type DatabaseService struct {
 
 func NewDatabaseService() *DatabaseService {
 	return &DatabaseService{
-		db: database.DB,
+		db: database.GetDB(),
 	}
 }
 

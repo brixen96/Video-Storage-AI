@@ -100,10 +100,23 @@ import {
 	faListCheck,
 	faBroom,
 	faHdd,
+	faMinus,
+	faChartBar,
+	faPaperPlane,
+	faSlidersH,
+	faSortAmountDown,
+	faSortAmountUp,
+	faCube,
+	faArrowsAlt,
+	faFileImage as faFileImageSolid,
+	faArrowRight,
+	faCloudDownloadAlt,
+	faUndo,
+	faCircle,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
-import { faHeart as farHeart, faStar as farStar } from '@fortawesome/free-regular-svg-icons'
+import { faFileImage, faHeart as farHeart, faStar as farStar, faUserCircle } from '@fortawesome/free-regular-svg-icons'
 
 // Import brand icons
 import { faTwitter, faInstagram } from '@fortawesome/free-brands-svg-icons'
@@ -210,7 +223,22 @@ library.add(
 	faFileExport,
 	faListCheck,
 	faBroom,
-	faHdd
+	faHdd,
+	faCircle,
+	faMinus,
+	faChartBar,
+	faPaperPlane,
+	faSlidersH,
+	faSortAmountDown,
+	faSortAmountUp,
+	faCube,
+	faUserCircle,
+	faArrowsAlt,
+	faFileImage,
+	faFileImageSolid,
+	faArrowRight,
+	faCloudDownloadAlt,
+	faUndo
 )
 
 export default FontAwesomeIcon

@@ -22,33 +22,40 @@
 							<option value="age">Sort by Age</option>
 							<option value="breast">Sort by Breast Size</option>
 							<option value="height">Sort by Height</option>
-							<option value="scenes">Sort by Scene Count</option>
+							<option value="scenes">Sort by Video Count</option>
 						</select>
 					</div>
 
-					<!-- Zoo Quick Filter -->
-					<div class="col-md-2">
+					<!-- Category Quick Filter -->
+					<div class="col-md-3">
 						<div class="btn-group w-100" role="group">
 							<button
-								:class="['btn', 'btn-sm', filters.zooFilter === 'all' ? 'btn-primary' : 'btn-outline-primary']"
-								@click="filters.zooFilter = 'all'"
+								:class="['btn', 'btn-sm', filters.categoryFilter === 'all' ? 'btn-primary' : 'btn-outline-primary']"
+								@click="filters.categoryFilter = 'all'"
 								title="Show All Performers"
 							>
 								All
 							</button>
 							<button
-								:class="['btn', 'btn-sm', filters.zooFilter === 'zoo-only' ? 'btn-danger' : 'btn-outline-danger']"
-								@click="filters.zooFilter = 'zoo-only'"
-								title="Show Zoo Only"
+								:class="['btn', 'btn-sm', filters.categoryFilter === 'regular' ? 'btn-info' : 'btn-outline-info']"
+								@click="filters.categoryFilter = 'regular'"
+								title="Regular Only"
+							>
+								<font-awesome-icon :icon="['fas', 'user']" />
+							</button>
+							<button
+								:class="['btn', 'btn-sm', filters.categoryFilter === 'zoo' ? 'btn-success' : 'btn-outline-success']"
+								@click="filters.categoryFilter = 'zoo'"
+								title="Zoo Only"
 							>
 								<font-awesome-icon :icon="['fas', 'dog']" />
 							</button>
 							<button
-								:class="['btn', 'btn-sm', filters.zooFilter === 'non-zoo' ? 'btn-success' : 'btn-outline-success']"
-								@click="filters.zooFilter = 'non-zoo'"
-								title="Hide Zoo"
+								:class="['btn', 'btn-sm', filters.categoryFilter === '3d' ? 'btn-warning' : 'btn-outline-warning']"
+								@click="filters.categoryFilter = '3d'"
+								title="3D Only"
 							>
-								<font-awesome-icon :icon="['fas', 'ban']" />
+								<font-awesome-icon :icon="['fas', 'cube']" />
 							</button>
 						</div>
 					</div>
@@ -77,17 +84,18 @@
 				<!-- Advanced Filters -->
 				<div v-if="showFilters" class="filters-panel mt-3">
 					<div class="row g-3">
-						<!-- Zoo Filter -->
+						<!-- Category Filter -->
 						<div class="col-md-3">
 							<div class="filter-group">
 								<label class="form-label">
-									<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
-									Zoo Filter
+									<font-awesome-icon :icon="['fas', 'list']" class="me-2" />
+									Category Filter
 								</label>
-								<select v-model="filters.zooFilter" class="form-select form-select-sm">
+								<select v-model="filters.categoryFilter" class="form-select form-select-sm">
 									<option value="all">Show All</option>
-									<option value="zoo-only">Zoo Only</option>
-									<option value="non-zoo">Non-Zoo Only</option>
+									<option value="regular">Regular Only</option>
+									<option value="zoo">Zoo Only</option>
+									<option value="3d">3D Only</option>
 								</select>
 							</div>
 						</div>
@@ -174,34 +182,45 @@
 					@click="openDetails(performer)"
 					@contextmenu.prevent="openContextMenu($event, performer)"
 				>
-					<!-- Video Preview -->
-					<div class="card-preview">
+					<!-- Video Preview with Two-Tier Loading -->
+					<div class="card-preview" @mouseenter="startVideoPreview(performer)" @mouseleave="stopVideoPreview(performer)">
+						<!-- Static Thumbnail (shown when not hovered) -->
+						<img
+							v-if="performer.thumbnail_path"
+							v-show="!hoveredPerformer[performer.id]"
+							:src="getThumbnailUrl(performer.thumbnail_path)"
+							class="preview-thumbnail"
+							:alt="performer.name"
+							loading="lazy"
+						/>
+						<!-- Video Preview (always loaded, visibility toggled) -->
 						<video
 							v-if="performer.preview_path"
+							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
+							:ref="`video-${performer.id}`"
 							:key="`preview-${performer.id}-${videoRefreshKey}`"
 							class="preview-video"
 							:src="getPreviewUrl(performer.preview_path)"
 							loop
 							muted
 							playsinline
-							preload="metadata"
-							@mouseenter="playPreview"
-							@mouseleave="pausePreview"
+							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
 							@error="handleVideoError"
 						></video>
-						<div v-else class="no-preview">
+						<!-- Fallback for No Preview -->
+						<div v-if="!performer.preview_path && !performer.thumbnail_path" class="no-preview">
 							<font-awesome-icon :icon="['fas', 'user']" size="3x" />
 						</div>
 
-						<!-- Scene Count Badge -->
+						<!-- Video Count Badge -->
 						<div class="scene-badge">
 							<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
-							{{ performer.scene_count || 0 }}
+							{{ performer.video_count || 0 }}
 						</div>
 
-						<!-- Zoo Badge -->
-						<div v-if="performer.zoo" class="zoo-badge" title="Zoo Content">
-							<font-awesome-icon :icon="['fas', 'dog']" />
+						<!-- Category Badge -->
+						<div v-if="performer.category && performer.category !== 'regular'" :class="['category-badge', 'category-' + performer.category]" :title="getCategoryName(performer.category)">
+							<font-awesome-icon :icon="['fas', getCategoryIcon(performer.category)]" />
 						</div>
 					</div>
 
@@ -240,34 +259,46 @@
 					@click="openDetails(performer)"
 					@contextmenu.prevent="openContextMenu($event, performer)"
 				>
-					<div class="list-preview">
+					<div class="list-preview" @mouseenter="startVideoPreview(performer)" @mouseleave="stopVideoPreview(performer)">
+						<!-- Static Thumbnail (shown when not hovered) -->
+						<img
+							v-if="performer.thumbnail_path"
+							v-show="!hoveredPerformer[performer.id]"
+							:src="getThumbnailUrl(performer.thumbnail_path)"
+							class="preview-thumbnail-small"
+							:alt="performer.name"
+							loading="lazy"
+						/>
+						<!-- Video Preview (always loaded, visibility toggled) -->
 						<video
 							v-if="performer.preview_path"
+							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
+							:ref="`video-${performer.id}`"
 							:key="`preview-${performer.id}-${videoRefreshKey}`"
 							class="preview-video-small"
 							:src="getPreviewUrl(performer.preview_path)"
 							loop
 							muted
 							playsinline
-							preload="metadata"
-							@loadedmetadata="onVideoLoaded"
+							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
 							@error="handleVideoError"
 						></video>
-						<div v-else class="no-preview-small">
+						<!-- Fallback for No Preview -->
+						<div v-if="!performer.preview_path && !performer.thumbnail_path" class="no-preview-small">
 							<font-awesome-icon :icon="['fas', 'user']" />
 						</div>
 					</div>
 					<div class="list-content">
 						<h5 class="performer-name">
 							{{ performer.name }}
-							<font-awesome-icon v-if="performer.zoo" :icon="['fas', 'dog']" class="zoo-icon ms-2" title="Zoo Content" />
+							<font-awesome-icon v-if="performer.category && performer.category !== 'regular'" :icon="['fas', getCategoryIcon(performer.category)]" :class="['category-icon', 'ms-2', 'category-' + performer.category]" :title="getCategoryName(performer.category)" />
 						</h5>
 						<div class="performer-details">
 							<span v-if="getAge(performer)" class="detail-item">Age: {{ getAge(performer) }}</span>
 							<span v-if="performer.metadata?.measurements" class="detail-item">Measurements: {{ performer.metadata.measurements }}</span>
 							<span v-if="performer.metadata?.height" class="detail-item">Height: {{ performer.metadata.height }}</span>
 							<span v-if="performer.metadata?.weight" class="detail-item">Weight: {{ performer.metadata.weight }}</span>
-							<span class="detail-item">Scenes: {{ performer.scene_count || 0 }}</span>
+							<span class="detail-item">Videos: {{ performer.video_count || 0 }}</span>
 						</div>
 					</div>
 					<div class="list-actions">
@@ -281,9 +312,25 @@
 
 		<!-- Context Menu -->
 		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click="closeContextMenu">
-			<button class="context-menu-item" @click="toggleZoo(contextMenu.performer)">
-				<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
-				{{ contextMenu.performer?.zoo ? 'Unmark Zoo' : 'Mark as Zoo' }}
+			<div class="context-menu-section">
+				<div class="context-menu-label">Set Category:</div>
+				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, 'regular')">
+					<font-awesome-icon :icon="['fas', 'user']" class="me-2" />
+					Regular
+				</button>
+				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, 'zoo')">
+					<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
+					Zoo
+				</button>
+				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, '3d')">
+					<font-awesome-icon :icon="['fas', 'cube']" class="me-2" />
+					3D
+				</button>
+			</div>
+			<div class="context-menu-divider"></div>
+			<button class="context-menu-item" @click="goToPerformerDetails(contextMenu.performer)">
+				<font-awesome-icon :icon="['fas', 'arrow-right']" class="me-2" />
+				Go to Performer Details Page
 			</button>
 			<button class="context-menu-item" @click="fetchMetadata(contextMenu.performer)">
 				<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
@@ -353,6 +400,9 @@
 						<li class="nav-item">
 							<a :class="['nav-link', { active: activeTab === 'external_links' }]" @click="activeTab = 'external_links'">Links</a>
 						</li>
+						<li class="nav-item">
+							<a :class="['nav-link', { active: activeTab === 'videos' }]" @click="activeTab = 'videos'">Videos ({{ detailsPanel.performer.video_count || 0 }})</a>
+						</li>
 					</ul>
 
 					<!-- Tab Content -->
@@ -385,16 +435,16 @@
 									<span class="metadata-value">{{ detailsPanel.performer.metadata.career_end }}</span>
 								</div>
 								<div class="metadata-item">
-									<span class="metadata-label">Scene Count:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.scene_count || 0 }}</span>
+									<span class="metadata-label">Video Count:</span>
+									<span class="metadata-value">{{ detailsPanel.performer.video_count || 0 }}</span>
 								</div>
 								<div v-if="detailsPanel.performer.metadata?.aliases?.length" class="metadata-item full-width">
 									<span class="metadata-label">Aliases:</span>
 									<span class="metadata-value">{{ detailsPanel.performer.metadata.aliases.join(', ') }}</span>
 								</div>
-								<div v-if="detailsPanel.performer.zoo" class="metadata-item full-width">
-									<span class="metadata-label">Content Type:</span>
-									<span class="metadata-value zoo-indicator">Zoo Content</span>
+								<div v-if="detailsPanel.performer.category" class="metadata-item full-width">
+									<span class="metadata-label">Category:</span>
+									<span :class="['metadata-value', 'category-badge', 'category-' + detailsPanel.performer.category]">{{ getCategoryName(detailsPanel.performer.category) }}</span>
 								</div>
 							</div>
 						</div>
@@ -477,7 +527,7 @@
 								<div v-if="performerMasterTags.length > 0" class="mt-3">
 									<button class="btn btn-outline-primary btn-sm w-100" @click="syncPerformerTags" :disabled="isSyncingTags">
 										<font-awesome-icon :icon="['fas', isSyncingTags ? 'spinner' : 'sync']" :spin="isSyncingTags" class="me-2" />
-										{{ isSyncingTags ? 'Syncing...' : `Sync Tags to ${detailsPanel.performer.scene_count || 0} Videos` }}
+										{{ isSyncingTags ? 'Syncing...' : `Sync Tags to ${detailsPanel.performer.video_count || 0} Videos` }}
 									</button>
 								</div>
 							</div>
@@ -513,6 +563,42 @@
 							</div>
 							<div v-else class="empty-tab">
 								<p>No external links available</p>
+							</div>
+						</div>
+
+						<!-- Videos Tab -->
+						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'videos' }]">
+							<div v-if="detailsPanel.performerVideos.length > 0" class="videos-grid">
+								<div
+									v-for="video in detailsPanel.performerVideos"
+									:key="video.id"
+									class="video-item"
+									@click="openVideo(video)"
+								>
+									<div class="video-thumbnail">
+										<img
+											v-if="video.thumbnail_path"
+											:src="`http://localhost:8080/assets/${video.thumbnail_path}`"
+											:alt="video.title"
+											loading="lazy"
+										/>
+										<div v-else class="no-thumbnail">
+											<font-awesome-icon :icon="['fas', 'film']" size="2x" />
+										</div>
+										<div class="video-duration">{{ formatDuration(video.duration) }}</div>
+									</div>
+									<div class="video-info">
+										<h6 class="video-title">{{ video.title }}</h6>
+										<p class="video-meta">{{ formatFileSize(video.file_size) }}</p>
+									</div>
+								</div>
+							</div>
+							<div v-else-if="detailsPanel.loadingVideos" class="empty-tab">
+								<font-awesome-icon :icon="['fas', 'spinner']" spin size="2x" />
+								<p class="mt-3">Loading videos...</p>
+							</div>
+							<div v-else class="empty-tab">
+								<p>No videos found for this performer</p>
 							</div>
 						</div>
 					</div>
@@ -652,7 +738,7 @@ export default {
 			viewMode: settings.defaultViewMode || 'grid',
 			showFilters: false,
 			filters: {
-				zooFilter: settings.defaultZooFilter || 'all', // 'all', 'zoo-only', 'non-zoo'
+				categoryFilter: settings.defaultCategoryFilter || 'all', // 'all', 'regular', 'zoo', '3d'
 				ageMin: null,
 				ageMax: null,
 				breastMin: '',
@@ -669,6 +755,8 @@ export default {
 			detailsPanel: {
 				visible: false,
 				performer: null,
+				performerVideos: [],
+				loadingVideos: false,
 			},
 			carouselIndex: 0,
 			activeTab: 'basic', // Tab in details panel: basic, appearance, performances, social_media, platform, tags, bios, external_links
@@ -690,6 +778,8 @@ export default {
 			selectedTagId: null,
 			isSyncingTags: false,
 			performerTags: {}, // Cache for performer tags: { performerId: [tags] }
+			// Two-tier loading
+			hoveredPerformer: {}, // Track which performers are being hovered: { performerId: boolean }
 		}
 	},
 
@@ -709,13 +799,10 @@ export default {
 				result = result.filter((p) => p && p.name && p.name.toLowerCase().includes(query))
 			}
 
-			// Zoo filter
-			if (this.filters.zooFilter === 'zoo-only') {
-				result = result.filter((p) => p && p.zoo === true)
-			} else if (this.filters.zooFilter === 'non-zoo') {
-				result = result.filter((p) => p && p.zoo !== true)
+			// Category filter
+			if (this.filters.categoryFilter !== 'all') {
+				result = result.filter((p) => p && p.category === this.filters.categoryFilter)
 			}
-			// If 'all', no filtering needed
 
 			// Age filter
 			if (this.filters.ageMin) {
@@ -774,7 +861,7 @@ export default {
 					case 'height':
 						return (this.parseHeight(a.metadata?.height) || 0) - (this.parseHeight(b.metadata?.height) || 0)
 					case 'scenes':
-						return (b.scene_count || 0) - (a.scene_count || 0)
+						return (b.video_count || 0) - (a.video_count || 0)
 					default:
 						return 0
 				}
@@ -783,15 +870,34 @@ export default {
 			return result
 		},
 		availableTagsForPerformer() {
-			// Filter out tags that are already assigned to the performer
-			if (!Array.isArray(this.performerMasterTags)) {
-				return this.allTags || []
+			// Filter tags by performer's category and exclude already assigned tags
+			if (!this.detailsPanel.performer) {
+				return []
 			}
+
+			const performerCategory = this.detailsPanel.performer.category || 'regular'
+
+			if (!Array.isArray(this.performerMasterTags)) {
+				return (this.allTags || []).filter(tag => tag.category === performerCategory)
+			}
+
 			const assignedTagIds = new Set(this.performerMasterTags.map((t) => t.id))
-			return (this.allTags || []).filter((tag) => !assignedTagIds.has(tag.id))
+			return (this.allTags || []).filter((tag) =>
+				tag.category === performerCategory && !assignedTagIds.has(tag.id)
+			)
 		},
 	},
 	methods: {
+		// Get category icon
+		getCategoryIcon(category) {
+			const icons = { regular: 'user', zoo: 'dog', '3d': 'cube' }
+			return icons[category] || 'user'
+		},
+		// Get category display name
+		getCategoryName(category) {
+			const names = { regular: 'Regular', zoo: 'Zoo', '3d': '3D' }
+			return names[category] || 'Regular'
+		},
 		// Calculate age from birthdate
 		getAge(performer) {
 			if (!performer.metadata?.birthdate) return null
@@ -810,6 +916,51 @@ export default {
 			// Try to extract numeric value (assumes cm if just a number)
 			const match = heightStr.match(/(\d+)/)
 			return match ? parseInt(match[1]) : null
+		},
+
+		// Two-tier loading: Get thumbnail URL
+		getThumbnailUrl(thumbnailPath) {
+			if (!thumbnailPath) return null
+			// If it's already a full URL, return it
+			if (thumbnailPath.startsWith('http://') || thumbnailPath.startsWith('https://')) {
+				return thumbnailPath
+			}
+			// If it starts with /assets/, prepend the base URL
+			if (thumbnailPath.startsWith('/assets/')) {
+				return `http://localhost:8080${thumbnailPath}`
+			}
+			// Otherwise, construct the assets URL
+			return `http://localhost:8080/assets/${thumbnailPath}`
+		},
+
+		// Two-tier loading: Start video preview on hover
+		startVideoPreview(performer) {
+			// Set hover state to true to show video
+			this.hoveredPerformer[performer.id] = true
+
+			// Play the video if it exists
+			this.$nextTick(() => {
+				const videoRef = this.$refs[`video-${performer.id}`]
+				if (videoRef && videoRef[0]) {
+					videoRef[0].play().catch(err => {
+						// Ignore play errors (can happen if video not loaded yet)
+						console.debug('Video play error:', err)
+					})
+				}
+			})
+		},
+
+		// Two-tier loading: Stop video preview on mouse leave
+		stopVideoPreview(performer) {
+			// Set hover state to false to show thumbnail again
+			this.hoveredPerformer[performer.id] = false
+
+			// Pause the video if it exists
+			const videoRef = this.$refs[`video-${performer.id}`]
+			if (videoRef && videoRef[0]) {
+				videoRef[0].pause()
+				videoRef[0].currentTime = 0 // Reset to beginning
+			}
 		},
 
 		async loadPerformers() {
@@ -960,6 +1111,7 @@ export default {
 		async openDetails(performer) {
 			this.detailsPanel.visible = true
 			this.detailsPanel.performer = performer
+			this.detailsPanel.performerVideos = []
 			this.carouselIndex = 0
 			this.activeTab = 'basic' // Reset to basic tab
 			this.selectedTagId = null // Reset selected tag
@@ -967,6 +1119,8 @@ export default {
 			await this.loadPerformerPreviews(performer.id)
 			// Load performer master tags
 			await this.loadPerformerTags(performer.id)
+			// Load performer videos
+			await this.loadPerformerVideos(performer.id)
 		},
 		closeDetails() {
 			this.detailsPanel.visible = false
@@ -981,6 +1135,10 @@ export default {
 		closeContextMenu() {
 			this.contextMenu.visible = false
 			this.contextMenu.performer = null
+		},
+		goToPerformerDetails(performer) {
+			this.closeContextMenu()
+			this.$router.push({ name: 'PerformerDetails', params: { id: performer.id } })
 		},
 		openCarouselContextMenu(event, previewIndex) {
 			this.carouselContextMenu.visible = true
@@ -1042,26 +1200,25 @@ export default {
 				this.$toast.error('Fetch Failed', err.response?.data?.error || 'Failed to fetch metadata from AdultDataLink')
 			}
 		},
-		async toggleZoo(performer) {
+		async updateCategory(performer, newCategory) {
 			this.closeContextMenu()
 			try {
-				const newZooValue = !performer.zoo
-				const response = await performersAPI.update(performer.id, { zoo: newZooValue })
+				const response = await performersAPI.update(performer.id, { category: newCategory })
 
 				// Update local state with response from server
-				if (response && response.zoo !== undefined) {
-					performer.zoo = response.zoo
+				if (response && response.category !== undefined) {
+					performer.category = response.category
 				} else {
-					performer.zoo = newZooValue
+					performer.category = newCategory
 				}
 
 				// Force re-render
 				this.$forceUpdate()
 
-				this.$toast.success('Updated', `${performer.name} ${newZooValue ? 'marked as Zoo' : 'unmarked as Zoo'}`)
+				this.$toast.success('Updated', `${performer.name} set to ${this.getCategoryName(newCategory)}`)
 			} catch (err) {
-				console.error('Failed to toggle zoo:', err)
-				this.$toast.error('Update Failed', 'Failed to update zoo status')
+				console.error('Failed to update category:', err)
+				this.$toast.error('Update Failed', 'Failed to update category')
 			}
 		},
 		async resetPerformer(performer) {
@@ -1171,6 +1328,40 @@ export default {
 				this.performerMasterTags = []
 			}
 		},
+		async loadPerformerVideos(performerId) {
+			this.detailsPanel.loadingVideos = true
+			try {
+				const response = await performersAPI.getVideos(performerId)
+				this.detailsPanel.performerVideos = response.data || []
+			} catch (error) {
+				console.error('Failed to load performer videos:', error)
+				this.detailsPanel.performerVideos = []
+				this.$toast.error('Error', 'Failed to load performer videos')
+			} finally {
+				this.detailsPanel.loadingVideos = false
+			}
+		},
+		openVideo(video) {
+			// Navigate to video player page
+			this.$router.push({ name: 'VideoPlayer', params: { id: video.id } })
+		},
+		formatDuration(seconds) {
+			if (!seconds) return '00:00'
+			const hours = Math.floor(seconds / 3600)
+			const minutes = Math.floor((seconds % 3600) / 60)
+			const secs = Math.floor(seconds % 60)
+
+			if (hours > 0) {
+				return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+			}
+			return `${minutes}:${String(secs).padStart(2, '0')}`
+		},
+		formatFileSize(bytes) {
+			if (!bytes) return '0 B'
+			const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+			const i = Math.floor(Math.log(bytes) / Math.log(1024))
+			return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`
+		},
 		async addTagToPerformer() {
 			if (!this.selectedTagId || !this.detailsPanel.performer) return
 
@@ -1205,8 +1396,8 @@ export default {
 		},
 		async syncPerformerTags() {
 			if (!this.detailsPanel.performer) return
-			const sceneCount = this.detailsPanel.performer.scene_count || 0
-			if (!confirm(`Apply master tags to all ${sceneCount} videos featuring this performer?`)) return
+			const videoCount = this.detailsPanel.performer.video_count || 0
+			if (!confirm(`Apply master tags to all ${videoCount} videos featuring this performer?`)) return
 
 			this.isSyncingTags = true
 			try {

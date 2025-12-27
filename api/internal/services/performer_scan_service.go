@@ -222,15 +222,15 @@ func (s *PerformerScanService) GetPerformerPreviews(performer *models.Performer)
 // GetByName retrieves a performer by name (helper method)
 func (ps *PerformerService) GetByName(name string) (*models.Performer, error) {
 	query := `
-		SELECT id, name, preview_path, folder_path, scene_count, zoo, metadata, created_at, updated_at
+		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
 		WHERE name = ?
 	`
 
 	var performer models.Performer
-	err := database.DB.QueryRow(query, name).Scan(
-		&performer.ID, &performer.Name, &performer.PreviewPath,
-		&performer.FolderPath, &performer.SceneCount, &performer.Zoo, &performer.Metadata,
+	err := database.GetDB().QueryRow(query, name).Scan(
+		&performer.ID, &performer.Name, &performer.PreviewPath, &performer.ThumbnailPath,
+		&performer.FolderPath, &performer.VideoCount, &performer.Category, &performer.Metadata,
 		&performer.CreatedAt, &performer.UpdatedAt,
 	)
 
@@ -252,18 +252,20 @@ func (ps *PerformerService) GetByName(name string) (*models.Performer, error) {
 // getPerformerByName retrieves a performer by name
 func (s *PerformerScanService) getPerformerByName(name string) (*models.Performer, error) {
 	query := `
-        SELECT id, name, preview_path, folder_path, scene_count, metadata, created_at, updated_at
+        SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
         FROM performers
         WHERE name = ?
     `
 
 	var performer models.Performer
-	err := database.DB.QueryRow(query, name).Scan(
+	err := database.GetDB().QueryRow(query, name).Scan(
 		&performer.ID,
 		&performer.Name,
 		&performer.PreviewPath,
+		&performer.ThumbnailPath,
 		&performer.FolderPath,
-		&performer.SceneCount,
+		&performer.VideoCount,
+		&performer.Category,
 		&performer.Metadata,
 		&performer.CreatedAt,
 		&performer.UpdatedAt,

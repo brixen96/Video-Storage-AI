@@ -252,6 +252,118 @@
 	background: rgba(102, 126, 234, 0.5);
 }
 
+/* Video List Section */
+.video-list {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	max-height: 600px;
+	overflow-y: auto;
+}
+
+.video-item {
+	display: flex;
+	gap: 1rem;
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	padding: 0.75rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.video-item:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(102, 126, 234, 0.5);
+	transform: translateX(4px);
+}
+
+.video-thumbnail {
+	position: relative;
+	width: 160px;
+	height: 90px;
+	border-radius: 6px;
+	overflow: hidden;
+	flex-shrink: 0;
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.video-thumbnail img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.thumbnail-placeholder {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.video-duration {
+	position: absolute;
+	bottom: 4px;
+	right: 4px;
+	background: rgba(0, 0, 0, 0.8);
+	color: #fff;
+	padding: 2px 6px;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	font-weight: 600;
+}
+
+.video-info {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	min-width: 0;
+}
+
+.video-title {
+	font-weight: 600;
+	font-size: 1rem;
+	color: #fff;
+	margin-bottom: 0.5rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.video-meta {
+	display: flex;
+	gap: 1rem;
+	font-size: 0.85rem;
+	color: rgba(255, 255, 255, 0.6);
+}
+
+.video-meta span {
+	display: flex;
+	align-items: center;
+}
+
+/* Video List Scrollbar */
+.video-list::-webkit-scrollbar {
+	width: 8px;
+}
+
+.video-list::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 4px;
+}
+
+.video-list::-webkit-scrollbar-thumb {
+	background: rgba(102, 126, 234, 0.3);
+	border-radius: 4px;
+}
+
+.video-list::-webkit-scrollbar-thumb:hover {
+	background: rgba(102, 126, 234, 0.5);
+}
+
 /* Responsive */
 @media (max-width: 992px) {
 	.performer-avatar {
@@ -277,5 +389,20 @@
 	.page-header .d-flex {
 		flex-direction: column;
 		gap: 1rem;
+	}
+
+	.video-thumbnail {
+		width: 120px;
+		height: 68px;
+	}
+
+	.video-title {
+		font-size: 0.9rem;
+	}
+
+	.video-meta {
+		font-size: 0.75rem;
+		flex-direction: column;
+		gap: 0.25rem;
 	}
 }

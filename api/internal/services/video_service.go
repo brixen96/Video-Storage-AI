@@ -26,7 +26,7 @@ type VideoService struct {
 // NewVideoService creates a new video service
 func NewVideoService(activityService *ActivityService, libraryService *LibraryService, performerService *PerformerService) *VideoService {
 	return &VideoService{
-		db:               database.DB,
+		db:               database.GetDB(),
 		activityService:  activityService,
 		libraryService:   libraryService,
 		performerService: performerService,
@@ -149,17 +149,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		args = append(args, query.TagID)
 	}
 
-	// Zoo content filter (checks if video has any performers with zoo = true)
-	if query.Zoo != nil {
+	// Category filter (checks if video has any performers with specified category)
+	if query.Category != "" {
 		joins = append(joins, "INNER JOIN video_performers vp2 ON v.id = vp2.video_id")
 		joins = append(joins, "INNER JOIN performers p ON vp2.performer_id = p.id")
-		if *query.Zoo {
-			// Show only zoo content
-			conditions = append(conditions, "p.zoo = 1")
-		} else {
-			// Show only non-zoo content (no performers with zoo = true)
-			conditions = append(conditions, "p.zoo = 0")
-		}
+		conditions = append(conditions, "p.category = ?")
+		args = append(args, query.Category)
 	}
 
 	// Add marking filters
@@ -353,6 +348,60 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	return &video, nil
 }
 
+// GetByPerformer retrieves all videos featuring a specific performer
+func (s *VideoService) GetByPerformer(performerID int64) ([]models.Video, error) {
+	query := `
+		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec, v.resolution,
+		       v.bitrate, v.fps, v.thumbnail_path, v.date, v.rating, v.description, v.is_favorite, v.is_pinned,
+		       v.not_interested, v.in_edit_list, v.created_at, v.updated_at, v.last_played_at, v.play_count
+		FROM videos v
+		INNER JOIN video_performers vp ON v.id = vp.video_id
+		WHERE vp.performer_id = ?
+		ORDER BY v.created_at DESC
+	`
+
+	rows, err := s.db.Query(query, performerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos by performer: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []models.Video
+	for rows.Next() {
+		var video models.Video
+		var lastPlayedAt sql.NullTime
+		var date, description sql.NullString
+
+		err := rows.Scan(
+			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
+			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
+			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
+			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		if lastPlayedAt.Valid {
+			video.LastPlayedAt = &lastPlayedAt.Time
+		}
+		if date.Valid {
+			video.Date = date.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+
+		videos = append(videos, video)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating video rows: %w", err)
+	}
+
+	return videos, nil
+}
+
 // Create creates a new video
 func (s *VideoService) Create(create *models.VideoCreate) (*models.Video, error) {
 	video := &models.Video{
@@ -476,10 +525,36 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 
 	// Update performer relationships
 	if update.PerformerIDs != nil {
+		// Get existing performers for this video to track changes
+		existingQuery := `SELECT performer_id FROM video_performers WHERE video_id = ?`
+		existingRows, err := s.db.Query(existingQuery, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query existing performers: %w", err)
+		}
+
+		existingPerformers := make(map[int64]bool)
+		for existingRows.Next() {
+			var performerID int64
+			if err := existingRows.Scan(&performerID); err == nil {
+				existingPerformers[performerID] = true
+			}
+		}
+		existingRows.Close()
+
 		// Clear existing performers
 		if _, err := s.db.Exec("DELETE FROM video_performers WHERE video_id = ?", id); err != nil {
 			return nil, fmt.Errorf("failed to clear performers: %w", err)
 		}
+
+		// Decrement counts for removed performers
+		for oldPerformerID := range existingPerformers {
+			if s.performerService != nil {
+				if err := s.performerService.DecrementVideoCount(oldPerformerID); err != nil {
+					log.Printf("Warning: failed to decrement video count for performer %d: %v", oldPerformerID, err)
+				}
+			}
+		}
+
 		// Add new performers
 		for _, performerID := range update.PerformerIDs {
 			if _, err := s.db.Exec("INSERT INTO video_performers (video_id, performer_id) VALUES (?, ?)",
@@ -487,8 +562,13 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 				return nil, fmt.Errorf("failed to add performer: %w", err)
 			}
 
-			// Auto-apply performer's master tags to this video
+			// Increment count for newly added performer
 			if s.performerService != nil {
+				if err := s.performerService.IncrementVideoCount(performerID); err != nil {
+					log.Printf("Warning: failed to increment video count for performer %d: %v", performerID, err)
+				}
+
+				// Auto-apply performer's master tags to this video
 				if err := s.performerService.ApplyMasterTagsToVideo(performerID, id); err != nil {
 					// Log error but don't fail the entire operation
 					log.Printf("Warning: failed to apply master tags from performer %d to video %d: %v", performerID, id, err)
@@ -730,6 +810,20 @@ func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error
 		return nil
 	}
 
+	// Create overall activity log for the entire parallel scan
+	activity, err := s.activityService.StartTask(
+		"library_scan_all",
+		fmt.Sprintf("Scanning all %d libraries with drive-aware optimization", len(libraries)),
+		map[string]interface{}{
+			"library_count":         len(libraries),
+			"server_max_concurrent": config.ServerMaxConcurrent,
+			"local_max_concurrent":  config.LocalMaxConcurrent,
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to create activity log: %v", err)
+	}
+
 	// Group libraries by drive type
 	serverLibraries := []models.Library{}
 	localLibraries := []models.Library{}
@@ -746,6 +840,14 @@ func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error
 	}
 
 	log.Printf("Grouped libraries - Server: %d, Local: %d", len(serverLibraries), len(localLibraries))
+
+	if activity != nil {
+		s.activityService.UpdateProgress(
+			activity.ID,
+			10,
+			fmt.Sprintf("Grouped %d libraries (Server: %d, Local: %d)", len(libraries), len(serverLibraries), len(localLibraries)),
+		)
+	}
 
 	// Create wait group for all scans
 	var wg sync.WaitGroup
@@ -770,9 +872,41 @@ func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error
 		}()
 	}
 
+	// Update progress periodically while scans are running
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		progress := 20
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if activity != nil && progress < 90 {
+					progress += 10
+					s.activityService.UpdateProgress(
+						activity.ID,
+						progress,
+						fmt.Sprintf("Scanning in progress... (%d%%)", progress),
+					)
+				}
+			}
+		}
+	}()
+
 	// Wait for all scans to complete
 	wg.Wait()
+	close(done)
 	log.Println("All parallel library scans completed")
+
+	// Complete activity
+	if activity != nil {
+		s.activityService.CompleteTask(
+			int64(activity.ID),
+			fmt.Sprintf("All %d libraries scanned successfully", len(libraries)),
+		)
+	}
 
 	return nil
 }
@@ -1151,6 +1285,157 @@ func (s *VideoService) generatePreviewsForLibrary(libraryID int64, previewDir st
 	return nil
 }
 
+// GenerateAllThumbnails generates thumbnails for all videos that don't have them
+func (s *VideoService) GenerateAllThumbnails() error {
+	log.Println("Starting batch video thumbnail generation...")
+
+	// Create activity log
+	activity, err := s.activityService.StartTask(
+		"video_thumbnail_generation",
+		"Generating thumbnails for videos without thumbnails",
+		map[string]interface{}{},
+	)
+	if err != nil {
+		log.Printf("Failed to create activity log: %v", err)
+	}
+
+	// Get all videos without thumbnails
+	query := `
+		SELECT id, library_id, file_path, duration
+		FROM videos
+		WHERE thumbnail_path IS NULL OR thumbnail_path = ''
+		ORDER BY id ASC
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		if activity != nil {
+			s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Failed: %v", err))
+		}
+		return fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	type videoInfo struct {
+		ID        int64
+		LibraryID int64
+		FilePath  string
+		Duration  float64
+	}
+
+	var videos []videoInfo
+	for rows.Next() {
+		var v videoInfo
+		if err := rows.Scan(&v.ID, &v.LibraryID, &v.FilePath, &v.Duration); err != nil {
+			log.Printf("Failed to scan video: %v", err)
+			continue
+		}
+		videos = append(videos, v)
+	}
+
+	if len(videos) == 0 {
+		log.Println("No videos need thumbnails")
+		if activity != nil {
+			s.activityService.CompleteTask(int64(activity.ID), "All videos already have thumbnails")
+		}
+		return nil
+	}
+
+	log.Printf("Found %d videos without thumbnails", len(videos))
+
+	// Generate thumbnails in parallel
+	numWorkers := runtime.NumCPU()
+	thumbnailJobs := make(chan videoInfo, len(videos))
+	var wg sync.WaitGroup
+	var generated, failed int
+	var mu sync.Mutex
+
+	mediaService := NewMediaService()
+
+	// Start workers
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for video := range thumbnailJobs {
+				// Get library
+				library, err := s.libraryService.GetByID(video.LibraryID)
+				if err != nil {
+					log.Printf("Worker %d: Failed to get library for video %d: %v", workerID, video.ID, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+
+				// Get thumbnail directory
+				thumbnailDir := filepath.Join(library.Path, ".thumbnails")
+
+				// Generate thumbnail
+				config := ThumbnailConfig{
+					LibraryID:     video.LibraryID,
+					LibraryPath:   library.Path,
+					VideoFilePath: video.FilePath,
+					Duration:      video.Duration,
+					ThumbnailDir:  thumbnailDir,
+				}
+
+				result, err := mediaService.GenerateThumbnailHierarchical(config)
+				if err != nil {
+					log.Printf("Worker %d: Failed to generate thumbnail for video %d: %v", workerID, video.ID, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+
+				// Update video thumbnail path
+				if err := s.updateVideoThumbnailPath(video.ID, result.RelativePath); err != nil {
+					log.Printf("Worker %d: Failed to update thumbnail path for video %d: %v", workerID, video.ID, err)
+					mu.Lock()
+					failed++
+					mu.Unlock()
+					continue
+				}
+
+				mu.Lock()
+				generated++
+				if generated%10 == 0 {
+					log.Printf("Progress: %d/%d thumbnails generated, %d failed", generated, len(videos), failed)
+					if activity != nil {
+						progress := int((float64(generated+failed) / float64(len(videos))) * 100)
+						s.activityService.UpdateProgress(
+							activity.ID,
+							progress,
+							fmt.Sprintf("Generated %d/%d thumbnails (%d failed)", generated, len(videos), failed),
+						)
+					}
+				}
+				mu.Unlock()
+			}
+		}(i)
+	}
+
+	// Queue all videos
+	for _, video := range videos {
+		thumbnailJobs <- video
+	}
+
+	close(thumbnailJobs)
+	wg.Wait()
+
+	log.Printf("Thumbnail generation complete: %d generated, %d failed", generated, failed)
+
+	if activity != nil {
+		s.activityService.CompleteTask(
+			int64(activity.ID),
+			fmt.Sprintf("Completed: %d thumbnails generated, %d failed", generated, failed),
+		)
+	}
+
+	return nil
+}
+
 // VideoMarks holds marking information for a video
 type VideoMarks struct {
 	NotInterested bool
@@ -1283,7 +1568,7 @@ func (s *VideoService) loadVideoRelationshipsBatch(videos []models.Video) error 
 
 	// Batch load performers
 	performerQuery := fmt.Sprintf(`
-		SELECT vp.video_id, p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.zoo, p.metadata, p.created_at, p.updated_at
+		SELECT vp.video_id, p.id, p.name, p.preview_path, p.folder_path, p.video_count, p.category, p.metadata, p.created_at, p.updated_at
 		FROM performers p
 		INNER JOIN video_performers vp ON p.id = vp.performer_id
 		WHERE vp.video_id IN (%s)
@@ -1301,19 +1586,8 @@ func (s *VideoService) loadVideoRelationshipsBatch(videos []models.Video) error 
 			var videoID int64
 			var performer models.Performer
 			var metadata sql.NullString
-			var zooVal interface{}
-			err := performerRows.Scan(&videoID, &performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.SceneCount, &zooVal, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
+			err := performerRows.Scan(&videoID, &performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.VideoCount, &performer.Category, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
 			if err == nil {
-				// Convert to bool - handle both int64 and bool types
-				switch v := zooVal.(type) {
-				case int64:
-					performer.Zoo = v != 0
-				case bool:
-					performer.Zoo = v
-				default:
-					performer.Zoo = false
-				}
-
 				if metadata.Valid {
 					performer.Metadata = metadata.String
 					// Unmarshal metadata for frontend use
@@ -1429,7 +1703,7 @@ func (s *VideoService) loadVideoRelationshipsBatch(videos []models.Video) error 
 func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 	// Load performers
 	performerQuery := `
-		SELECT p.id, p.name, p.preview_path, p.folder_path, p.scene_count, p.zoo, p.metadata, p.created_at, p.updated_at
+		SELECT p.id, p.name, p.preview_path, p.folder_path, p.video_count, p.category, p.metadata, p.created_at, p.updated_at
 		FROM performers p
 		INNER JOIN video_performers vp ON p.id = vp.performer_id
 		WHERE vp.video_id = ?
@@ -1444,19 +1718,8 @@ func (s *VideoService) loadVideoRelationships(video *models.Video) error {
 		for performerRows.Next() {
 			var performer models.Performer
 			var metadata sql.NullString
-			var zooVal interface{}
-			err := performerRows.Scan(&performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.SceneCount, &zooVal, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
+			err := performerRows.Scan(&performer.ID, &performer.Name, &performer.PreviewPath, &performer.FolderPath, &performer.VideoCount, &performer.Category, &metadata, &performer.CreatedAt, &performer.UpdatedAt)
 			if err == nil {
-				// Convert to bool - handle both int64 and bool types
-				switch v := zooVal.(type) {
-				case int64:
-					performer.Zoo = v != 0
-				case bool:
-					performer.Zoo = v
-				default:
-					performer.Zoo = false
-				}
-
 				if metadata.Valid {
 					performer.Metadata = metadata.String
 					// Unmarshal metadata for frontend use

@@ -8,9 +8,17 @@
 		<!-- Thumbnail / Preview -->
 		<div class="video-thumbnail" @mouseenter="startPreview" @mouseleave="stopPreview">
 			<!-- Static Thumbnail -->
-			<img v-if="!isPreviewPlaying && video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" loading="lazy" class="thumbnail-image" />
+			<img
+				v-if="!isPreviewPlaying && video.thumbnail_path"
+				:src="getThumbnailURL(video)"
+				:alt="video.title"
+				loading="lazy"
+				class="thumbnail-image"
+				@error="handleThumbnailError"
+			/>
 			<div v-else-if="!isPreviewPlaying" class="thumbnail-placeholder">
 				<font-awesome-icon :icon="['fas', 'video']" size="3x" />
+				<span v-if="thumbnailError" class="error-text">Thumbnail unavailable</span>
 			</div>
 
 			<!-- Storyboard Preview (cycles through frames on hover) -->
@@ -109,6 +117,7 @@ export default {
 			previewFrameIndex: 0,
 			previewInterval: null,
 			previewFrames: [], // Array of frame URLs
+			thumbnailError: false,
 		}
 	},
 	computed: {
@@ -142,18 +151,21 @@ export default {
 				frames.push(getAssetURL(framePath))
 			}
 			this.previewFrames = frames
+			console.log(`Loaded ${frames.length} preview frames for: ${this.video.title}`, frames[0])
 		},
 		startPreview() {
 			// Delay preview start by 300ms to avoid loading on quick hovers
 			this.hoverTimeout = setTimeout(() => {
-				if (this.hasPreview) {
+				if (this.hasPreview && this.previewFrames.length > 0) {
 					this.isPreviewPlaying = true
 					this.previewFrameIndex = 0
 
-					// Cycle through frames every 200ms for smooth timelapse effect
+					// Cycle through frames every 500ms for better viewing
 					this.previewInterval = setInterval(() => {
-						this.previewFrameIndex = (this.previewFrameIndex + 1) % this.previewFrames.length
-					}, 200)
+						if (this.previewFrames.length > 0) {
+							this.previewFrameIndex = (this.previewFrameIndex + 1) % this.previewFrames.length
+						}
+					}, 500)
 				}
 			}, 300)
 		},
@@ -214,6 +226,10 @@ export default {
 		},
 		showContextMenu(event) {
 			this.$emit('context-menu', { video: this.video, x: event.clientX, y: event.clientY })
+		},
+		handleThumbnailError() {
+			this.thumbnailError = true
+			console.warn(`Thumbnail failed to load for video: ${this.video.title}`)
 		},
 	},
 	mounted() {

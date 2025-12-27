@@ -257,7 +257,7 @@ export default {
 		},
 		async loadTags() {
 			try {
-				this.tags = await this.$store.dispatch('fetchTags')
+				this.tags = await this.$store.dispatch('fetchTags', true)
 			} catch (error) {
 				console.error('Failed to load tags:', error)
 			}

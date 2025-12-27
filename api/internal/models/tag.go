@@ -6,24 +6,27 @@ import "time"
 type Tag struct {
 	ID        int64     `json:"id" db:"id"`
 	Name      string    `json:"name" db:"name" binding:"required"`
-	Color     string    `json:"color" db:"color"` // Hex color code
-	Icon      string    `json:"icon" db:"icon"`   // Font Awesome icon name
+	Color     string    `json:"color" db:"color"`       // Hex color code
+	Icon      string    `json:"icon" db:"icon"`         // Font Awesome icon name
+	Category  string    `json:"category" db:"category"` // regular, zoo, or 3d
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // TagCreate represents the data needed to create a tag
 type TagCreate struct {
-	Name  string `json:"name" binding:"required"`
-	Color string `json:"color"`
-	Icon  string `json:"icon"`
+	Name     string `json:"name" binding:"required"`
+	Color    string `json:"color"`
+	Icon     string `json:"icon"`
+	Category string `json:"category"`
 }
 
 // TagUpdate represents the data that can be updated
 type TagUpdate struct {
-	Name  *string `json:"name,omitempty"`
-	Color *string `json:"color,omitempty"`
-	Icon  *string `json:"icon,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	Color    *string `json:"color,omitempty"`
+	Icon     *string `json:"icon,omitempty"`
+	Category *string `json:"category,omitempty"`
 }
 
 // TagMergeRequest represents a request to merge multiple tags

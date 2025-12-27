@@ -26,7 +26,7 @@ func NewStudioService() *StudioService {
 func (s *StudioService) GetAll() ([]models.Studio, error) {
 	query := `
 		SELECT s.id, s.name, s.logo_path, s.description, s.founded_date, s.country,
-		       s.metadata, s.created_at, s.updated_at
+		       s.category, s.metadata, s.created_at, s.updated_at
 		FROM studios s
 		ORDER BY s.name ASC
 	`
@@ -42,7 +42,7 @@ func (s *StudioService) GetAll() ([]models.Studio, error) {
 		var studio models.Studio
 		err := rows.Scan(
 			&studio.ID, &studio.Name, &studio.LogoPath, &studio.Description,
-			&studio.FoundedDate, &studio.Country, &studio.Metadata,
+			&studio.FoundedDate, &studio.Country, &studio.Category, &studio.Metadata,
 			&studio.CreatedAt, &studio.UpdatedAt,
 		)
 		if err != nil {
@@ -65,7 +65,7 @@ func (s *StudioService) GetAll() ([]models.Studio, error) {
 func (s *StudioService) GetByID(id int64) (*models.Studio, error) {
 	query := `
 		SELECT id, name, logo_path, description, founded_date, country,
-		       metadata, created_at, updated_at
+		       category, metadata, created_at, updated_at
 		FROM studios
 		WHERE id = ?
 	`
@@ -73,7 +73,7 @@ func (s *StudioService) GetByID(id int64) (*models.Studio, error) {
 	var studio models.Studio
 	err := s.db.QueryRow(query, id).Scan(
 		&studio.ID, &studio.Name, &studio.LogoPath, &studio.Description,
-		&studio.FoundedDate, &studio.Country, &studio.Metadata,
+		&studio.FoundedDate, &studio.Country, &studio.Category, &studio.Metadata,
 		&studio.CreatedAt, &studio.UpdatedAt,
 	)
 
@@ -101,7 +101,7 @@ func (s *StudioService) GetWithGroups(id int64) (*models.StudioWithGroups, error
 
 	// Get groups for this studio
 	groupQuery := `
-		SELECT id, studio_id, name, logo_path, description, metadata, created_at, updated_at
+		SELECT id, studio_id, name, logo_path, description, category, metadata, created_at, updated_at
 		FROM groups
 		WHERE studio_id = ?
 		ORDER BY name ASC
@@ -118,7 +118,7 @@ func (s *StudioService) GetWithGroups(id int64) (*models.StudioWithGroups, error
 		var group models.Group
 		err := rows.Scan(
 			&group.ID, &group.StudioID, &group.Name, &group.LogoPath,
-			&group.Description, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
+			&group.Description, &group.Category, &group.Metadata, &group.CreatedAt, &group.UpdatedAt,
 		)
 		if err != nil {
 			log.Printf("Failed to scan group: %v", err)
@@ -143,6 +143,12 @@ func (s *StudioService) GetWithGroups(id int64) (*models.StudioWithGroups, error
 func (s *StudioService) Create(create *models.StudioCreate) (*models.Studio, error) {
 	now := time.Now()
 
+	// Default category to 'regular' if not provided
+	category := create.Category
+	if category == "" {
+		category = "regular"
+	}
+
 	// Marshal metadata if provided
 	metadataJSON := "{}"
 	if create.Metadata != nil {
@@ -154,11 +160,11 @@ func (s *StudioService) Create(create *models.StudioCreate) (*models.Studio, err
 	}
 
 	query := `
-		INSERT INTO studios (name, logo_path, description, founded_date, country, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO studios (name, logo_path, description, founded_date, country, category, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	result, err := s.db.Exec(query, create.Name, create.LogoPath, create.Description,
-		create.FoundedDate, create.Country, metadataJSON, now, now)
+		create.FoundedDate, create.Country, category, metadataJSON, now, now)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create studio: %w", err)
 	}
@@ -195,6 +201,9 @@ func (s *StudioService) Update(id int64, update *models.StudioUpdate) (*models.S
 	if update.Country != nil {
 		studio.Country = *update.Country
 	}
+	if update.Category != nil {
+		studio.Category = *update.Category
+	}
 	if update.Metadata != nil {
 		studio.MetadataObj = update.Metadata
 	}
@@ -209,11 +218,11 @@ func (s *StudioService) Update(id int64, update *models.StudioUpdate) (*models.S
 	query := `
 		UPDATE studios
 		SET name = ?, logo_path = ?, description = ?, founded_date = ?, country = ?,
-		    metadata = ?, updated_at = ?
+		    category = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
 	`
 	_, err = s.db.Exec(query, studio.Name, studio.LogoPath, studio.Description,
-		studio.FoundedDate, studio.Country, studio.Metadata, studio.UpdatedAt, id)
+		studio.FoundedDate, studio.Country, studio.Category, studio.Metadata, studio.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update studio: %w", err)
 	}

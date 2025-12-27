@@ -82,6 +82,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.POST("/scan", scanVideos)                       // Scan library for videos
 			videos.POST("/scan-all-parallel", scanAllVideosParallel) // Scan all libraries in parallel
 			videos.POST("/generate-previews", generateAllPreviews) // Generate preview storyboards for all videos
+			videos.POST("/generate-thumbnails", generateVideoThumbnails) // Generate thumbnails for all videos
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
@@ -101,13 +102,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			performers.GET("/:id", getPerformer)                    // Get single performer
 			performers.GET("/:id/previews", getPerformerPreviews)   // Get all preview videos
 			performers.GET("/:id/tags", getPerformerTags)           // Get performer master tags
+			performers.GET("/:id/videos", getPerformerVideos)       // Get videos featuring performer
 			performers.POST("", createPerformer)                    // Create performer
 			performers.POST("/scan", scanPerformers)                // Scan performer folders
+			performers.POST("/generate-thumbnails", generatePerformerThumbnails) // Generate thumbnails for all performers
 			performers.PUT("/:id", updatePerformer)                 // Update performer
 			performers.DELETE("/:id", deletePerformer)              // Delete performer
 			performers.POST("/:id/fetch-metadata", fetchMetadata)   // Fetch from AdultDataLink
 			performers.POST("/:id/reset-metadata", resetMetadata)   // Reset metadata
 			performers.POST("/:id/reset-previews", resetPreviews)   // Reset previews
+			performers.POST("/:id/generate-thumbnail", generatePerformerThumbnail) // Generate thumbnail for single performer
 			performers.POST("/:id/tags", addPerformerTag)           // Add master tag to performer
 			performers.DELETE("/:id/tags/:tagId", removePerformerTag) // Remove master tag from performer
 			performers.POST("/:id/sync-tags", syncPerformerTags)    // Sync master tags to all videos
@@ -196,7 +200,15 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/suggest-naming", suggestNaming)        // Generate better filename suggestions
 			ai.GET("/library-analytics", getLibraryAnalytics) // Get comprehensive library statistics
 			ai.POST("/analyze-thumbnail-quality", analyzeThumbnailQuality) // Analyze thumbnail quality
-			ai.POST("/chat", aiChat)                         // Chat with AI assistant (placeholder)
+
+			// AI Companion endpoints
+			ai.POST("/chat", aiCompanionChat)                // Chat with AI Companion
+			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
+			ai.POST("/memories", saveAIMemory)               // Save memory
+			ai.GET("/memories", getAIMemories)               // Get memories
+			ai.GET("/memories/search", searchAIMemories)     // Search memories
+			ai.PUT("/memories/:id", updateAIMemory)          // Update memory
+			ai.DELETE("/memories/:id", deleteAIMemory)       // Delete memory
 		}
 
 		// WebSocket endpoint
@@ -227,5 +239,3 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 // File operation handlers are implemented in file_handlers.go
 
 // AI handlers are implemented in ai_handlers.go
-
-func aiChat(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"message": "AI chat"}) }

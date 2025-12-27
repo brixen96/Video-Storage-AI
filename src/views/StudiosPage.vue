@@ -23,7 +23,7 @@
 			<!-- Search and filters -->
 			<div class="filters-section mb-4">
 				<div class="row g-3">
-					<div class="col-md-6">
+					<div class="col-md-4">
 						<div class="input-group">
 							<span class="input-group-text">
 								<font-awesome-icon :icon="['fas', 'search']" />
@@ -31,11 +31,19 @@
 							<input v-model="searchQuery" type="text" class="form-control" placeholder="Search studios..." />
 						</div>
 					</div>
-					<div class="col-md-3">
+					<div class="col-md-2">
 						<select v-model="sortBy" class="form-select">
 							<option value="name">Sort by Name</option>
 							<option value="created">Sort by Date Added</option>
 							<option value="videos">Sort by Video Count</option>
+						</select>
+					</div>
+					<div class="col-md-3">
+						<select v-model="filterCategory" class="form-select">
+							<option value="">All Categories</option>
+							<option value="regular">Regular</option>
+							<option value="zoo">Zoo</option>
+							<option value="3d">3D</option>
 						</select>
 					</div>
 					<div class="col-md-3">
@@ -72,6 +80,10 @@
 							<div class="studio-info">
 								<h3 class="studio-name">{{ studio.name }}</h3>
 								<div class="studio-meta">
+									<span v-if="studio.category && studio.category !== 'regular'" :class="['badge', 'category-badge', 'category-' + studio.category]">
+										<font-awesome-icon :icon="['fas', getCategoryIcon(studio.category)]" />
+										{{ getCategoryName(studio.category) }}
+									</span>
 									<span v-if="studio.country" class="badge bg-secondary">
 										<font-awesome-icon :icon="['fas', 'globe']" />
 										{{ studio.country }}
@@ -251,6 +263,22 @@
 
 			<!-- Context Menu -->
 			<div v-if="contextMenu.show" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
+				<div class="context-menu-section">
+					<div class="context-menu-label">Set Category:</div>
+					<div class="context-menu-item" @click="updateStudioCategory(contextMenu.studio, 'regular')">
+						<font-awesome-icon :icon="['fas', 'user']" />
+						Regular
+					</div>
+					<div class="context-menu-item" @click="updateStudioCategory(contextMenu.studio, 'zoo')">
+						<font-awesome-icon :icon="['fas', 'dog']" />
+						Zoo
+					</div>
+					<div class="context-menu-item" @click="updateStudioCategory(contextMenu.studio, '3d')">
+						<font-awesome-icon :icon="['fas', 'cube']" />
+						3D
+					</div>
+				</div>
+				<div class="context-menu-divider"></div>
 				<div class="context-menu-item" @click="editStudio(contextMenu.studio)">
 					<font-awesome-icon :icon="['fas', 'edit']" />
 					Edit
@@ -274,6 +302,7 @@ const groups = ref([])
 const loading = ref(false)
 const searchQuery = ref('')
 const sortBy = ref('name')
+const filterCategory = ref('')
 const filterCountry = ref('')
 const selectedStudio = ref(null)
 const showStudioModal = ref(false)
@@ -310,6 +339,11 @@ const filteredStudios = computed(() => {
 		filtered = filtered.filter((s) => s.name.toLowerCase().includes(query) || s.description?.toLowerCase().includes(query))
 	}
 
+	// Category filter
+	if (filterCategory.value) {
+		filtered = filtered.filter((s) => s.category === filterCategory.value)
+	}
+
 	// Country filter
 	if (filterCountry.value) {
 		filtered = filtered.filter((s) => s.country === filterCountry.value)
@@ -344,6 +378,29 @@ const studioGroups = computed(() => {
 })
 
 // Methods
+// Helper functions for categories
+const getCategoryIcon = (category) => {
+	const icons = { regular: 'user', zoo: 'dog', '3d': 'cube' }
+	return icons[category] || 'user'
+}
+
+const getCategoryName = (category) => {
+	const names = { regular: 'Regular', zoo: 'Zoo', '3d': '3D' }
+	return names[category] || 'Regular'
+}
+
+const updateStudioCategory = async (studio, newCategory) => {
+	hideContextMenu()
+	try {
+		await studiosAPI.update(studio.id, { category: newCategory })
+		studio.category = newCategory
+		// No toast library available in this page, just log success
+		console.log(`Updated ${studio.name} to ${getCategoryName(newCategory)}`)
+	} catch (error) {
+		console.error('Failed to update studio category:', error)
+	}
+}
+
 const loadStudios = async () => {
 	loading.value = true
 	try {

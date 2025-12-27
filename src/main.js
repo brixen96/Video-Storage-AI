@@ -16,6 +16,7 @@ app.component('ToastNotification', ToastNotification)
 
 // Create and mount toast instance
 const toastApp = createApp(ToastNotification)
+toastApp.component('font-awesome-icon', FontAwesomeIcon) // Register font-awesome-icon in toast app
 const toastContainer = document.createElement('div')
 document.body.appendChild(toastContainer)
 const toastInstance = toastApp.mount(toastContainer)

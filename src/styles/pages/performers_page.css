@@ -223,6 +223,14 @@
 	display: block;
 }
 
+.preview-thumbnail {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+	transition: opacity 0.2s ease;
+}
+
 .no-preview {
 	position: absolute;
 	top: 0;
@@ -354,6 +362,14 @@
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+}
+
+.preview-thumbnail-small {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+	transition: opacity 0.2s ease;
 }
 
 .no-preview-small {
@@ -842,6 +858,84 @@
 	flex: 1;
 }
 
+/* Videos Tab */
+.videos-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 1rem;
+	max-height: 500px;
+	overflow-y: auto;
+	padding: 0.5rem;
+}
+
+.video-item {
+	background: rgba(0, 0, 0, 0.3);
+	border-radius: 0.5rem;
+	overflow: hidden;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	border: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.video-item:hover {
+	transform: translateY(-4px);
+	box-shadow: 0 8px 16px rgba(0, 217, 255, 0.3);
+	border-color: rgba(0, 217, 255, 0.5);
+}
+
+.video-thumbnail {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 16/9;
+	overflow: hidden;
+	background: rgba(0, 0, 0, 0.5);
+}
+
+.video-thumbnail img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.video-thumbnail .no-thumbnail {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	height: 100%;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.video-duration {
+	position: absolute;
+	bottom: 0.5rem;
+	right: 0.5rem;
+	background: rgba(0, 0, 0, 0.8);
+	padding: 0.25rem 0.5rem;
+	border-radius: 0.25rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+}
+
+.video-info {
+	padding: 0.75rem;
+}
+
+.video-title {
+	font-size: 0.85rem;
+	font-weight: 600;
+	margin: 0 0 0.25rem 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.video-meta {
+	font-size: 0.75rem;
+	color: rgba(255, 255, 255, 0.6);
+	margin: 0;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
 	.performers-grid {
@@ -856,5 +950,9 @@
 
 	.metadata-grid {
 		grid-template-columns: 1fr;
+	}
+
+	.videos-grid {
+		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 	}
 }

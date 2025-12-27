@@ -228,14 +228,15 @@ export default createStore({
 
 			commit('SET_TAGS_LOADING', true)
 			try {
-				const response = await tagsAPI.getAll()
-				const tags = (response && response.data) || []
-				commit('SET_TAGS', tags)
+				const tags = await tagsAPI.getAll()
+				// Tags API returns array directly (not wrapped in response.data)
+				const tagsList = Array.isArray(tags) ? tags : []
+				commit('SET_TAGS', tagsList)
 
 				// Store in persistent cache
-				await cacheService.set(CACHE_KEYS.tags, tags)
+				await cacheService.set(CACHE_KEYS.tags, tagsList)
 
-				return tags
+				return tagsList
 			} catch (error) {
 				commit('SET_TAGS_LOADING', false)
 				throw error
