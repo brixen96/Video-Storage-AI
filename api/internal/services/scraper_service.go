@@ -1,0 +1,1797 @@
+package services
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/database"
+	"github.com/brixen96/video-storage-ai/internal/models"
+)
+
+// ScraperService handles web scraping operations
+type ScraperService struct {
+	db                 *sql.DB
+	activityService    *ActivityService
+	aiCompanionService *AICompanionService
+	httpClient         *http.Client
+	sessionCookie      string // Store session cookie for authenticated requests
+}
+
+// NewScraperService creates a new scraper service
+func NewScraperService(activitySvc *ActivityService, aiCompanionSvc *AICompanionService) *ScraperService {
+	svc := &ScraperService{
+		db:                 database.GetDB(),
+		activityService:    activitySvc,
+		aiCompanionService: aiCompanionSvc,
+		sessionCookie:      "",
+		httpClient: &http.Client{
+			Timeout: 60 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// Allow up to 10 redirects
+				if len(via) >= 10 {
+					return fmt.Errorf("too many redirects")
+				}
+				return nil
+			},
+		},
+	}
+
+	// Load session cookie from database
+	svc.loadSessionCookieFromDB()
+
+	return svc
+}
+
+// loadSessionCookieFromDB loads the session cookie from database on startup
+func (s *ScraperService) loadSessionCookieFromDB() {
+	var cookie string
+	err := s.db.QueryRow("SELECT value FROM app_settings WHERE key = 'scraper_session_cookie'").Scan(&cookie)
+	if err == nil {
+		s.sessionCookie = cookie
+		log.Printf("Loaded session cookie from database (length: %d)", len(cookie))
+	} else if err != sql.ErrNoRows {
+		log.Printf("Error loading session cookie from database: %v", err)
+	}
+}
+
+// SetSessionCookie sets the authentication cookie for scraping
+func (s *ScraperService) SetSessionCookie(cookie string) {
+	// Clean the cookie string - remove newlines, carriage returns, and extra spaces
+	cleaned := strings.ReplaceAll(cookie, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	cleaned = strings.TrimSpace(cleaned)
+	s.sessionCookie = cleaned
+	log.Printf("Session cookie set (length: %d)", len(cleaned))
+
+	// Save to database for persistence
+	_, err := s.db.Exec(`
+		INSERT INTO app_settings (key, value, updated_at)
+		VALUES ('scraper_session_cookie', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = CURRENT_TIMESTAMP
+	`, cleaned, cleaned)
+	if err != nil {
+		log.Printf("Error saving session cookie to database: %v", err)
+	} else {
+		log.Printf("Session cookie saved to database")
+	}
+}
+
+// GetSessionCookie returns the current session cookie
+func (s *ScraperService) GetSessionCookie() string {
+	return s.sessionCookie
+}
+
+// ScrapeThread scrapes a single thread from simpcity.is
+func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, error) {
+	// Clean the URL: remove common suffixes like /unread, /latest
+	cleanURL := strings.TrimSuffix(threadURL, "/")
+	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
+	cleanURL = strings.TrimSuffix(cleanURL, "/latest")
+	cleanURL = strings.TrimSuffix(cleanURL, "/")
+
+	log.Printf("Scraping thread: %s", cleanURL)
+
+	// Parse URL to extract thread ID
+	threadID, err := s.extractThreadID(cleanURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract thread ID: %w", err)
+	}
+
+	// Create request with authentication
+	req, err := http.NewRequest("GET", cleanURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add session cookie if available
+	if s.sessionCookie != "" {
+		req.Header.Set("Cookie", s.sessionCookie)
+	}
+
+	// Add user agent to mimic browser
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	// Fetch the page
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch thread: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("authentication required - please set session cookie")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Parse HTML
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	// Extract thread information
+	thread := &models.ScrapedThread{
+		ExternalID:     threadID,
+		Source:         "simpcity",
+		URL:            cleanURL,
+		FirstScrapedAt: time.Now(),
+		LastScrapedAt:  time.Now(),
+		MetadataObj:    &models.ScrapedThreadMetadata{},
+	}
+
+	// Extract title (raw)
+	rawTitle := strings.TrimSpace(doc.Find("h1.p-title-value").First().Text())
+
+	// Extract tags from title BEFORE cleaning
+	extractedTags := s.ExtractTagsFromTitle(rawTitle)
+
+	// Clean title from tags and set it
+	thread.Title = s.CleanTitleFromTags(rawTitle)
+
+	// Extract author
+	thread.Author = strings.TrimSpace(doc.Find(".p-description .username").First().Text())
+
+	// Extract category
+	thread.Category = strings.TrimSpace(doc.Find(".p-breadcrumbs li:nth-last-child(2) a").First().Text())
+
+	// Extract view count and reply count from meta info
+	doc.Find("dl.pairs").Each(func(i int, sel *goquery.Selection) {
+		dt := strings.TrimSpace(sel.Find("dt").Text())
+		dd := strings.TrimSpace(sel.Find("dd").Text())
+
+		if strings.Contains(dt, "Views") {
+			fmt.Sscanf(dd, "%d", &thread.ViewCount)
+		} else if strings.Contains(dt, "Replies") {
+			fmt.Sscanf(dd, "%d", &thread.ReplyCount)
+		}
+	})
+
+	// Extract all thumbnails (images) for fallback support
+	var thumbnails []string
+	doc.Find(".message-main img").Each(func(i int, sel *goquery.Selection) {
+		if imgURL, exists := sel.Attr("src"); exists {
+			// Filter out smilies, avatars, and other non-content images
+			if !strings.Contains(imgURL, "/smilies/") &&
+				!strings.Contains(imgURL, "/avatars/") &&
+				!strings.Contains(imgURL, "data:image") {
+				thumbnails = append(thumbnails, imgURL)
+			}
+		}
+	})
+
+	// Set primary thumbnail and all thumbnails
+	if len(thumbnails) > 0 {
+		thread.MetadataObj.ThumbnailURL = thumbnails[0]
+		thread.MetadataObj.ThumbnailURLs = thumbnails
+	}
+
+	// Combine extracted tags with forum tags
+	thread.MetadataObj.Tags = extractedTags
+
+	// Also get tags from the forum's tag list
+	doc.Find(".tagList a").Each(func(i int, sel *goquery.Selection) {
+		tag := strings.TrimSpace(sel.Text())
+		if tag != "" && !contains(thread.MetadataObj.Tags, tag) {
+			thread.MetadataObj.Tags = append(thread.MetadataObj.Tags, tag)
+		}
+	})
+
+	// Check if pinned or locked
+	thread.MetadataObj.IsPinned = doc.Find(".structItem--sticky").Length() > 0
+	thread.MetadataObj.IsLocked = doc.Find(".structItem--locked").Length() > 0
+
+	// Extract performer and studio names from CLEANED title
+	thread.MetadataObj.PerformerNames = s.extractPerformerNames(thread.Title)
+	thread.MetadataObj.StudioNames = s.extractStudioNames(thread.Title)
+
+	// Count posts
+	thread.PostCount = doc.Find(".message--post").Length()
+
+	return thread, nil
+}
+
+// ScrapePosts scrapes all posts from a thread, handling pagination
+func (s *ScraperService) ScrapePosts(threadURL string, threadID int64) ([]*models.ScrapedPost, []*models.ScrapedDownloadLink, error) {
+	// Clean the URL first: remove trailing slash and common suffixes like /unread, /latest
+	cleanURL := strings.TrimSuffix(threadURL, "/")
+	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
+	cleanURL = strings.TrimSuffix(cleanURL, "/latest")
+	cleanURL = strings.TrimSuffix(cleanURL, "/")
+
+	log.Printf("Scraping posts from thread: %s", cleanURL)
+
+	var allPosts []*models.ScrapedPost
+	var allDownloadLinks []*models.ScrapedDownloadLink
+	postNumber := 1
+	currentPage := 1
+
+	for {
+		// Construct URL for current page
+		pageURL := cleanURL
+		if currentPage > 1 {
+			pageURL = fmt.Sprintf("%s/page-%d", cleanURL, currentPage)
+		}
+
+		log.Printf("Scraping page %d: %s", currentPage, pageURL)
+
+		// Create request with authentication
+		req, err := http.NewRequest("GET", pageURL, nil)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		// Add session cookie if available
+		if s.sessionCookie != "" {
+			req.Header.Set("Cookie", s.sessionCookie)
+		}
+
+		// Add user agent
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to fetch thread: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusNotFound {
+			// No more pages
+			resp.Body.Close()
+			break
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
+		}
+
+		// Extract posts from current page
+		postsOnPage := 0
+		doc.Find(".message--post").Each(func(i int, sel *goquery.Selection) {
+			post := s.extractPost(sel, threadID, postNumber)
+			if post != nil {
+				// Extract download links from post content and store temporarily with post index
+				links := s.extractDownloadLinks(post.Content, threadID, int64(len(allPosts))) // Use index as temporary marker
+
+				allPosts = append(allPosts, post)
+				allDownloadLinks = append(allDownloadLinks, links...)
+				postsOnPage++
+				postNumber++
+			}
+		})
+
+		log.Printf("Found %d posts on page %d", postsOnPage, currentPage)
+
+		// Stop if no posts found on this page
+		if postsOnPage == 0 {
+			log.Printf("No posts found on page %d, stopping pagination", currentPage)
+			break
+		}
+
+		// Check if there's a next page by looking for pagination elements
+		hasNextPage := false
+
+		// Method 1: Check for "Next" button (most reliable)
+		nextButton := doc.Find(".pageNav-jump--next")
+		if nextButton.Length() > 0 && !nextButton.HasClass("is-disabled") {
+			hasNextPage = true
+			log.Printf("Found active 'Next' button - more pages available")
+		}
+
+		// Method 2: Check for page numbers greater than current page
+		if !hasNextPage {
+			doc.Find(".pageNav-page").Each(func(i int, sel *goquery.Selection) {
+				pageNumText := strings.TrimSpace(sel.Text())
+				if pageNumText != "" {
+					var num int
+					_, err := fmt.Sscanf(pageNumText, "%d", &num)
+					if err == nil && num > currentPage {
+						hasNextPage = true
+						log.Printf("Found page number %d (current: %d) - more pages available", num, currentPage)
+					}
+				}
+			})
+		}
+
+		// Method 3: Try to fetch next page to see if it exists (fallback)
+		if !hasNextPage {
+			// Construct potential next page URL (using already cleaned URL)
+			nextPageURL := fmt.Sprintf("%s/page-%d", cleanURL, currentPage+1)
+
+			testReq, err := http.NewRequest("HEAD", nextPageURL, nil)
+			if err == nil {
+				if s.sessionCookie != "" {
+					testReq.Header.Set("Cookie", s.sessionCookie)
+				}
+				testReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+				testResp, err := s.httpClient.Do(testReq)
+				if err == nil {
+					defer testResp.Body.Close()
+					if testResp.StatusCode == http.StatusOK {
+						hasNextPage = true
+						log.Printf("Confirmed next page exists via HEAD request")
+					}
+				}
+			}
+		}
+
+		if !hasNextPage {
+			log.Printf("No more pages to scrape (last page: %d)", currentPage)
+			break
+		}
+
+		currentPage++
+		log.Printf("Moving to page %d", currentPage)
+
+		// Add a small delay to be polite to the server
+		time.Sleep(1 * time.Second)
+	}
+
+	log.Printf("Total posts scraped: %d across %d pages", len(allPosts), currentPage)
+	return allPosts, allDownloadLinks, nil
+}
+
+// extractPost extracts a single post from a goquery selection
+func (s *ScraperService) extractPost(sel *goquery.Selection, threadID int64, postNumber int) *models.ScrapedPost {
+	post := &models.ScrapedPost{
+		ThreadID:    threadID,
+		Source:      "simpcity",
+		PostNumber:  postNumber,
+		ScrapedAt:   time.Now(),
+		MetadataObj: &models.ScrapedPostMetadata{},
+	}
+
+	// Extract post ID
+	if postID, exists := sel.Attr("data-content"); exists {
+		post.ExternalID = strings.TrimPrefix(postID, "post-")
+	}
+
+	// Extract author
+	post.Author = strings.TrimSpace(sel.Find(".message-name .username").Text())
+
+	// Extract content (HTML)
+	contentHTML, _ := sel.Find(".message-body .bbWrapper").Html()
+	post.Content = contentHTML
+
+	// Extract plain text
+	post.PlainText = strings.TrimSpace(sel.Find(".message-body .bbWrapper").Text())
+
+	// Extract like count
+	likeText := strings.TrimSpace(sel.Find(".reactionsBar-link").Text())
+	fmt.Sscanf(likeText, "%d", &post.LikeCount)
+
+	// Extract post date
+	if dateStr, exists := sel.Find(".message-attribution-main time").Attr("datetime"); exists {
+		if parsedTime, err := time.Parse(time.RFC3339, dateStr); err == nil {
+			post.PostedAt = parsedTime
+		}
+	}
+
+	// Extract attachments from attachment section
+	sel.Find(".message-attachments .attachment").Each(func(i int, attSel *goquery.Selection) {
+		attachment := models.Attachment{}
+		if imgURL, exists := attSel.Find("img").Attr("src"); exists {
+			attachment.Type = "image"
+			attachment.URL = imgURL
+			attachment.ThumbnailURL, _ = attSel.Find("img").Attr("data-thumbnail")
+			post.MetadataObj.Attachments = append(post.MetadataObj.Attachments, attachment)
+		}
+	})
+
+	// Extract images from post content
+	sel.Find(".message-body .bbWrapper img").Each(func(i int, imgSel *goquery.Selection) {
+		attachment := models.Attachment{}
+		if imgURL, exists := imgSel.Attr("src"); exists {
+			attachment.Type = "image"
+			attachment.URL = imgURL
+			// Check for data-url (full size) or use src
+			if dataURL, hasData := imgSel.Attr("data-url"); hasData {
+				attachment.URL = dataURL
+				attachment.ThumbnailURL = imgURL
+			}
+			post.MetadataObj.Attachments = append(post.MetadataObj.Attachments, attachment)
+		}
+	})
+
+	// Store raw HTML
+	post.MetadataObj.RawHTML = contentHTML
+
+	return post
+}
+
+// extractDownloadLinks extracts download links from post content
+func (s *ScraperService) extractDownloadLinks(content string, threadID int64, postID int64) []*models.ScrapedDownloadLink {
+	var links []*models.ScrapedDownloadLink
+
+	// Regular expressions for different hosting providers - more flexible patterns
+	providers := map[string]*regexp.Regexp{
+		"gofile":     regexp.MustCompile(`https?://(?:www\.)?gofile\.io/d/[a-zA-Z0-9_-]+`),
+		"pixeldrain": regexp.MustCompile(`https?://(?:www\.)?pixeldrain\.com/(?:u|l)/[a-zA-Z0-9_-]+`),
+		"bunkr":      regexp.MustCompile(`https?://(?:www\.)?(?:bunkr|bunkrr)\.[a-z]+/[a-z]/[a-zA-Z0-9_-]+`),
+		"cyberdrop":  regexp.MustCompile(`https?://(?:www\.)?cyberdrop\.(?:me|to|cc)/a/[a-zA-Z0-9_-]+`),
+		"mediafire":  regexp.MustCompile(`https?://(?:www\.)?mediafire\.com/(?:file|folder)/[a-zA-Z0-9_/-]+`),
+		"mega":       regexp.MustCompile(`https?://(?:www\.)?mega\.nz/(?:file|folder)/[a-zA-Z0-9#_-]+`),
+	}
+
+	for provider, regex := range providers {
+		matches := regex.FindAllString(content, -1)
+		for _, match := range matches {
+			link := &models.ScrapedDownloadLink{
+				ThreadID:      threadID,
+				PostID:        postID,
+				Source:        "simpcity",
+				Provider:      provider,
+				URL:           match,
+				OriginalURL:   match,
+				Status:        "active",
+				DiscoveredAt:  time.Now(),
+				MetadataObj:   &models.DownloadLinkMetadata{},
+			}
+			links = append(links, link)
+		}
+	}
+
+	// Log if no links found
+	if len(links) == 0 {
+		log.Printf("No download links found in post %d (content length: %d)", postID, len(content))
+	} else {
+		log.Printf("Found %d download links in post %d", len(links), postID)
+	}
+
+	return links
+}
+
+// extractThreadID extracts the thread ID from URL
+func (s *ScraperService) extractThreadID(threadURL string) (string, error) {
+	parsedURL, err := url.Parse(threadURL)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract from path like /threads/thread-name.123456/
+	parts := strings.Split(strings.Trim(parsedURL.Path, "/"), ".")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid thread URL format")
+	}
+
+	threadID := strings.TrimSuffix(parts[len(parts)-1], "/")
+	return threadID, nil
+}
+
+// extractPerformerNames attempts to extract performer names from title
+func (s *ScraperService) extractPerformerNames(title string) []string {
+	var performers []string
+
+	// Common patterns: [Name], (Name), Name - Content
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`\[([^\]]+)\]`),
+		regexp.MustCompile(`\(([^)]+)\)`),
+	}
+
+	for _, pattern := range patterns {
+		matches := pattern.FindAllStringSubmatch(title, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				name := strings.TrimSpace(match[1])
+				// Filter out common non-name terms
+				if !s.isCommonTerm(name) {
+					performers = append(performers, name)
+				}
+			}
+		}
+	}
+
+	return performers
+}
+
+// extractStudioNames attempts to extract studio names from title
+func (s *ScraperService) extractStudioNames(title string) []string {
+	var studios []string
+
+	// Common studio indicators
+	studioKeywords := []string{"Official", "Network", "Productions", "Studios", "Entertainment"}
+
+	words := strings.Fields(title)
+	for i, word := range words {
+		for _, keyword := range studioKeywords {
+			if strings.Contains(word, keyword) && i > 0 {
+				studios = append(studios, words[i-1]+" "+word)
+			}
+		}
+	}
+
+	return studios
+}
+
+// isCommonTerm checks if a term is a common non-name word
+func (s *ScraperService) isCommonTerm(term string) bool {
+	commonTerms := []string{"NEW", "HD", "4K", "LEAKED", "EXCLUSIVE", "UPDATED", "MEGA", "PACK"}
+	termUpper := strings.ToUpper(term)
+	for _, common := range commonTerms {
+		if termUpper == common {
+			return true
+		}
+	}
+	return false
+}
+
+// SaveThread saves a scraped thread to the database
+func (s *ScraperService) SaveThread(thread *models.ScrapedThread) error {
+	// Marshal metadata
+	if err := thread.MarshalMetadata(); err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Check if thread already exists
+	var existingID int64
+	err := s.db.QueryRow(`
+		SELECT id FROM scraped_threads
+		WHERE external_id = ? AND source = ?
+	`, thread.ExternalID, thread.Source).Scan(&existingID)
+
+	if err == sql.ErrNoRows {
+		// Insert new thread
+		result, err := s.db.Exec(`
+			INSERT INTO scraped_threads (
+				external_id, source, title, url, author, category,
+				view_count, reply_count, post_count, download_count,
+				metadata, first_scraped_at, last_scraped_at,
+				last_updated_at, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, thread.ExternalID, thread.Source, thread.Title, thread.URL,
+			thread.Author, thread.Category, thread.ViewCount, thread.ReplyCount,
+			thread.PostCount, thread.DownloadCount, thread.Metadata,
+			thread.FirstScrapedAt, thread.LastScrapedAt, thread.LastUpdatedAt,
+			time.Now())
+
+		if err != nil {
+			return fmt.Errorf("failed to insert thread: %w", err)
+		}
+
+		threadID, _ := result.LastInsertId()
+		thread.ID = threadID
+	} else if err != nil {
+		return fmt.Errorf("failed to check existing thread: %w", err)
+	} else {
+		// Update existing thread
+		_, err = s.db.Exec(`
+			UPDATE scraped_threads SET
+				title = ?, url = ?, author = ?, category = ?,
+				view_count = ?, reply_count = ?, post_count = ?,
+				download_count = ?, metadata = ?, last_scraped_at = ?,
+				last_updated_at = ?
+			WHERE id = ?
+		`, thread.Title, thread.URL, thread.Author, thread.Category,
+			thread.ViewCount, thread.ReplyCount, thread.PostCount,
+			thread.DownloadCount, thread.Metadata, time.Now(),
+			thread.LastUpdatedAt, existingID)
+
+		if err != nil {
+			return fmt.Errorf("failed to update thread: %w", err)
+		}
+
+		thread.ID = existingID
+	}
+
+	return nil
+}
+
+// SavePost saves a scraped post to the database
+func (s *ScraperService) SavePost(post *models.ScrapedPost) error {
+	// Marshal metadata
+	if err := post.MarshalMetadata(); err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Check if post already exists
+	var existingID int64
+	err := s.db.QueryRow(`
+		SELECT id FROM scraped_posts
+		WHERE external_id = ? AND source = ?
+	`, post.ExternalID, post.Source).Scan(&existingID)
+
+	if err == sql.ErrNoRows {
+		// Insert new post
+		result, err := s.db.Exec(`
+			INSERT INTO scraped_posts (
+				thread_id, external_id, source, author, content,
+				plain_text, post_number, like_count, metadata,
+				posted_at, scraped_at, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, post.ThreadID, post.ExternalID, post.Source, post.Author,
+			post.Content, post.PlainText, post.PostNumber, post.LikeCount,
+			post.Metadata, post.PostedAt, post.ScrapedAt, time.Now())
+
+		if err != nil {
+			return fmt.Errorf("failed to insert post: %w", err)
+		}
+
+		postID, _ := result.LastInsertId()
+		post.ID = postID
+	} else if err != nil {
+		return fmt.Errorf("failed to check existing post: %w", err)
+	} else {
+		// Update existing post
+		_, err = s.db.Exec(`
+			UPDATE scraped_posts SET
+				content = ?, plain_text = ?, like_count = ?,
+				metadata = ?, scraped_at = ?
+			WHERE id = ?
+		`, post.Content, post.PlainText, post.LikeCount,
+			post.Metadata, time.Now(), existingID)
+
+		if err != nil {
+			return fmt.Errorf("failed to update post: %w", err)
+		}
+
+		post.ID = existingID
+	}
+
+	return nil
+}
+
+// SaveDownloadLink saves a download link to the database
+func (s *ScraperService) SaveDownloadLink(link *models.ScrapedDownloadLink) error {
+	// Marshal metadata
+	if err := link.MarshalMetadata(); err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Check if link already exists
+	var existingID int64
+	err := s.db.QueryRow(`
+		SELECT id FROM scraped_download_links
+		WHERE url = ? AND source = ?
+	`, link.URL, link.Source).Scan(&existingID)
+
+	if err == sql.ErrNoRows {
+		// Insert new link
+		result, err := s.db.Exec(`
+			INSERT INTO scraped_download_links (
+				thread_id, post_id, source, provider, url, original_url,
+				filename, file_size, file_type, status, metadata,
+				discovered_at, created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, link.ThreadID, link.PostID, link.Source, link.Provider,
+			link.URL, link.OriginalURL, link.Filename, link.FileSize,
+			link.FileType, link.Status, link.Metadata, link.DiscoveredAt,
+			time.Now())
+
+		if err != nil {
+			return fmt.Errorf("failed to insert download link: %w", err)
+		}
+
+		linkID, _ := result.LastInsertId()
+		link.ID = linkID
+	} else if err != nil {
+		return fmt.Errorf("failed to check existing link: %w", err)
+	} else {
+		// Update existing link
+		link.ID = existingID
+		// Don't update existing links, just track they were found again
+	}
+
+	return nil
+}
+
+// ScrapeThreadComplete scrapes a thread and all its posts in one operation
+func (s *ScraperService) ScrapeThreadComplete(threadURL string) error {
+	// Create activity log
+	activity, err := s.activityService.Create(&models.ActivityLogCreate{
+		TaskType: "scraper_thread",
+		Status:   "running",
+		Message:  fmt.Sprintf("Scraping thread: %s", threadURL),
+		Details: map[string]interface{}{
+			"url": threadURL,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create activity: %w", err)
+	}
+
+	// Update progress
+	s.activityService.UpdateProgress(activity.ID, 10, "Fetching thread information...")
+
+	// Scrape thread metadata
+	thread, err := s.ScrapeThread(threadURL)
+	if err != nil {
+		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape thread: %v", err))
+		return err
+	}
+
+	// Save thread
+	if err := s.SaveThread(thread); err != nil {
+		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to save thread: %v", err))
+		return err
+	}
+
+	s.activityService.UpdateProgress(activity.ID, 30, "Thread saved. Scraping posts...")
+
+	// Scrape posts and download links
+	posts, downloadLinks, err := s.ScrapePosts(threadURL, thread.ID)
+	if err != nil {
+		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape posts: %v", err))
+		return err
+	}
+
+	s.activityService.UpdateProgress(activity.ID, 50, fmt.Sprintf("Found %d posts. Saving...", len(posts)))
+
+	// Save posts and their associated links
+	for i, post := range posts {
+		if err := s.SavePost(post); err != nil {
+			log.Printf("Failed to save post %d: %v", i, err)
+			continue
+		}
+
+		// Save download links that belong to this post
+		// Links were marked with post index (PostID field was used as temporary index)
+		for _, link := range downloadLinks {
+			// Check if this link belongs to this post (by matching the temporary index)
+			if link.PostID == int64(i) {
+				link.PostID = post.ID // Update with actual database post ID
+				if err := s.SaveDownloadLink(link); err != nil {
+					log.Printf("Failed to save download link for post %d: %v", i, err)
+				}
+			}
+		}
+
+		progress := 50 + (40 * (i + 1) / len(posts))
+		s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Saved %d/%d posts", i+1, len(posts)))
+	}
+
+	// Update thread counts
+	thread.PostCount = len(posts)
+	thread.DownloadCount = len(downloadLinks)
+	s.SaveThread(thread)
+
+	s.activityService.UpdateProgress(activity.ID, 90, "Notifying AI Companion...")
+
+	// Notify AI Companion
+	s.notifyAICompanion(thread, len(posts), len(downloadLinks))
+
+	// Complete activity
+	s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf(
+		"Successfully scraped thread: %d posts, %d download links found",
+		len(posts), len(downloadLinks),
+	))
+
+	return nil
+}
+
+// notifyAICompanion sends scraping results to AI Companion
+func (s *ScraperService) notifyAICompanion(thread *models.ScrapedThread, postCount, linkCount int) {
+	if s.aiCompanionService == nil {
+		return
+	}
+
+	// Create memory entry
+	memoryData := map[string]interface{}{
+		"type":           "scraper_result",
+		"source":         "simpcity",
+		"thread_title":   thread.Title,
+		"thread_url":     thread.URL,
+		"author":         thread.Author,
+		"category":       thread.Category,
+		"post_count":     postCount,
+		"download_count": linkCount,
+		"performers":     thread.MetadataObj.PerformerNames,
+		"studios":        thread.MetadataObj.StudioNames,
+		"tags":           thread.MetadataObj.Tags,
+		"timestamp":      time.Now(),
+	}
+
+	memoryJSON, _ := json.Marshal(memoryData)
+
+	// Store in AI Companion memory
+	s.db.Exec(`
+		INSERT INTO ai_companion_memory (type, content, metadata, created_at)
+		VALUES (?, ?, ?, ?)
+	`, "scraper_result", thread.Title, string(memoryJSON), time.Now())
+
+	log.Printf("AI Companion notified of scraping results: %s", thread.Title)
+}
+
+// GetStats returns scraper statistics
+func (s *ScraperService) GetStats() (*models.ScraperStats, error) {
+	stats := &models.ScraperStats{
+		SourceBreakdown:   make(map[string]int),
+		ProviderBreakdown: make(map[string]int),
+	}
+
+	// Total threads
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_threads").Scan(&stats.TotalThreads)
+
+	// Total posts
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts").Scan(&stats.TotalPosts)
+
+	// Total download links
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_download_links").Scan(&stats.TotalDownloadLinks)
+
+	// Active/dead links
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_download_links WHERE status = 'active'").Scan(&stats.ActiveLinks)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_download_links WHERE status = 'dead'").Scan(&stats.DeadLinks)
+
+	// Last scraped
+	s.db.QueryRow("SELECT MAX(last_scraped_at) FROM scraped_threads").Scan(&stats.LastScrapedAt)
+
+	// Source breakdown
+	rows, _ := s.db.Query("SELECT source, COUNT(*) FROM scraped_threads GROUP BY source")
+	defer rows.Close()
+	for rows.Next() {
+		var source string
+		var count int
+		rows.Scan(&source, &count)
+		stats.SourceBreakdown[source] = count
+	}
+
+	// Provider breakdown
+	rows, _ = s.db.Query("SELECT provider, COUNT(*) FROM scraped_download_links GROUP BY provider")
+	defer rows.Close()
+	for rows.Next() {
+		var provider string
+		var count int
+		rows.Scan(&provider, &count)
+		stats.ProviderBreakdown[provider] = count
+	}
+
+	return stats, nil
+}
+
+// GetAllThreads retrieves all scraped threads with pagination, sorting, and filtering
+func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filter string) ([]*models.ScrapedThread, int, error) {
+	// Build WHERE clause for filters
+	whereClause := "WHERE 1=1"
+	var args []interface{}
+
+	// Provider filter (check download links for specific provider)
+	if provider != "" {
+		whereClause += " AND id IN (SELECT DISTINCT thread_id FROM scraped_download_links WHERE provider = ?)"
+		args = append(args, provider)
+	}
+
+	// Content filter
+	if filter == "has_downloads" {
+		whereClause += " AND download_count > 0"
+	} else if filter == "no_downloads" {
+		whereClause += " AND download_count = 0"
+	}
+
+	// Get total count with filters
+	var total int
+	countQuery := "SELECT COUNT(*) FROM scraped_threads " + whereClause
+	countArgs := args
+	s.db.QueryRow(countQuery, countArgs...).Scan(&total)
+
+	// Build ORDER BY clause (cast numeric fields to ensure proper sorting with NULLS LAST)
+	orderClause := "ORDER BY last_scraped_at DESC"
+	switch sortBy {
+	case "date_desc":
+		orderClause = "ORDER BY last_scraped_at DESC"
+	case "date_asc":
+		orderClause = "ORDER BY last_scraped_at ASC"
+	case "title_asc":
+		orderClause = "ORDER BY title COLLATE NOCASE ASC"
+	case "title_desc":
+		orderClause = "ORDER BY title COLLATE NOCASE DESC"
+	case "views_desc":
+		orderClause = "ORDER BY COALESCE(view_count, 0) DESC"
+	case "views_asc":
+		orderClause = "ORDER BY COALESCE(view_count, 0) ASC"
+	case "replies_desc":
+		orderClause = "ORDER BY COALESCE(reply_count, 0) DESC"
+	case "downloads_desc":
+		orderClause = "ORDER BY COALESCE(download_count, 0) DESC"
+	}
+
+	// Build final query
+	query := "SELECT id, external_id, source, title, url, author, category, " +
+		"view_count, reply_count, post_count, download_count, " +
+		"metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at " +
+		"FROM scraped_threads " + whereClause + " " +
+		orderClause + " " +
+		"LIMIT ? OFFSET ?"
+
+	args = append(args, limit, offset)
+
+	// Debug logging
+	log.Printf("GetAllThreads Query: %s", query)
+	log.Printf("GetAllThreads Args: %v", args)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var threads []*models.ScrapedThread
+	for rows.Next() {
+		thread := &models.ScrapedThread{}
+		err := rows.Scan(
+			&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title,
+			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
+			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
+			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt,
+		)
+		if err != nil {
+			log.Printf("Error scanning thread: %v", err)
+			continue
+		}
+		thread.UnmarshalMetadata()
+		threads = append(threads, thread)
+
+		// Debug: Log first 10 threads when sorting by replies
+		if sortBy == "replies_desc" && len(threads) <= 10 {
+			titlePreview := thread.Title
+			if len(titlePreview) > 50 {
+				titlePreview = titlePreview[:50] + "..."
+			}
+			log.Printf("Thread #%d: ID=%d, ReplyCount=%d, ViewCount=%d, Title=%s",
+				len(threads), thread.ID, thread.ReplyCount, thread.ViewCount, titlePreview)
+		}
+	}
+
+	if sortBy == "replies_desc" && len(threads) > 0 {
+		log.Printf("Total threads returned: %d", len(threads))
+	}
+
+	return threads, total, nil
+}
+
+// GetThreadByID retrieves a specific thread with its posts
+func (s *ScraperService) GetThreadByID(id int64) (*models.ScrapedThread, error) {
+	thread := &models.ScrapedThread{}
+	err := s.db.QueryRow(`
+		SELECT id, external_id, source, title, url, author, category,
+			   view_count, reply_count, post_count, download_count,
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+		FROM scraped_threads
+		WHERE id = ?
+	`, id).Scan(
+		&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title,
+		&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
+		&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
+		&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
+		&thread.LastUpdatedAt, &thread.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	thread.UnmarshalMetadata()
+	return thread, nil
+}
+
+// SearchThreads searches threads by title or content
+func (s *ScraperService) SearchThreads(query string, limit, offset int) ([]*models.ScrapedThread, int, error) {
+	searchPattern := "%" + query + "%"
+
+	var total int
+	s.db.QueryRow(`
+		SELECT COUNT(*) FROM scraped_threads
+		WHERE title LIKE ? OR author LIKE ?
+	`, searchPattern, searchPattern).Scan(&total)
+
+	rows, err := s.db.Query(`
+		SELECT id, external_id, source, title, url, author, category,
+			   view_count, reply_count, post_count, download_count,
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+		FROM scraped_threads
+		WHERE title LIKE ? OR author LIKE ?
+		ORDER BY last_scraped_at DESC
+		LIMIT ? OFFSET ?
+	`, searchPattern, searchPattern, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var threads []*models.ScrapedThread
+	for rows.Next() {
+		thread := &models.ScrapedThread{}
+		err := rows.Scan(
+			&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title,
+			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
+			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
+			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		thread.UnmarshalMetadata()
+		threads = append(threads, thread)
+	}
+
+	return threads, total, nil
+}
+
+// GetPostsByThreadID retrieves all posts for a thread
+func (s *ScraperService) GetPostsByThreadID(threadID int64) ([]*models.ScrapedPost, error) {
+	rows, err := s.db.Query(`
+		SELECT id, thread_id, external_id, author, content, posted_at,
+			   metadata, created_at
+		FROM scraped_posts
+		WHERE thread_id = ?
+		ORDER BY posted_at ASC
+	`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []*models.ScrapedPost
+	for rows.Next() {
+		post := &models.ScrapedPost{}
+		err := rows.Scan(
+			&post.ID, &post.ThreadID, &post.ExternalID, &post.Author,
+			&post.Content, &post.PostedAt, &post.Metadata, &post.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		post.UnmarshalMetadata()
+		posts = append(posts, post)
+	}
+
+	return posts, nil
+}
+
+// GetDownloadLinksByThreadID retrieves all download links for a thread
+func (s *ScraperService) GetDownloadLinksByThreadID(threadID int64) ([]*models.ScrapedDownloadLink, error) {
+	rows, err := s.db.Query(`
+		SELECT id, thread_id, post_id, source, provider, url, original_url,
+			   status, metadata, discovered_at, last_checked_at, created_at
+		FROM scraped_download_links
+		WHERE thread_id = ?
+		ORDER BY discovered_at ASC
+	`, threadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*models.ScrapedDownloadLink
+	for rows.Next() {
+		link := &models.ScrapedDownloadLink{}
+		err := rows.Scan(
+			&link.ID, &link.ThreadID, &link.PostID, &link.Source,
+			&link.Provider, &link.URL, &link.OriginalURL, &link.Status,
+			&link.Metadata, &link.DiscoveredAt, &link.LastCheckedAt, &link.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		link.UnmarshalMetadata()
+		links = append(links, link)
+	}
+
+	return links, nil
+}
+
+// DeleteThread deletes a thread and all associated posts and download links
+func (s *ScraperService) DeleteThread(threadID int64) error {
+	// Start a transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete download links first
+	_, err = tx.Exec("DELETE FROM scraped_download_links WHERE thread_id = ?", threadID)
+	if err != nil {
+		return fmt.Errorf("failed to delete download links: %w", err)
+	}
+
+	// Delete posts
+	_, err = tx.Exec("DELETE FROM scraped_posts WHERE thread_id = ?", threadID)
+	if err != nil {
+		return fmt.Errorf("failed to delete posts: %w", err)
+	}
+
+	// Delete thread
+	result, err := tx.Exec("DELETE FROM scraped_threads WHERE id = ?", threadID)
+	if err != nil {
+		return fmt.Errorf("failed to delete thread: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("thread not found")
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Printf("Deleted thread %d and all associated data", threadID)
+	return nil
+}
+
+// ForumThreadInfo represents basic thread information from forum listing
+type ForumThreadInfo struct {
+	Title      string
+	URL        string
+	ExternalID string
+	Author     string
+	ReplyCount int
+	ViewCount  int
+}
+
+// ScrapeForumCategory scrapes all threads from a forum category (with pagination)
+func (s *ScraperService) ScrapeForumCategory(forumURL string) ([]ForumThreadInfo, error) {
+	log.Printf("Starting forum category scrape: %s", forumURL)
+
+	var allThreads []ForumThreadInfo
+	currentPage := 1
+	baseURL := strings.TrimSuffix(forumURL, "/")
+
+	for {
+		pageURL := baseURL
+		if currentPage > 1 {
+			pageURL = fmt.Sprintf("%s/page-%d", baseURL, currentPage)
+		}
+
+		log.Printf("Scraping forum page %d: %s", currentPage, pageURL)
+
+		// Create request
+		req, err := http.NewRequest("GET", pageURL, nil)
+		if err != nil {
+			return allThreads, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		// Add session cookie if available
+		if s.sessionCookie != "" {
+			req.Header.Set("Cookie", s.sessionCookie)
+		}
+
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+		// Fetch the page
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return allThreads, fmt.Errorf("failed to fetch forum page: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return allThreads, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		// Parse HTML
+		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		if err != nil {
+			return allThreads, fmt.Errorf("failed to parse HTML: %w", err)
+		}
+
+		threadsOnPage := 0
+
+		// Extract thread information from listing
+		doc.Find(".structItem--thread").Each(func(i int, sel *goquery.Selection) {
+			thread := ForumThreadInfo{}
+
+			// Extract title and URL
+			titleEl := sel.Find(".structItem-title a[data-tp-primary]").First()
+			thread.Title = strings.TrimSpace(titleEl.Text())
+			threadURL, exists := titleEl.Attr("href")
+			if exists {
+				// Convert relative URL to absolute
+				if strings.HasPrefix(threadURL, "/") {
+					parsedURL, _ := url.Parse(baseURL)
+					thread.URL = fmt.Sprintf("%s://%s%s", parsedURL.Scheme, parsedURL.Host, threadURL)
+				} else {
+					thread.URL = threadURL
+				}
+
+				// Extract thread ID from URL
+				thread.ExternalID, _ = s.extractThreadID(thread.URL)
+			}
+
+			// Extract author
+			thread.Author = strings.TrimSpace(sel.Find(".structItem-cell--meta .username").First().Text())
+
+			// Extract reply count
+			replyText := strings.TrimSpace(sel.Find(".structItem-cell--meta dd").First().Text())
+			fmt.Sscanf(replyText, "%d", &thread.ReplyCount)
+
+			// Extract view count (not always available)
+			// This is typically in a tooltip or data attribute
+
+			if thread.Title != "" && thread.URL != "" {
+				allThreads = append(allThreads, thread)
+				threadsOnPage++
+			}
+		})
+
+		log.Printf("Found %d threads on page %d (total so far: %d)", threadsOnPage, currentPage, len(allThreads))
+
+		// Check if there's a next page
+		hasNextPage := false
+		if doc.Find(".pageNav-jump--next").Length() > 0 {
+			hasNextPage = true
+		}
+
+		if !hasNextPage || threadsOnPage == 0 {
+			log.Printf("No more pages to scrape. Total threads found: %d", len(allThreads))
+			break
+		}
+
+		currentPage++
+		time.Sleep(2 * time.Second) // Be respectful to the server
+	}
+
+	return allThreads, nil
+}
+
+// ScrapeForumAndSaveAll scrapes all threads from a forum and saves them with full content
+// Uses concurrent workers for significantly faster scraping
+func (s *ScraperService) ScrapeForumAndSaveAll(forumURL string) error {
+	// Create activity log for tracking
+	activity, err := s.activityService.StartTask("forum_scrape", fmt.Sprintf("Scraping forum: %s", forumURL), map[string]interface{}{
+		"forum_url": forumURL,
+	})
+	if err != nil {
+		log.Printf("Failed to create activity log: %v", err)
+	}
+
+	log.Printf("Starting multi-threaded forum scrape: %s", forumURL)
+
+	// First, get all thread URLs from the forum listing
+	if activity != nil {
+		s.activityService.UpdateProgress(activity.ID, 5, "Scanning forum pages for threads...")
+	}
+
+	threads, err := s.ScrapeForumCategory(forumURL)
+	if err != nil {
+		if activity != nil {
+			s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape forum category: %v", err))
+		}
+		return fmt.Errorf("failed to scrape forum category: %w", err)
+	}
+
+	totalThreads := len(threads)
+	log.Printf("Found %d threads to scrape sequentially", totalThreads)
+	if activity != nil {
+		s.activityService.UpdateProgress(activity.ID, 10, fmt.Sprintf("Found %d threads. Starting sequential scrape...", totalThreads))
+	}
+
+	// Sequential scraping with rate limiting
+	successCount := 0
+	errorCount := 0
+
+	for i, threadInfo := range threads {
+		log.Printf("Scraping thread %d/%d: %s", i+1, totalThreads, threadInfo.Title)
+
+		err := s.ScrapeThreadComplete(threadInfo.URL)
+
+		if err != nil {
+			log.Printf("Error scraping thread %s: %v", threadInfo.URL, err)
+			errorCount++
+		} else {
+			successCount++
+		}
+
+		// Update progress
+		if activity != nil {
+			progress := 10 + (85 * (i + 1) / totalThreads)
+			s.activityService.UpdateProgress(activity.ID, progress,
+				fmt.Sprintf("Scraped %d/%d threads (Success: %d, Errors: %d)", i+1, totalThreads, successCount, errorCount))
+		}
+
+		// Delay to avoid rate limiting (3 seconds between threads)
+		if i < totalThreads-1 { // Don't delay after the last thread
+			time.Sleep(3 * time.Second)
+		}
+	}
+
+	log.Printf("Multi-threaded forum scrape complete. Success: %d, Errors: %d", successCount, errorCount)
+
+	if activity != nil {
+		s.activityService.CompleteTask(int64(activity.ID),
+			fmt.Sprintf("Forum scrape complete. Success: %d, Errors: %d", successCount, errorCount))
+	}
+
+	// Notify AI Companion about completion
+	if s.aiCompanionService != nil {
+		// Trigger auto-link after forum scrape
+		go func() {
+			time.Sleep(2 * time.Second)
+			log.Println("🤖 Auto-linking threads to performers...")
+			if err := s.AutoLinkThreadsToPerformers(); err != nil {
+				log.Printf("Error in auto-link: %v", err)
+			}
+		}()
+	}
+
+	return nil
+}
+
+// Known tags to extract from titles
+var knownTags = []string{
+	"XXX", "OnlyFans", "BBW", "T H I C C", "MILF", "Petite",
+	"Teen", "Asian", "Indian", "Ebony", "Latina", "Feet", "Retired",
+}
+
+// ExtractTagsFromTitle extracts known tags from thread title
+func (s *ScraperService) ExtractTagsFromTitle(title string) []string {
+	var extractedTags []string
+	titleUpper := strings.ToUpper(title)
+
+	for _, tag := range knownTags {
+		// Case-insensitive search
+		tagUpper := strings.ToUpper(tag)
+		if strings.Contains(titleUpper, tagUpper) {
+			// Add tag if not already in list
+			if !contains(extractedTags, tag) {
+				extractedTags = append(extractedTags, tag)
+			}
+		}
+	}
+
+	return extractedTags
+}
+
+// CleanTitleFromTags removes known tags from title and cleans it up
+func (s *ScraperService) CleanTitleFromTags(title string) string {
+	cleanedTitle := title
+
+	// Remove tags (case-insensitive)
+	for _, tag := range knownTags {
+		// Try various bracket formats: [TAG], (TAG), {TAG}
+		patterns := []string{
+			fmt.Sprintf("[%s]", tag),
+			fmt.Sprintf("(%s)", tag),
+			fmt.Sprintf("{%s}", tag),
+			fmt.Sprintf("【%s】", tag), // Japanese brackets
+		}
+
+		for _, pattern := range patterns {
+			// Case-insensitive replacement
+			re := regexp.MustCompile(`(?i)` + regexp.QuoteMeta(pattern))
+			cleanedTitle = re.ReplaceAllString(cleanedTitle, "")
+		}
+
+		// Also remove standalone tags with spaces
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(tag) + `\b`)
+		cleanedTitle = re.ReplaceAllString(cleanedTitle, "")
+	}
+
+	// Clean up multiple spaces, dashes, and pipes
+	cleanedTitle = regexp.MustCompile(`\s+`).ReplaceAllString(cleanedTitle, " ")
+	cleanedTitle = regexp.MustCompile(`\s*[-|]\s*$`).ReplaceAllString(cleanedTitle, "")
+	cleanedTitle = regexp.MustCompile(`^\s*[-|]\s*`).ReplaceAllString(cleanedTitle, "")
+	cleanedTitle = strings.TrimSpace(cleanedTitle)
+
+	return cleanedTitle
+}
+
+// ExtractPerformerNameFromTitle extracts potential performer name from thread title
+func (s *ScraperService) ExtractPerformerNameFromTitle(title string) []string {
+	// First, clean the title from tags
+	cleanedTitle := s.CleanTitleFromTags(title)
+
+	// Common patterns for performer threads:
+	// "Performer Name - Title"
+	// "[Performer Name]"
+	// "Performer Name | something"
+	// "Performer Name (aka Other Name)"
+
+	var names []string
+
+	// Remove common prefixes
+	cleanedTitle = strings.TrimSpace(cleanedTitle)
+
+	// Pattern 1: Text before dash
+	if strings.Contains(cleanedTitle, " - ") {
+		parts := strings.Split(cleanedTitle, " - ")
+		name := strings.TrimSpace(parts[0])
+		// Remove brackets if present
+		name = strings.Trim(name, "[]")
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+
+	// Pattern 2: Text in brackets
+	bracketRegex := regexp.MustCompile(`\[(.*?)\]`)
+	matches := bracketRegex.FindAllStringSubmatch(cleanedTitle, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			name := strings.TrimSpace(match[1])
+			if name != "" && !contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+
+	// Pattern 3: Text before pipe
+	if strings.Contains(cleanedTitle, " | ") {
+		parts := strings.Split(cleanedTitle, " | ")
+		name := strings.TrimSpace(parts[0])
+		name = strings.Trim(name, "[]")
+		if name != "" && !contains(names, name) {
+			names = append(names, name)
+		}
+	}
+
+	// Pattern 4: Extract aka names
+	akaRegex := regexp.MustCompile(`\(aka\s+(.*?)\)`)
+	matches = akaRegex.FindAllStringSubmatch(cleanedTitle, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			name := strings.TrimSpace(match[1])
+			if name != "" && !contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+
+	return names
+}
+
+// contains checks if a string slice contains a string
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
+}
+
+// LinkThreadToPerformer creates a link between a scraped thread and a performer
+func (s *ScraperService) LinkThreadToPerformer(threadID int64, performerID int64, confidence float64) error {
+	_, err := s.db.Exec(`
+		INSERT INTO performer_scraped_threads (performer_id, thread_id, confidence)
+		VALUES (?, ?, ?)
+		ON CONFLICT(performer_id, thread_id) DO UPDATE SET confidence = ?
+	`, performerID, threadID, confidence, confidence)
+
+	if err != nil {
+		return fmt.Errorf("failed to link thread to performer: %w", err)
+	}
+
+	return nil
+}
+
+// FindOrCreatePerformer finds an existing performer by name or creates a new one
+func (s *ScraperService) FindOrCreatePerformer(name string) (int64, error) {
+	// First, try to find existing performer (case-insensitive)
+	var performerID int64
+	err := s.db.QueryRow(`
+		SELECT id FROM performers WHERE LOWER(name) = LOWER(?)
+	`, name).Scan(&performerID)
+
+	if err == nil {
+		// Found existing performer
+		return performerID, nil
+	}
+
+	if err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to query performer: %w", err)
+	}
+
+	// Create new performer
+	result, err := s.db.Exec(`
+		INSERT INTO performers (name, category, metadata, created_at, updated_at)
+		VALUES (?, 'regular', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, name)
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to create performer: %w", err)
+	}
+
+	performerID, err = result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get performer ID: %w", err)
+	}
+
+	log.Printf("Created new performer: %s (ID: %d)", name, performerID)
+	return performerID, nil
+}
+
+// GetThreadsByPerformer retrieves all scraped threads linked to a performer
+func (s *ScraperService) GetThreadsByPerformer(performerID int64) ([]*models.ScrapedThread, error) {
+	query := `
+		SELECT
+			t.id, t.external_id, t.source, t.title, t.url, t.author, t.category,
+			t.view_count, t.reply_count, t.post_count, t.download_count,
+			t.metadata, t.first_scraped_at, t.last_scraped_at, t.last_updated_at, t.created_at
+		FROM scraped_threads t
+		INNER JOIN performer_scraped_threads pt ON t.id = pt.thread_id
+		WHERE pt.performer_id = ?
+		ORDER BY t.last_scraped_at DESC
+	`
+
+	rows, err := s.db.Query(query, performerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query threads: %w", err)
+	}
+	defer rows.Close()
+
+	var threads []*models.ScrapedThread
+	for rows.Next() {
+		thread := &models.ScrapedThread{}
+		err := rows.Scan(
+			&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title, &thread.URL,
+			&thread.Author, &thread.Category, &thread.ViewCount, &thread.ReplyCount,
+			&thread.PostCount, &thread.DownloadCount, &thread.Metadata,
+			&thread.FirstScrapedAt, &thread.LastScrapedAt, &thread.LastUpdatedAt, &thread.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan thread: %w", err)
+		}
+
+		// Unmarshal metadata
+		thread.UnmarshalMetadata()
+		threads = append(threads, thread)
+	}
+
+	return threads, nil
+}
+
+// CheckLinkStatus checks if a download link is still active
+func (s *ScraperService) CheckLinkStatus(linkURL string) string {
+	// Create HEAD request to check if link is alive
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return nil // Allow redirects
+		},
+	}
+
+	req, err := http.NewRequest("HEAD", linkURL, nil)
+	if err != nil {
+		return "unknown"
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// Network error or timeout
+		return "dead"
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return "active"
+	} else if resp.StatusCode == 404 || resp.StatusCode == 410 {
+		return "dead"
+	} else if resp.StatusCode == 403 || resp.StatusCode == 401 {
+		return "restricted"
+	} else if resp.StatusCode >= 500 {
+		return "unavailable"
+	}
+
+	return "unknown"
+}
+
+// CheckAllLinkStatuses checks the status of all download links
+func (s *ScraperService) CheckAllLinkStatuses() error {
+	query := `SELECT id, url FROM scraped_download_links WHERE status != 'dead'`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return fmt.Errorf("failed to query links: %w", err)
+	}
+	defer rows.Close()
+
+	checkedCount := 0
+	deadCount := 0
+
+	for rows.Next() {
+		var linkID int64
+		var linkURL string
+
+		if err := rows.Scan(&linkID, &linkURL); err != nil {
+			continue
+		}
+
+		// Check link status
+		status := s.CheckLinkStatus(linkURL)
+
+		// Update database
+		_, err := s.db.Exec(`
+			UPDATE scraped_download_links
+			SET status = ?, last_checked_at = CURRENT_TIMESTAMP
+			WHERE id = ?
+		`, status, linkID)
+
+		if err != nil {
+			log.Printf("Error updating link status: %v", err)
+			continue
+		}
+
+		checkedCount++
+		if status == "dead" {
+			deadCount++
+		}
+
+		// Rate limit: wait 1 second between checks
+		time.Sleep(1 * time.Second)
+
+		// Log progress every 10 links
+		if checkedCount%10 == 0 {
+			log.Printf("Checked %d links, found %d dead", checkedCount, deadCount)
+		}
+	}
+
+	log.Printf("Link status check complete. Checked: %d, Dead: %d", checkedCount, deadCount)
+	return nil
+}
+
+// AutoLinkThreadsToPerformers automatically links threads to performers based on title matching
+func (s *ScraperService) AutoLinkThreadsToPerformers() error {
+	// Get all threads (using a large limit to get all threads)
+	threads, _, err := s.GetAllThreads(10000, 0, "", "", "")
+	if err != nil {
+		return fmt.Errorf("failed to get threads: %w", err)
+	}
+
+	linkedCount := 0
+	for _, thread := range threads {
+		// Extract performer names from title
+		performerNames := s.ExtractPerformerNameFromTitle(thread.Title)
+
+		for _, name := range performerNames {
+			// Find or create performer
+			performerID, err := s.FindOrCreatePerformer(name)
+			if err != nil {
+				log.Printf("Error finding/creating performer %s: %v", name, err)
+				continue
+			}
+
+			// Link thread to performer
+			err = s.LinkThreadToPerformer(thread.ID, performerID, 0.8) // 0.8 confidence for auto-linking
+			if err != nil {
+				log.Printf("Error linking thread %d to performer %d: %v", thread.ID, performerID, err)
+				continue
+			}
+
+			linkedCount++
+			log.Printf("Linked thread '%s' to performer '%s'", thread.Title, name)
+		}
+	}
+
+	log.Printf("Auto-linked %d thread-performer relationships", linkedCount)
+	return nil
+}
+
+// DeleteThreads deletes multiple threads by their IDs
+func (s *ScraperService) DeleteThreads(threadIDs []int64) error {
+	if len(threadIDs) == 0 {
+		return fmt.Errorf("no thread IDs provided")
+	}
+
+	// Start a transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete download links for these threads
+	placeholders := make([]string, len(threadIDs))
+	args := make([]interface{}, len(threadIDs))
+	for i, id := range threadIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf("DELETE FROM scraped_download_links WHERE thread_id IN (%s)", strings.Join(placeholders, ","))
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete download links: %w", err)
+	}
+
+	// Delete posts for these threads
+	query = fmt.Sprintf("DELETE FROM scraped_posts WHERE thread_id IN (%s)", strings.Join(placeholders, ","))
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete posts: %w", err)
+	}
+
+	// Delete performer-thread links
+	query = fmt.Sprintf("DELETE FROM performer_scraped_threads WHERE thread_id IN (%s)", strings.Join(placeholders, ","))
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete performer links: %w", err)
+	}
+
+	// Delete the threads themselves
+	query = fmt.Sprintf("DELETE FROM scraped_threads WHERE id IN (%s)", strings.Join(placeholders, ","))
+	_, err = tx.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete threads: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Printf("Successfully deleted %d threads", len(threadIDs))
+	return nil
+}
+
+// DeleteAllThreads deletes all scraped threads from the database
+func (s *ScraperService) DeleteAllThreads() error {
+	// Start a transaction
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete all download links
+	_, err = tx.Exec("DELETE FROM scraped_download_links")
+	if err != nil {
+		return fmt.Errorf("failed to delete download links: %w", err)
+	}
+
+	// Delete all posts
+	_, err = tx.Exec("DELETE FROM scraped_posts")
+	if err != nil {
+		return fmt.Errorf("failed to delete posts: %w", err)
+	}
+
+	// Delete all performer-thread links
+	_, err = tx.Exec("DELETE FROM performer_scraped_threads")
+	if err != nil {
+		return fmt.Errorf("failed to delete performer links: %w", err)
+	}
+
+	// Delete all threads
+	_, err = tx.Exec("DELETE FROM scraped_threads")
+	if err != nil {
+		return fmt.Errorf("failed to delete threads: %w", err)
+	}
+
+	// Commit the transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	log.Println("Successfully deleted all scraped threads")
+	return nil
+}

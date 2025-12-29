@@ -1,24 +1,25 @@
 package models
 
 import (
+	"database/sql"
 	"encoding/json"
 	"time"
 )
 
 // Performer represents a performer in the database
 type Performer struct {
-	ID             int64       `json:"id"`
-	Name           string      `json:"name"`
-	PreviewPath    string      `json:"preview_path"`
-	ThumbnailPath  string      `json:"thumbnail_path"` // Static thumbnail from preview video
-	FolderPath     string      `json:"folder_path"`
-	VideoCount     int         `json:"video_count"` // Number of videos linked to this performer
-	Category       string      `json:"category" db:"category"` // 'regular', 'zoo', or '3d'
-	Metadata       string      `json:"-"` // Raw JSON from DB
+	ID             int64              `json:"id"`
+	Name           string             `json:"name"`
+	PreviewPath    sql.NullString     `json:"preview_path" db:"preview_path"`
+	ThumbnailPath  sql.NullString     `json:"thumbnail_path" db:"thumbnail_path"` // Static thumbnail from preview video
+	FolderPath     sql.NullString     `json:"folder_path" db:"folder_path"`
+	VideoCount     int                `json:"video_count"` // Number of videos linked to this performer
+	Category       string             `json:"category" db:"category"` // 'regular', 'zoo', or '3d'
+	Metadata       string             `json:"-"` // Raw JSON from DB
 	MetadataObj    *PerformerMetadata `json:"metadata,omitempty"`
-	CreatedAt      time.Time   `json:"created_at"`
-	UpdatedAt      time.Time   `json:"updated_at"`
-	IsLCPCandidate bool        `json:"is_lcp_candidate,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
+	IsLCPCandidate bool               `json:"is_lcp_candidate,omitempty"`
 }
 
 // PerformerCreate represents the data needed to create a new performer
@@ -76,4 +77,20 @@ func (p *Performer) MarshalMetadata() error {
 	bytes, err := json.Marshal(p.MetadataObj)
 	p.Metadata = string(bytes)
 	return err
+}
+
+// MarshalJSON provides custom JSON marshaling to handle sql.NullString fields
+func (p *Performer) MarshalJSON() ([]byte, error) {
+	type Alias Performer
+	return json.Marshal(&struct {
+		PreviewPath   string `json:"preview_path"`
+		ThumbnailPath string `json:"thumbnail_path"`
+		FolderPath    string `json:"folder_path"`
+		*Alias
+	}{
+		PreviewPath:   p.PreviewPath.String,
+		ThumbnailPath: p.ThumbnailPath.String,
+		FolderPath:    p.FolderPath.String,
+		Alias:         (*Alias)(p),
+	})
 }

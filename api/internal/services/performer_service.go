@@ -131,8 +131,8 @@ func (s *PerformerService) Create(create *models.PerformerCreate) (*models.Perfo
 	// Prepare performer
 	performer := &models.Performer{
 		Name:        create.Name,
-		PreviewPath: create.PreviewPath,
-		FolderPath:  create.FolderPath,
+		PreviewPath: sql.NullString{String: create.PreviewPath, Valid: create.PreviewPath != ""},
+		FolderPath:  sql.NullString{String: create.FolderPath, Valid: create.FolderPath != ""},
 		VideoCount:  0,
 		MetadataObj: create.Metadata,
 		CreatedAt:   time.Now(),
@@ -186,13 +186,13 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 		performer.Name = *update.Name
 	}
 	if update.PreviewPath != nil {
-		performer.PreviewPath = *update.PreviewPath
+		performer.PreviewPath = sql.NullString{String: *update.PreviewPath, Valid: *update.PreviewPath != ""}
 	}
 	if update.ThumbnailPath != nil {
-		performer.ThumbnailPath = *update.ThumbnailPath
+		performer.ThumbnailPath = sql.NullString{String: *update.ThumbnailPath, Valid: *update.ThumbnailPath != ""}
 	}
 	if update.FolderPath != nil {
-		performer.FolderPath = *update.FolderPath
+		performer.FolderPath = sql.NullString{String: *update.FolderPath, Valid: *update.FolderPath != ""}
 	}
 	if update.Category != nil {
 		performer.Category = *update.Category

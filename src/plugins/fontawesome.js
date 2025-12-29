@@ -113,6 +113,19 @@ import {
 	faCloudDownloadAlt,
 	faUndo,
 	faCircle,
+	faSpider,
+	faComments,
+	faCommentDots,
+	faLink,
+	faChartPie,
+	faServer,
+	faInbox,
+	faKey,
+	faComment,
+	faTerminal,
+	faClone,
+	faLightbulb,
+	faMicrophone,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -238,7 +251,20 @@ library.add(
 	faFileImageSolid,
 	faArrowRight,
 	faCloudDownloadAlt,
-	faUndo
+	faUndo,
+	faSpider,
+	faComments,
+	faCommentDots,
+	faLink,
+	faChartPie,
+	faServer,
+	faInbox,
+	faKey,
+	faComment,
+	faTerminal,
+	faClone,
+	faLightbulb,
+	faMicrophone
 )
 
 export default FontAwesomeIcon

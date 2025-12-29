@@ -59,7 +59,7 @@ func (s *ScannerService) ScanPerformerDirectory(baseDir string) (*ScanResult, er
 		existing, _ := s.performerService.GetByName(performerName)
 		if existing != nil {
 			// Update folder path if needed
-			if existing.FolderPath != performerPath {
+			if existing.FolderPath.String != performerPath {
 				update := &models.PerformerUpdate{
 					FolderPath: &performerPath,
 				}

@@ -80,8 +80,8 @@ func (s *PerformerScanService) ScanPerformerFolders() (*PerformerScanResult, err
 		if err == nil && existingPerformer != nil {
 			result.Existing++
 			// Performer exists, update folder path if needed
-			if existingPerformer.FolderPath != folderPath {
-				existingPerformer.FolderPath = folderPath
+			if existingPerformer.FolderPath.String != folderPath {
+				existingPerformer.FolderPath = sql.NullString{String: folderPath, Valid: folderPath != ""}
 				_, updateErr := s.performerService.Update(existingPerformer.ID, &models.PerformerUpdate{
 					FolderPath: &folderPath,
 				})
@@ -176,7 +176,7 @@ func (s *PerformerScanService) findPrimaryPreview(folderPath string) string {
 
 // GetPerformerPreviews returns all preview videos for a performer
 func (s *PerformerScanService) GetPerformerPreviews(performer *models.Performer) ([]string, error) {
-	if performer.FolderPath == "" {
+	if !performer.FolderPath.Valid || performer.FolderPath.String == "" {
 		return []string{}, nil
 	}
 
@@ -184,7 +184,7 @@ func (s *PerformerScanService) GetPerformerPreviews(performer *models.Performer)
 	previews := []string{}
 
 	// Walk the performer's folder and find all videos
-	err := filepath.WalkDir(performer.FolderPath, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(performer.FolderPath.String, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}

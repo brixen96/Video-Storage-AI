@@ -138,6 +138,16 @@ export const activityAPI = {
 	clearAll: () => api.post('/activity/clear-all'),
 }
 
+export const consoleLogAPI = {
+	getAll: (params) => api.get('/console-logs', { params }), // Get all console logs with filters (source, level, search, page, limit)
+	getStats: () => api.get('/console-logs/stats'), // Get console log statistics
+	getById: (id) => api.get(`/console-logs/${id}`), // Get single console log
+	create: (data) => api.post('/console-logs', data), // Create a new console log (source, level, message, details)
+	delete: (id) => api.delete(`/console-logs/${id}`), // Delete a console log
+	clearAll: () => api.post('/console-logs/clear'), // Clear all console logs
+	cleanOld: (days = 30) => api.post('/console-logs/clean', null, { params: { days } }), // Clean old console logs
+}
+
 export const databaseAPI = {
 	getStats: () => api.get('/database/stats'),
 	optimize: () => api.post('/database/optimize'),

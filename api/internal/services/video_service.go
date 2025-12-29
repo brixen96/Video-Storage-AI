@@ -608,11 +608,25 @@ func (s *VideoService) Delete(id int64) error {
 
 // ScanLibrary scans a library for video files
 func (s *VideoService) ScanLibrary(libraryID int64) error {
+	// Initialize console log service
+	consoleLogSvc := NewConsoleLogService()
+
 	// Get library
 	library, err := s.libraryService.GetByID(libraryID)
 	if err != nil {
+		consoleLogSvc.LogAPI("error", "Failed to get library for scan", map[string]interface{}{
+			"library_id": libraryID,
+			"error":      err.Error(),
+		})
 		return fmt.Errorf("library not found: %w", err)
 	}
+
+	// Log scan start
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Library scan started: %s", library.Name), map[string]interface{}{
+		"library_id":   libraryID,
+		"library_name": library.Name,
+		"library_path": library.Path,
+	})
 
 	// Create activity log
 	activity, err := s.activityService.StartTask(
@@ -625,12 +639,22 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 		},
 	)
 	if err != nil {
+		consoleLogSvc.LogAPI("error", "Failed to create activity log for library scan", map[string]interface{}{
+			"library_id": libraryID,
+			"error":      err.Error(),
+		})
 		return fmt.Errorf("failed to create activity log: %w", err)
 	}
 
 	// Scan for video files
 	videoFiles, err := s.findVideoFiles(library.Path)
 	if err != nil {
+		consoleLogSvc.LogAPI("error", "Failed to scan directory for videos", map[string]interface{}{
+			"library_id":   libraryID,
+			"library_name": library.Name,
+			"library_path": library.Path,
+			"error":        err.Error(),
+		})
 		if err := s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scan directory: %v", err)); err != nil {
 			log.Printf("Failed to fail task: %v", err)
 		}
@@ -638,6 +662,11 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	}
 
 	total := len(videoFiles)
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Found %d video files in library: %s", total, library.Name), map[string]interface{}{
+		"library_id":     libraryID,
+		"library_name":   library.Name,
+		"total_files":    total,
+	})
 	if err := s.activityService.UpdateProgress(activity.ID, 0, fmt.Sprintf("Found %d video files", total)); err != nil {
 		log.Printf("Failed to update progress: %v", err)
 	}
@@ -789,6 +818,15 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	wg.Wait()
 	log.Println("All thumbnail generation workers completed")
 
+	// Log scan completion
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Library scan completed: %s", library.Name), map[string]interface{}{
+		"library_id":     libraryID,
+		"library_name":   library.Name,
+		"total_files":    total,
+		"videos_added":   added,
+		"videos_skipped": skipped,
+	})
+
 	// Complete activity
 	_ = s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan complete: %d videos added, %d skipped", added, skipped))
 
@@ -799,16 +837,30 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error {
 	log.Println("Starting parallel library scan with drive-aware optimization...")
 
+	// Initialize console log service
+	consoleLogSvc := NewConsoleLogService()
+
 	// Get all libraries
 	libraries, err := s.libraryService.GetAll()
 	if err != nil {
+		consoleLogSvc.LogAPI("error", "Failed to get libraries for parallel scan", map[string]interface{}{
+			"error": err.Error(),
+		})
 		return fmt.Errorf("failed to get libraries: %w", err)
 	}
 
 	if len(libraries) == 0 {
 		log.Println("No libraries found to scan")
+		consoleLogSvc.LogAPI("warning", "No libraries found to scan", nil)
 		return nil
 	}
+
+	// Log parallel scan start
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Starting parallel scan of %d libraries", len(libraries)), map[string]interface{}{
+		"library_count":         len(libraries),
+		"server_max_concurrent": config.ServerMaxConcurrent,
+		"local_max_concurrent":  config.LocalMaxConcurrent,
+	})
 
 	// Create overall activity log for the entire parallel scan
 	activity, err := s.activityService.StartTask(
@@ -899,6 +951,13 @@ func (s *VideoService) ScanAllLibrariesParallel(config ParallelScanConfig) error
 	wg.Wait()
 	close(done)
 	log.Println("All parallel library scans completed")
+
+	// Log parallel scan completion
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Parallel scan completed: %d libraries", len(libraries)), map[string]interface{}{
+		"library_count":    len(libraries),
+		"server_libraries": len(serverLibraries),
+		"local_libraries":  len(localLibraries),
+	})
 
 	// Complete activity
 	if activity != nil {

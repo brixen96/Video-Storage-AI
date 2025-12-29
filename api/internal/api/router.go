@@ -103,6 +103,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			performers.GET("/:id/previews", getPerformerPreviews)   // Get all preview videos
 			performers.GET("/:id/tags", getPerformerTags)           // Get performer master tags
 			performers.GET("/:id/videos", getPerformerVideos)       // Get videos featuring performer
+			performers.GET("/:id/scraped-threads", getThreadsByPerformer) // Get scraped threads for performer
 			performers.POST("", createPerformer)                    // Create performer
 			performers.POST("/scan", scanPerformers)                // Scan performer folders
 			performers.POST("/generate-thumbnails", generatePerformerThumbnails) // Generate thumbnails for all performers
@@ -209,6 +210,41 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.GET("/memories/search", searchAIMemories)     // Search memories
 			ai.PUT("/memories/:id", updateAIMemory)          // Update memory
 			ai.DELETE("/memories/:id", deleteAIMemory)       // Delete memory
+		}
+
+		// Scraper endpoints
+		scraper := v1.Group("/scraper")
+		{
+			scraper.GET("/stats", getScraperStats)                 // Get scraper statistics
+			scraper.GET("/threads", getScrapedThreads)             // List all scraped threads
+			scraper.GET("/threads/search", searchScrapedThreads)   // Search threads
+			scraper.GET("/threads/:id", getScrapedThread)          // Get single thread
+			scraper.POST("/threads/scrape", scrapeThread)          // Scrape a thread
+			scraper.POST("/threads/:id/rescrape", rescrapeThread)  // Rescrape an existing thread
+			scraper.DELETE("/threads/:id", deleteThread)           // Delete a thread
+			scraper.DELETE("/threads", deleteMultipleThreads)      // Delete multiple threads
+			scraper.DELETE("/threads/all", deleteAllThreads)       // Delete all threads
+			scraper.POST("/session", setSessionCookie)             // Set session cookie for authentication
+			scraper.GET("/session", getSessionCookie)              // Get session cookie status
+
+			// Forum scraping endpoints
+			scraper.POST("/forum/scrape-listing", scrapeForumCategory)     // Scrape forum category listing (get all thread URLs)
+			scraper.POST("/forum/scrape-all", scrapeForumAndSaveAll)       // Scrape entire forum with full content
+			scraper.POST("/performers/auto-link", autoLinkThreadsToPerformers) // Auto-link threads to performers
+			scraper.POST("/performers/link", linkThreadToPerformer)        // Manually link thread to performer
+			scraper.POST("/links/check-status", checkLinkStatuses)         // Check all download link statuses
+		}
+
+		// Console Logs endpoints
+		consoleLogs := v1.Group("/console-logs")
+		{
+			consoleLogs.GET("", getConsoleLogs)              // Get all console logs with filters
+			consoleLogs.GET("/stats", getConsoleLogStats)    // Get console log statistics
+			consoleLogs.GET("/:id", getConsoleLog)           // Get single console log
+			consoleLogs.POST("", createConsoleLog)           // Create a new console log
+			consoleLogs.DELETE("/:id", deleteConsoleLog)     // Delete a console log
+			consoleLogs.POST("/clear", clearConsoleLogs)     // Clear all console logs
+			consoleLogs.POST("/clean", cleanOldConsoleLogs)  // Clean old console logs
 		}
 
 		// WebSocket endpoint

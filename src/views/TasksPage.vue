@@ -9,33 +9,6 @@
 				<p class="text-light">Real-time task monitoring with instant feedback</p>
 			</div>
 
-			<!-- Active Tasks Monitor - ULTRA HIGH PRIORITY -->
-			<div v-if="activeTasks.length > 0" class="active-tasks-monitor mb-4">
-				<h5 class="section-title mb-3">
-					<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-					Active Tasks ({{ activeTasks.length }})
-				</h5>
-				<div class="row g-3">
-					<div v-for="task in activeTasks" :key="task.id" class="col-md-6">
-						<div class="card task-progress-card">
-							<div class="card-body">
-								<div class="d-flex justify-content-between align-items-start mb-2">
-									<h6 class="mb-0">{{ task.message }}</h6>
-									<span class="badge bg-primary">{{ task.status }}</span>
-								</div>
-								<div class="progress mb-2" style="height: 8px">
-									<div class="progress-bar progress-bar-striped progress-bar-animated" :style="{ width: task.progress + '%' }" role="progressbar"></div>
-								</div>
-								<div class="d-flex justify-content-between">
-									<small class="text-light">{{ task.progress }}%</small>
-									<small class="text-light">{{ formatTaskType(task.task_type) }}</small>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-
 			<!-- Task Categories -->
 			<div class="row g-3">
 				<!-- Library Tasks -->
@@ -242,6 +215,79 @@
 					</div>
 				</div>
 			</div>
+
+			<!-- Database Operations -->
+			<div class="row g-3 mt-3">
+				<div class="col-12">
+					<div class="card task-card">
+						<div class="card-header">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'tools']" class="me-2" />
+								Database Operations
+							</h5>
+						</div>
+						<div class="card-body">
+							<div class="row g-3">
+								<!-- Optimize Database -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Optimize Database</h6>
+											<p class="text-light mb-0">Run VACUUM to optimize database performance and reclaim space</p>
+										</div>
+										<button class="btn btn-primary mt-3" @click="optimizeDatabase" :disabled="isDbOperationRunning">
+											<font-awesome-icon :icon="['fas', isDbOperationRunning ? 'spinner' : 'wrench']" :spin="isDbOperationRunning" class="me-2" />
+											{{ isDbOperationRunning ? 'Optimizing...' : 'Optimize Database' }}
+										</button>
+									</div>
+								</div>
+
+								<!-- Backup Database -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Backup Database</h6>
+											<p class="text-light mb-0">Create a backup of the entire database</p>
+										</div>
+										<button class="btn btn-success mt-3" @click="backupDatabase" :disabled="isDbOperationRunning">
+											<font-awesome-icon :icon="['fas', isDbOperationRunning ? 'spinner' : 'save']" :spin="isDbOperationRunning" class="me-2" />
+											{{ isDbOperationRunning ? 'Backing Up...' : 'Backup Database' }}
+										</button>
+									</div>
+								</div>
+
+								<!-- Restore Database -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Restore Database</h6>
+											<p class="text-light mb-0">Restore database from a backup file</p>
+										</div>
+										<button class="btn btn-warning mt-3" @click="restoreDatabase" :disabled="isDbOperationRunning">
+											<font-awesome-icon :icon="['fas', isDbOperationRunning ? 'spinner' : 'upload']" :spin="isDbOperationRunning" class="me-2" />
+											{{ isDbOperationRunning ? 'Restoring...' : 'Restore Database' }}
+										</button>
+									</div>
+								</div>
+
+								<!-- Clear All Activities -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Clear All Activity Logs</h6>
+											<p class="text-light mb-0">Delete all activity logs from the database</p>
+										</div>
+										<button class="btn btn-danger mt-3" @click="clearAllActivities" :disabled="isDbOperationRunning">
+											<font-awesome-icon :icon="['fas', isDbOperationRunning ? 'spinner' : 'trash']" :spin="isDbOperationRunning" class="me-2" />
+											{{ isDbOperationRunning ? 'Clearing...' : 'Clear All Activity Logs' }}
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
@@ -262,6 +308,7 @@ export default {
 				tagCount: 0,
 			},
 			wsUnsubscribe: null,
+			isDbOperationRunning: false,
 		}
 	},
 	mounted() {
@@ -462,6 +509,137 @@ export default {
 			} catch (error) {
 				console.error('Failed to fetch metadata:', error)
 				this.$toast.error('Fetch Failed', error.response?.data?.error || 'Failed to start metadata fetch')
+			}
+		},
+
+		async optimizeDatabase() {
+			if (!confirm('Optimize database? This will run VACUUM to reclaim space and improve performance. The application may be briefly unavailable.')) {
+				return
+			}
+
+			this.isDbOperationRunning = true
+			try {
+				const response = await databaseAPI.optimize()
+
+				if (response.status === 200) {
+					this.$toast.success('Database Optimized', 'Database has been successfully optimized!')
+					await this.loadDatabaseInfo()
+				}
+			} catch (error) {
+				console.error('Failed to optimize database:', error)
+				this.$toast.error('Optimization Failed', error.response?.data?.error || 'Failed to optimize database')
+			} finally {
+				this.isDbOperationRunning = false
+			}
+		},
+
+		async backupDatabase() {
+			if (!confirm('Create a database backup? This will create a timestamped backup file.')) {
+				return
+			}
+
+			this.isDbOperationRunning = true
+			try {
+				const response = await databaseAPI.backup()
+
+				if (response.status === 200) {
+					const backupPath = response.data.backup_path || 'backup created'
+					this.$toast.success('Backup Created', `Database backup created: ${backupPath}`)
+				}
+			} catch (error) {
+				console.error('Failed to backup database:', error)
+				this.$toast.error('Backup Failed', error.response?.data?.error || 'Failed to create database backup')
+			} finally {
+				this.isDbOperationRunning = false
+			}
+		},
+
+		async restoreDatabase() {
+			// First, get list of available backups
+			this.isDbOperationRunning = true
+			try {
+				const backupsResponse = await databaseAPI.listBackups()
+				const backups = backupsResponse.data.backups || []
+
+				if (backups.length === 0) {
+					this.$toast.warning('No Backups Found', 'No backup files available to restore from')
+					this.isDbOperationRunning = false
+					return
+				}
+
+				// Show backup selection dialog
+				const backupList = backups.map((b, i) => `${i + 1}. ${b.name} (${b.size}, ${b.created_at})`).join('\n')
+				const selection = prompt(`Select a backup to restore:\n\n${backupList}\n\nEnter the number (1-${backups.length}):`)
+
+				if (!selection) {
+					this.isDbOperationRunning = false
+					return
+				}
+
+				const index = parseInt(selection) - 1
+				if (isNaN(index) || index < 0 || index >= backups.length) {
+					this.$toast.error('Invalid Selection', 'Please enter a valid backup number')
+					this.isDbOperationRunning = false
+					return
+				}
+
+				const selectedBackup = backups[index]
+
+				if (!confirm(`Restore from backup: ${selectedBackup.name}?\n\nWARNING: This will replace the current database. This action cannot be undone!`)) {
+					this.isDbOperationRunning = false
+					return
+				}
+
+				const response = await databaseAPI.restore({ backup_path: selectedBackup.path })
+
+				if (response.status === 200) {
+					this.$toast.success('Database Restored', `Database has been restored from ${selectedBackup.name}`)
+					await this.loadDatabaseInfo()
+					// Reload the page to refresh all data
+					setTimeout(() => {
+						window.location.reload()
+					}, 2000)
+				}
+			} catch (error) {
+				console.error('Failed to restore database:', error)
+				this.$toast.error('Restore Failed', error.response?.data?.error || 'Failed to restore database')
+			} finally {
+				this.isDbOperationRunning = false
+			}
+		},
+
+		async clearAllActivities() {
+			if (!confirm('Delete ALL activity logs? This will permanently remove all activity history from the database. This action cannot be undone!')) {
+				return
+			}
+
+			// Double confirmation for destructive action
+			if (!confirm('Are you ABSOLUTELY sure? This will delete ALL activity logs permanently.')) {
+				return
+			}
+
+			this.isDbOperationRunning = true
+			try {
+				const response = await fetch('http://localhost:8080/api/v1/activity/clear-all', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+				})
+
+				const data = await response.json()
+
+				if (response.ok) {
+					this.$toast.success('Activities Cleared', `Successfully deleted ${data.deleted_count || 'all'} activity logs`)
+					await this.loadDatabaseInfo()
+				} else {
+					throw new Error(data.error || 'Failed to clear activities')
+				}
+			} catch (error) {
+				console.error('Failed to clear activities:', error)
+				this.$toast.error('Clear Failed', error.message || 'Failed to clear activity logs')
+			} finally {
+				this.isDbOperationRunning = false
 			}
 		},
 	},

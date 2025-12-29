@@ -120,14 +120,14 @@ func (s *PerformerThumbnailService) GenerateThumbnailForPerformer(performerID in
 	}
 
 	// Check if performer has a preview video
-	if performer.PreviewPath == "" {
+	if !performer.PreviewPath.Valid || performer.PreviewPath.String == "" {
 		return "", nil // Skip performers without preview videos
 	}
 
 	// Convert preview path URL to filesystem path
 	// PreviewPath is like "/assets/performers/Name/preview.mp4"
 	// Remove "/assets/" prefix and join with assetsBaseDir
-	previewPath := performer.PreviewPath
+	previewPath := performer.PreviewPath.String
 	if len(previewPath) > 8 && previewPath[:8] == "/assets/" {
 		previewPath = previewPath[8:] // Remove "/assets/" prefix
 	}
@@ -270,7 +270,7 @@ func (ps *PerformerService) UpdateWithThumbnailCheck(id int64, update *models.Pe
 		return nil, err
 	}
 
-	oldPreviewPath := current.PreviewPath
+	oldPreviewPath := current.PreviewPath.String
 
 	// Perform the update
 	performer, err := ps.Update(id, update)

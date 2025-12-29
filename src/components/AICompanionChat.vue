@@ -22,7 +22,13 @@
 						</div>
 					</div>
 					<div class="chat-header-actions">
-						<button class="btn-header-action" @click="minimizeChat" title="Minimize">
+						<button class="btn-header-action" @click="toggleSearch" title="Search Messages">
+						<font-awesome-icon :icon="['fas', 'search']" />
+					</button>
+					<button class="btn-header-action" @click="exportChat" title="Export Chat">
+						<font-awesome-icon :icon="['fas', 'download']" />
+					</button>
+					<button class="btn-header-action" @click="minimizeChat" title="Minimize">
 							<font-awesome-icon :icon="['fas', 'minus']" />
 						</button>
 						<button class="btn-header-action" @click="closeChat" title="Close">
@@ -31,15 +37,64 @@
 					</div>
 				</div>
 
+		<!-- Search Bar -->
+		<transition name="slide-down">
+			<div v-if="showSearch" class="search-bar">
+				<div class="search-input-group">
+					<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
+					<input
+						ref="searchInput"
+						v-model="searchQuery"
+						type="text"
+						class="search-input"
+						placeholder="Search messages..."
+						@keyup.esc="clearSearch"
+					/>
+					<button v-if="searchQuery" class="btn-clear-search" @click="clearSearch">
+						<font-awesome-icon :icon="['fas', 'times']" />
+					</button>
+				</div>
+				<div v-if="searchQuery" class="search-results-info">
+					Found {{ filteredMessageCount }} message(s)
+				</div>
+			</div>
+		</transition>
+
 				<!-- Chat Messages -->
 				<div class="chat-messages" ref="chatMessages">
-					<div v-for="(message, index) in chatHistory" :key="index" class="chat-message" :class="message.role">
+					<!-- Suggested Prompts (shown when empty) -->
+					<div v-if="chatHistory.length === 0 && !isCompanionThinking" class="suggested-prompts">
+						<div class="suggested-header">
+							<h5>💡 Try asking me:</h5>
+						</div>
+						<div class="prompt-grid">
+							<button v-for="prompt in suggestedPrompts" :key="prompt.text" class="prompt-card" @click="askQuickQuestion(prompt.text)">
+								<div class="prompt-icon">
+									<font-awesome-icon :icon="prompt.icon" />
+								</div>
+								<div class="prompt-text">{{ prompt.text }}</div>
+							</button>
+						</div>
+					</div>
+
+					<!-- Chat Messages -->
+					<div v-for="(message, index) in displayedMessages" :key="index" class="chat-message" :class="message.role">
 						<div class="message-avatar">
 							<font-awesome-icon :icon="['fas', message.role === 'user' ? 'user' : 'robot']" />
 						</div>
 						<div class="message-content">
-							<div class="message-text">{{ message.content }}</div>
+							<div class="message-text">
+								<!-- Use plain text for user messages -->
+								<template v-if="message.role === 'user'">{{ message.content }}</template>
+								<!-- Use markdown rendering for AI responses -->
+								<MarkdownMessage v-else :content="message.content" />
+							</div>
+							<div class="message-footer">
 							<div class="message-time">{{ formatMessageTime(message.timestamp) }}</div>
+							<button class="btn-copy-message" @click="copyMessage(message.content)" title="Copy message">
+								<font-awesome-icon :icon="['fas', 'copy']" />
+							</button>
+						</div>
 						</div>
 					</div>
 					<div v-if="isCompanionThinking" class="chat-message assistant thinking">
@@ -58,8 +113,70 @@
 					</div>
 				</div>
 
+			<!-- Statistics Panel -->
+			<transition name="slide-down">
+				<div v-if="showStats && chatHistory.length > 0" class="stats-panel">
+					<div class="stats-header">
+						<h6>📊 Conversation Stats</h6>
+						<button class="btn-close-stats" @click="showStats = false">
+							<font-awesome-icon :icon="['fas', 'times']" />
+						</button>
+					</div>
+					<div class="stats-grid">
+						<div class="stat-item">
+							<div class="stat-icon">
+								<font-awesome-icon :icon="['fas', 'comments']" />
+							</div>
+							<div class="stat-details">
+								<div class="stat-value">{{ chatStats.totalMessages }}</div>
+								<div class="stat-label">Total Messages</div>
+							</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-icon user">
+								<font-awesome-icon :icon="['fas', 'user']" />
+							</div>
+							<div class="stat-details">
+								<div class="stat-value">{{ chatStats.userMessages }}</div>
+								<div class="stat-label">Your Questions</div>
+							</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-icon ai">
+								<font-awesome-icon :icon="['fas', 'robot']" />
+							</div>
+							<div class="stat-details">
+								<div class="stat-value">{{ chatStats.aiMessages }}</div>
+								<div class="stat-label">AI Responses</div>
+							</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-icon">
+								<font-awesome-icon :icon="['fas', 'clock']" />
+							</div>
+							<div class="stat-details">
+								<div class="stat-value">{{ chatStats.sessionDuration }}</div>
+								<div class="stat-label">Session Time</div>
+							</div>
+						</div>
+						<div class="stat-item">
+							<div class="stat-icon">
+								<font-awesome-icon :icon="['fas', 'text-width']" />
+							</div>
+							<div class="stat-details">
+								<div class="stat-value">{{ chatStats.avgMessageLength }}</div>
+								<div class="stat-label">Avg Length</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</transition>
+
 				<!-- Quick Actions -->
 				<div class="quick-actions-bar">
+					<button class="btn-quick-action" @click="showStats = !showStats" :class="{ 'active': showStats }" title="Toggle Stats">
+						<font-awesome-icon :icon="['fas', 'chart-line']" />
+					</button>
 					<button class="btn-quick-action" @click="askQuickQuestion('How many videos do I have?')" title="Library Stats">
 						<font-awesome-icon :icon="['fas', 'chart-bar']" />
 					</button>
@@ -68,6 +185,15 @@
 					</button>
 					<button class="btn-quick-action" @click="askQuickQuestion('Show me videos with issues')" title="Issues">
 						<font-awesome-icon :icon="['fas', 'exclamation-triangle']" />
+					</button>
+					<button class="btn-quick-action" @click="askQuickQuestion('Find duplicates in my library')" title="Find Duplicates">
+						<font-awesome-icon :icon="['fas', 'clone']" />
+					</button>
+					<button class="btn-quick-action" @click="askQuickQuestion('Suggest tags for untagged videos')" title="Smart Tagging">
+						<font-awesome-icon :icon="['fas', 'tags']" />
+					</button>
+					<button class="btn-quick-action" @click="askQuickQuestion('Show library insights')" title="AI Insights">
+						<font-awesome-icon :icon="['fas', 'lightbulb']" />
 					</button>
 					<button class="btn-quick-action btn-danger" @click="clearChatHistory" title="Clear Chat">
 						<font-awesome-icon :icon="['fas', 'trash']" />
@@ -85,6 +211,10 @@
 							@keyup.enter="sendCompanionMessage"
 							:disabled="isCompanionThinking"
 						/>
+						<button class="btn btn-voice-input" @click="toggleVoiceInput" :class="{ 'listening': isListening }" :disabled="isCompanionThinking" title="Voice Input">
+							<font-awesome-icon :icon="['fas', isListening ? 'stop' : 'microphone']" />
+							<span v-if="isListening" class="listening-pulse"></span>
+						</button>
 						<button class="btn btn-primary" @click="sendCompanionMessage" :disabled="isCompanionThinking || !companionInput.trim()">
 							<font-awesome-icon :icon="['fas', isCompanionThinking ? 'spinner' : 'paper-plane']" :spin="isCompanionThinking" />
 						</button>
@@ -96,9 +226,10 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, getCurrentInstance } from 'vue'
+import { ref, computed, nextTick, onMounted, getCurrentInstance } from 'vue'
 import { aiCompanionAPI } from '@/services/api'
 import { toolDefinitions, executeTool } from '@/services/aiTools'
+import MarkdownMessage from './MarkdownMessage.vue'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -111,6 +242,104 @@ const isCompanionThinking = ref(false)
 const companionConnected = ref(false)
 const chatMessages = ref(null)
 const hasNewMessage = ref(false)
+const showSearch = ref(false)
+const searchQuery = ref('')
+const searchInput = ref(null)
+const filteredMessageCount = ref(0)
+const isListening = ref(false)
+const recognition = ref(null)
+const typingText = ref('')
+const isTyping = ref(false)
+const showStats = ref(false)
+
+// Conversation statistics
+const chatStats = computed(() => {
+	const totalMessages = chatHistory.value.length
+	const userMessages = chatHistory.value.filter(m => m.role === 'user').length
+	const aiMessages = chatHistory.value.filter(m => m.role === 'assistant').length
+	const avgMessageLength = totalMessages > 0
+		? Math.round(chatHistory.value.reduce((sum, m) => sum + m.content.length, 0) / totalMessages)
+		: 0
+
+	// Calculate session duration if there are messages
+	let sessionDuration = 'N/A'
+	if (totalMessages > 0) {
+		const firstMessage = chatHistory.value[0].timestamp
+		const lastMessage = chatHistory.value[totalMessages - 1].timestamp
+		const diffMs = new Date(lastMessage) - new Date(firstMessage)
+		const diffMins = Math.floor(diffMs / 60000)
+		if (diffMins < 60) {
+			sessionDuration = `${diffMins}m`
+		} else {
+			const hours = Math.floor(diffMins / 60)
+			const mins = diffMins % 60
+			sessionDuration = `${hours}h ${mins}m`
+		}
+	}
+
+	return {
+		totalMessages,
+		userMessages,
+		aiMessages,
+		avgMessageLength,
+		sessionDuration
+	}
+})
+
+// eslint-disable-next-line no-unused-vars
+const displayedMessages = computed(() => {
+	if (!searchQuery.value) return chatHistory.value
+
+	const query = searchQuery.value.toLowerCase()
+	const filtered = chatHistory.value.map((msg, index) => ({
+		...msg,
+		highlighted: msg.content.toLowerCase().includes(query),
+		originalIndex: index
+	})).filter(msg => msg.highlighted)
+
+	// eslint-disable-next-line vue/no-async-in-computed-properties
+	setTimeout(() => {
+		filteredMessageCount.value = filtered.length
+	}, 0)
+
+	return filtered.length > 0 ? filtered : chatHistory.value
+})
+
+// Suggested prompts for new users
+const suggestedPrompts = ref([
+	{
+		text: 'How many videos do I have?',
+		icon: ['fas', 'video'],
+	},
+	{
+		text: 'Show library health score',
+		icon: ['fas', 'heart'],
+	},
+	{
+		text: 'Predict library growth',
+		icon: ['fas', 'chart-line'],
+	},
+	{
+		text: 'Find duplicates',
+		icon: ['fas', 'copy'],
+	},
+	{
+		text: 'Performer quality analysis',
+		icon: ['fas', 'star'],
+	},
+	{
+		text: 'Show insights',
+		icon: ['fas', 'lightbulb'],
+	},
+	{
+		text: 'Check for errors',
+		icon: ['fas', 'exclamation-triangle'],
+	},
+	{
+		text: 'What are my top performers?',
+		icon: ['fas', 'users'],
+	},
+])
 
 // Load chat history from localStorage
 const loadChatHistory = () => {
@@ -408,6 +637,155 @@ const clearChatHistory = () => {
 	}
 }
 
+// Search functions
+// eslint-disable-next-line no-unused-vars
+const toggleSearch = async () => {
+	showSearch.value = !showSearch.value
+	if (showSearch.value) {
+		await nextTick()
+		searchInput.value?.focus()
+	} else {
+		clearSearch()
+	}
+}
+
+// eslint-disable-next-line no-unused-vars
+const filterMessages = () => {
+	// The computed property handles this automatically
+}
+
+const clearSearch = () => {
+	searchQuery.value = ''
+	filteredMessageCount.value = 0
+}
+
+// Export chat
+// eslint-disable-next-line no-unused-vars
+const exportChat = () => {
+	const chatData = {
+		exported_at: new Date().toISOString(),
+		message_count: chatHistory.value.length,
+		messages: chatHistory.value,
+	}
+
+	const dataStr = JSON.stringify(chatData, null, 2)
+	const dataBlob = new Blob([dataStr], { type: 'application/json' })
+	const url = URL.createObjectURL(dataBlob)
+
+	const link = document.createElement('a')
+	link.href = url
+	link.download = `ai-companion-chat-${new Date().toISOString().split('T')[0]}.json`
+	link.click()
+
+	URL.revokeObjectURL(url)
+	toast.success('Chat Exported', 'Your conversation has been exported successfully')
+}
+
+// Copy message
+// eslint-disable-next-line no-unused-vars
+const copyMessage = async (content) => {
+	try {
+		await navigator.clipboard.writeText(content)
+		toast.success('Copied!', 'Message copied to clipboard')
+	} catch (err) {
+		console.error('Failed to copy:', err)
+		toast.error('Copy Failed', 'Could not copy message to clipboard')
+	}
+}
+
+// Regenerate response
+// eslint-disable-next-line no-unused-vars
+const regenerateResponse = async (index) => {
+	if (index < 1) return // Need at least one user message before this
+
+	// Find the user message that triggered this response
+	const userMessageIndex = index - 1
+	if (userMessageIndex < 0 || chatHistory.value[userMessageIndex].role !== 'user') return
+
+	// Remove the old response
+	chatHistory.value.splice(index, 1)
+
+	// Resend the user message
+	companionInput.value = chatHistory.value[userMessageIndex].content
+	// Remove the user message too so it doesn't duplicate
+	chatHistory.value.splice(userMessageIndex, 1)
+
+	// Send again
+	await sendCompanionMessage()
+}
+
+// Voice input functions
+const initSpeechRecognition = () => {
+	if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+		const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+		recognition.value = new SpeechRecognition()
+		recognition.value.continuous = false
+		recognition.value.interimResults = true
+		recognition.value.lang = 'en-US'
+
+		recognition.value.onstart = () => {
+			isListening.value = true
+			companionInput.value = ''
+		}
+
+		recognition.value.onresult = (event) => {
+			const transcript = Array.from(event.results)
+				.map(result => result[0])
+				.map(result => result.transcript)
+				.join('')
+
+			companionInput.value = transcript
+
+			// If result is final, send the message
+			if (event.results[0].isFinal) {
+				sendCompanionMessage()
+			}
+		}
+
+		recognition.value.onerror = (event) => {
+			console.error('Speech recognition error:', event.error)
+			isListening.value = false
+			toast.error('Voice Input Error', `Could not recognize speech: ${event.error}`)
+		}
+
+		recognition.value.onend = () => {
+			isListening.value = false
+		}
+	}
+}
+
+const toggleVoiceInput = () => {
+	if (!recognition.value) {
+		initSpeechRecognition()
+	}
+
+	if (!recognition.value) {
+		toast.error('Not Supported', 'Voice input is not supported in your browser')
+		return
+	}
+
+	if (isListening.value) {
+		recognition.value.stop()
+	} else {
+		recognition.value.start()
+	}
+}
+
+// Typing animation for AI responses
+// eslint-disable-next-line no-unused-vars
+const typeMessage = async (message, speed = 30) => {
+	isTyping.value = true
+	typingText.value = ''
+
+	for (let i = 0; i < message.length; i++) {
+		typingText.value += message[i]
+		await new Promise(resolve => setTimeout(resolve, speed))
+	}
+
+	isTyping.value = false
+	return message
+}
+
 const formatMessageTime = (timestamp) => {
 	const date = new Date(timestamp)
 	return date.toLocaleTimeString('en-US', {
@@ -433,8 +811,25 @@ onMounted(async () => {
 	if (companionConnected.value && chatHistory.value.length === 0) {
 		chatHistory.value.push({
 			role: 'assistant',
-			content:
-				"Hello! I'm your AI Companion - the intelligent core of Video Storage AI. I can query your database, analyze your library, find performers, and monitor for issues. I'm here to help manage and optimize your video collection. What would you like to know?",
+			content: `# 👋 Hello! I'm your AI Companion
+
+I'm the **intelligent core** of Video Storage AI with advanced capabilities:
+
+## 🎯 What I Can Do:
+- 📊 **Analyze** your video library health and statistics
+- 🔍 **Find** duplicates, performers, and specific content
+- 📈 **Predict** library growth and provide insights
+- ⭐ **Evaluate** performer quality and metadata completeness
+- 🚨 **Monitor** for errors and issues
+- 💡 **Suggest** optimizations and improvements
+
+## 🧠 Smart Features:
+- **Markdown Support** - I can format responses beautifully
+- **Code Highlighting** - Share code snippets with syntax colors
+- **Memory System** - I remember our conversations
+- **Real-time Data** - All answers are from your actual database
+
+Try one of the suggested prompts above, or ask me anything about your library!`,
 			timestamp: new Date(),
 		})
 		saveChatHistory()
@@ -753,10 +1148,33 @@ onMounted(async () => {
 	padding: 0.75rem;
 	background: rgba(0, 0, 0, 0.3);
 	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(0, 217, 255, 0.5) rgba(0, 0, 0, 0.2);
+}
+
+.quick-actions-bar::-webkit-scrollbar {
+	height: 6px;
+}
+
+.quick-actions-bar::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 3px;
+}
+
+.quick-actions-bar::-webkit-scrollbar-thumb {
+	background: rgba(0, 217, 255, 0.5);
+	border-radius: 3px;
+}
+
+.quick-actions-bar::-webkit-scrollbar-thumb:hover {
+	background: rgba(0, 217, 255, 0.7);
 }
 
 .btn-quick-action {
-	flex: 1;
+	flex: 0 0 auto;
+	min-width: 2.5rem;
 	background: rgba(0, 217, 255, 0.1);
 	border: 1px solid rgba(0, 217, 255, 0.3);
 	color: #00d9ff;
@@ -837,6 +1255,345 @@ onMounted(async () => {
 .chat-input-container .btn-primary:disabled {
 	background: rgba(108, 117, 125, 0.5);
 	opacity: 0.6;
+}
+
+/* Voice Input Button */
+.btn-voice-input {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	padding: 0.65rem 1rem;
+	margin-right: 0.5rem;
+	font-weight: 600;
+	color: #00d9ff;
+	transition: all 0.3s ease;
+	position: relative;
+	overflow: visible;
+}
+
+.btn-voice-input:hover:not(:disabled) {
+	background: rgba(0, 217, 255, 0.2);
+	border-color: #00d9ff;
+	transform: scale(1.05);
+}
+
+.btn-voice-input:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.btn-voice-input.listening {
+	background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+	border-color: #ff4444;
+	color: #fff;
+	animation: pulse-glow 2s infinite;
+}
+
+.listening-pulse {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: 100%;
+	height: 100%;
+	border-radius: 0.375rem;
+	background: rgba(255, 68, 68, 0.4);
+	animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+	pointer-events: none;
+}
+
+@keyframes pulse-glow {
+	0%, 100% {
+		box-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+	}
+	50% {
+		box-shadow: 0 0 20px rgba(255, 68, 68, 0.8);
+	}
+}
+
+@keyframes pulse-ring {
+	0% {
+		transform: translate(-50%, -50%) scale(0.8);
+		opacity: 1;
+	}
+	100% {
+		transform: translate(-50%, -50%) scale(1.5);
+		opacity: 0;
+	}
+}
+
+/* Search Bar */
+.search-bar {
+	background: rgba(0, 0, 0, 0.2);
+	padding: 1rem;
+	border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+}
+
+.search-input-group {
+	display: flex;
+	align-items: center;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	border-radius: 0.5rem;
+	padding: 0.5rem 1rem;
+	gap: 0.75rem;
+}
+
+.search-icon {
+	color: #00d9ff;
+	font-size: 1rem;
+}
+
+.search-input {
+	flex: 1;
+	background: transparent;
+	border: none;
+	color: #fff;
+	font-size: 0.95rem;
+	outline: none;
+}
+
+.search-input::placeholder {
+	color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-clear-search {
+	background: transparent;
+	border: none;
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	padding: 0.25rem;
+	transition: color 0.2s ease;
+}
+
+.btn-clear-search:hover {
+	color: #ff4444;
+}
+
+.search-results-info {
+	margin-top: 0.5rem;
+	font-size: 0.85rem;
+	color: #00d9ff;
+	text-align: center;
+}
+
+.slide-down-enter-active, .slide-down-leave-active {
+	transition: all 0.3s ease;
+}
+
+.slide-down-enter-from, .slide-down-leave-to {
+	max-height: 0;
+	opacity: 0;
+	overflow: hidden;
+}
+
+.slide-down-enter-to, .slide-down-leave-from {
+	max-height: 200px;
+	opacity: 1;
+}
+
+/* Statistics Panel */
+.stats-panel {
+	background: linear-gradient(135deg, rgba(0, 217, 255, 0.1) 0%, rgba(0, 153, 204, 0.1) 100%);
+	border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+	padding: 1rem;
+}
+
+.stats-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 1rem;
+}
+
+.stats-header h6 {
+	margin: 0;
+	color: #00d9ff;
+	font-size: 0.95rem;
+	font-weight: 600;
+}
+
+.btn-close-stats {
+	background: transparent;
+	border: none;
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	padding: 0.25rem;
+	transition: color 0.2s ease;
+}
+
+.btn-close-stats:hover {
+	color: #ff4444;
+}
+
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	gap: 0.75rem;
+}
+
+.stat-item {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	background: rgba(0, 0, 0, 0.3);
+	padding: 0.75rem;
+	border-radius: 0.5rem;
+	border: 1px solid rgba(0, 217, 255, 0.2);
+	transition: all 0.3s ease;
+}
+
+.stat-item:hover {
+	background: rgba(0, 0, 0, 0.4);
+	border-color: #00d9ff;
+	transform: translateY(-2px);
+}
+
+.stat-icon {
+	width: 2.5rem;
+	height: 2.5rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: linear-gradient(135deg, #00d9ff 0%, #0099cc 100%);
+	border-radius: 0.5rem;
+	color: #fff;
+	font-size: 1.1rem;
+	flex-shrink: 0;
+}
+
+.stat-icon.user {
+	background: linear-gradient(135deg, #00ff88 0%, #00cc66 100%);
+}
+
+.stat-icon.ai {
+	background: linear-gradient(135deg, #ff00ff 0%, #cc00cc 100%);
+}
+
+.stat-details {
+	flex: 1;
+	min-width: 0;
+}
+
+.stat-value {
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: #fff;
+	line-height: 1.2;
+}
+
+.stat-label {
+	font-size: 0.75rem;
+	color: rgba(255, 255, 255, 0.6);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.btn-quick-action.active {
+	background: linear-gradient(135deg, #00d9ff 0%, #0099cc 100%);
+	border-color: #00d9ff;
+	color: #fff;
+}
+
+/* Message Footer with Copy Button */
+.message-footer {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-top: 0.25rem;
+}
+
+.btn-copy-message {
+	background: transparent;
+	border: none;
+	color: rgba(255, 255, 255, 0.4);
+	cursor: pointer;
+	padding: 0.25rem 0.5rem;
+	font-size: 0.85rem;
+	transition: all 0.2s ease;
+	opacity: 0;
+}
+
+.chat-message:hover .btn-copy-message {
+	opacity: 1;
+}
+
+.btn-copy-message:hover {
+	color: #00d9ff;
+	transform: scale(1.1);
+}
+
+/* Suggested Prompts */
+.suggested-prompts {
+	padding: 1.5rem 1rem;
+	animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.suggested-header h5 {
+	margin: 0 0 1rem 0;
+	color: #00d9ff;
+	font-size: 1rem;
+	font-weight: 600;
+	text-align: center;
+}
+
+.prompt-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 0.75rem;
+}
+
+.prompt-card {
+	background: rgba(0, 217, 255, 0.1);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	border-radius: 10px;
+	padding: 0.85rem;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+	text-align: center;
+}
+
+.prompt-card:hover {
+	background: rgba(0, 217, 255, 0.2);
+	border-color: #00d9ff;
+	transform: translateY(-3px);
+	box-shadow: 0 4px 12px rgba(0, 217, 255, 0.3);
+}
+
+.prompt-icon {
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	background: linear-gradient(135deg, #00d9ff 0%, #0099cc 100%);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #fff;
+	font-size: 1rem;
+}
+
+.prompt-text {
+	font-size: 0.8rem;
+	color: rgba(255, 255, 255, 0.9);
+	font-weight: 500;
+	line-height: 1.3;
 }
 
 /* Scrollbar */

@@ -66,6 +66,16 @@ const routes = [
 		name: 'EditList',
 		component: () => import(/* webpackChunkName: "edit-list" */ '@/views/EditListPage.vue'),
 	},
+	{
+		path: '/scraper',
+		name: 'Scraper',
+		component: () => import(/* webpackChunkName: "scraper" */ '@/views/ScraperPage.vue'),
+	},
+	{
+		path: '/scraper/:id',
+		name: 'ScraperThread',
+		component: () => import(/* webpackChunkName: "scraper-thread" */ '@/views/ScraperThreadPage.vue'),
+	},
 ]
 
 const router = createRouter({
