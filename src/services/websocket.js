@@ -11,25 +11,20 @@ class WebSocketService {
 
 	connect() {
 		if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-			console.log('WebSocket already connected or connecting')
 			return
 		}
 
 		if (this.isConnecting) {
-			console.log('Connection attempt already in progress')
 			return
 		}
 
 		this.isConnecting = true
 		const wsUrl = `ws://localhost:8080/api/v1/ws`
 
-		console.log('Connecting to WebSocket:', wsUrl)
-
 		try {
 			this.ws = new WebSocket(wsUrl)
 
 			this.ws.onopen = () => {
-				console.log('WebSocket connected')
 				this.reconnectAttempts = 0
 				this.isConnecting = false
 				this.notifyListeners('connected', { connected: true })
@@ -40,32 +35,27 @@ class WebSocketService {
 					const message = JSON.parse(event.data)
 					this.handleMessage(message)
 				} catch (error) {
-					console.error('Failed to parse WebSocket message:', error)
+					// Silently handle parse errors
 				}
 			}
 
-			this.ws.onerror = (error) => {
-				console.error('WebSocket error:', error)
+			this.ws.onerror = () => {
 				this.isConnecting = false
 			}
 
 			this.ws.onclose = (event) => {
-				console.log('WebSocket closed:', event.code, event.reason)
 				this.isConnecting = false
 				this.notifyListeners('connected', { connected: false })
 
 				// Attempt to reconnect if not a normal closure and we should reconnect
 				if (this.shouldReconnect && event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
 					this.reconnectAttempts++
-					console.log(`Reconnecting... Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`)
 					setTimeout(() => this.connect(), this.reconnectDelay)
 				} else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-					console.error('Max reconnection attempts reached')
 					this.notifyListeners('error', { message: 'Failed to connect to server' })
 				}
 			}
 		} catch (error) {
-			console.error('Failed to create WebSocket:', error)
 			this.isConnecting = false
 		}
 	}
@@ -88,8 +78,11 @@ class WebSocketService {
 			case 'status_update':
 				this.notifyListeners('status_update', data)
 				break
+			case 'console_log':
+				this.notifyListeners('console_log', data)
+				break
 			default:
-				console.log('Unknown message type:', type)
+				// Silently ignore unknown message types
 		}
 	}
 
@@ -125,7 +118,7 @@ class WebSocketService {
 				try {
 					callback(data)
 				} catch (error) {
-					console.error('Error in WebSocket listener:', error)
+					// Silently handle listener errors
 				}
 			})
 		}

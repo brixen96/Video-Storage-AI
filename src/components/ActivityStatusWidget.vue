@@ -3,6 +3,7 @@
 		<div class="status-indicator" @click="toggleDetails" :class="statusColor">
 			<div class="status-dot"></div>
 			<span class="status-label">{{ statusLabel }}</span>
+			<span v-if="status.running_tasks > 0" class="badge bg-warning text-dark ms-2">{{ status.running_tasks }}</span>
 			<span v-if="wsConnected" class="ws-indicator" title="Real-time updates active">
 				<i class="bi bi-broadcast"></i>
 			</span>

@@ -16,8 +16,14 @@ import (
 // DB is the global database instance
 var DB *sql.DB
 
+// dbPath stores the path to the database file
+var dbPath string
+
 // Initialize sets up the database connection and creates tables
 func Initialize(cfg *config.Config) error {
+	// Store the database path
+	dbPath = cfg.Database.Path
+
 	// Ensure the database directory exists
 	dbDir := filepath.Dir(cfg.Database.Path)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
@@ -60,6 +66,11 @@ func Initialize(cfg *config.Config) error {
 // GetDB returns the database instance
 func GetDB() *sql.DB {
 	return DB
+}
+
+// GetDBPath returns the database file path
+func GetDBPath() string {
+	return dbPath
 }
 
 // Close closes the database connection

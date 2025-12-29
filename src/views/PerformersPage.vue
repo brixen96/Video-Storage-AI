@@ -219,7 +219,11 @@
 						</div>
 
 						<!-- Category Badge -->
-						<div v-if="performer.category && performer.category !== 'regular'" :class="['category-badge', 'category-' + performer.category]" :title="getCategoryName(performer.category)">
+						<div
+							v-if="performer.category && performer.category !== 'regular'"
+							:class="['category-badge', 'category-' + performer.category]"
+							:title="getCategoryName(performer.category)"
+						>
 							<font-awesome-icon :icon="['fas', getCategoryIcon(performer.category)]" />
 						</div>
 					</div>
@@ -291,7 +295,12 @@
 					<div class="list-content">
 						<h5 class="performer-name">
 							{{ performer.name }}
-							<font-awesome-icon v-if="performer.category && performer.category !== 'regular'" :icon="['fas', getCategoryIcon(performer.category)]" :class="['category-icon', 'ms-2', 'category-' + performer.category]" :title="getCategoryName(performer.category)" />
+							<font-awesome-icon
+								v-if="performer.category && performer.category !== 'regular'"
+								:icon="['fas', getCategoryIcon(performer.category)]"
+								:class="['category-icon', 'ms-2', 'category-' + performer.category]"
+								:title="getCategoryName(performer.category)"
+							/>
 						</h5>
 						<div class="performer-details">
 							<span v-if="getAge(performer)" class="detail-item">Age: {{ getAge(performer) }}</span>
@@ -444,7 +453,9 @@
 								</div>
 								<div v-if="detailsPanel.performer.category" class="metadata-item full-width">
 									<span class="metadata-label">Category:</span>
-									<span :class="['metadata-value', 'category-badge', 'category-' + detailsPanel.performer.category]">{{ getCategoryName(detailsPanel.performer.category) }}</span>
+									<span :class="['metadata-value', 'category-badge', 'category-' + detailsPanel.performer.category]">{{
+										getCategoryName(detailsPanel.performer.category)
+									}}</span>
 								</div>
 							</div>
 						</div>
@@ -569,19 +580,9 @@
 						<!-- Videos Tab -->
 						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'videos' }]">
 							<div v-if="detailsPanel.performerVideos.length > 0" class="videos-grid">
-								<div
-									v-for="video in detailsPanel.performerVideos"
-									:key="video.id"
-									class="video-item"
-									@click="openVideo(video)"
-								>
+								<div v-for="video in detailsPanel.performerVideos" :key="video.id" class="video-item" @click="openVideo(video)">
 									<div class="video-thumbnail">
-										<img
-											v-if="video.thumbnail_path"
-											:src="`http://localhost:8080/assets/${video.thumbnail_path}`"
-											:alt="video.title"
-											loading="lazy"
-										/>
+										<img v-if="video.thumbnail_path" :src="`http://localhost:8080/assets/${video.thumbnail_path}`" :alt="video.title" loading="lazy" />
 										<div v-else class="no-thumbnail">
 											<font-awesome-icon :icon="['fas', 'film']" size="2x" />
 										</div>
@@ -878,13 +879,11 @@ export default {
 			const performerCategory = this.detailsPanel.performer.category || 'regular'
 
 			if (!Array.isArray(this.performerMasterTags)) {
-				return (this.allTags || []).filter(tag => tag.category === performerCategory)
+				return (this.allTags || []).filter((tag) => tag.category === performerCategory)
 			}
 
 			const assignedTagIds = new Set(this.performerMasterTags.map((t) => t.id))
-			return (this.allTags || []).filter((tag) =>
-				tag.category === performerCategory && !assignedTagIds.has(tag.id)
-			)
+			return (this.allTags || []).filter((tag) => tag.category === performerCategory && !assignedTagIds.has(tag.id))
 		},
 	},
 	methods: {
@@ -942,7 +941,7 @@ export default {
 			this.$nextTick(() => {
 				const videoRef = this.$refs[`video-${performer.id}`]
 				if (videoRef && videoRef[0]) {
-					videoRef[0].play().catch(err => {
+					videoRef[0].play().catch((err) => {
 						// Ignore play errors (can happen if video not loaded yet)
 						console.debug('Video play error:', err)
 					})
@@ -997,7 +996,6 @@ export default {
 				this.performers = [] // Ensure it's always an array even on error
 			} finally {
 				this.loading = false
-				console.log(this.performers)
 			}
 		},
 

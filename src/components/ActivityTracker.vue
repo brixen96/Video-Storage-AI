@@ -22,6 +22,7 @@
 
 <script>
 import { activityAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 export default {
 	name: 'ActivityTracker',
@@ -29,19 +30,27 @@ export default {
 		return {
 			activities: [],
 			expanded: true,
-			pollInterval: null,
+			unsubscribeActivity: null,
 		}
 	},
 	mounted() {
+		// Initial fetch
 		this.fetchActivities()
-		// Poll every 3 seconds for updates
-		this.pollInterval = setInterval(() => {
-			this.fetchActivities()
-		}, 3000)
+
+		// Subscribe to WebSocket updates instead of polling
+		this.unsubscribeActivity = websocketService.on('activity_update', (data) => {
+			this.handleActivityUpdate(data)
+		})
+
+		// Connect WebSocket if not already connected
+		if (!websocketService.isConnected()) {
+			websocketService.connect()
+		}
 	},
 	beforeUnmount() {
-		if (this.pollInterval) {
-			clearInterval(this.pollInterval)
+		// Unsubscribe from WebSocket
+		if (this.unsubscribeActivity) {
+			this.unsubscribeActivity()
 		}
 	},
 	methods: {
@@ -50,7 +59,22 @@ export default {
 				const response = await activityAPI.getAll({ status: 'running' })
 				this.activities = response.data || []
 			} catch (error) {
-				console.error('Failed to fetch activities:', error)
+				// Silently fail - WebSocket will provide updates
+			}
+		},
+		handleActivityUpdate(data) {
+			// Handle real-time activity updates from WebSocket
+			if (data.status === 'running') {
+				// Add or update activity
+				const index = this.activities.findIndex(a => a.id === data.id)
+				if (index >= 0) {
+					this.activities[index] = data
+				} else {
+					this.activities.push(data)
+				}
+			} else {
+				// Remove completed/failed activities
+				this.activities = this.activities.filter(a => a.id !== data.id)
 			}
 		},
 		toggleExpanded() {

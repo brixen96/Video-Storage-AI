@@ -23,53 +23,44 @@
 
 			<!-- Content -->
 			<div v-else-if="performer" class="performer-content">
-				<!-- Header -->
-				<div class="page-header mb-4">
-					<div class="header-content">
-						<div class="d-flex align-items-center gap-4">
-							<!-- Video Avatar Preview -->
-							<div class="performer-avatar" @mouseenter="hoveredAvatar = true" @mouseleave="hoveredAvatar = false">
-								<!-- Static Thumbnail (shown when not hovered) -->
-								<img
-									v-show="!hoveredAvatar"
-									v-if="performer.thumbnail_path"
-									:key="`thumb-${performer.id}`"
-									:src="getAssetURL(performer.thumbnail_path)"
-									:alt="performer.name"
-									class="avatar-image"
-								/>
-								<!-- Video Preview (shown on hover) -->
-								<video
-									v-show="hoveredAvatar"
-									v-if="performer.preview_path"
-									:key="`video-${performer.id}`"
-									:src="getAssetURL(performer.preview_path)"
-									autoplay
-									loop
-									muted
-									playsinline
-									class="avatar-video"
-								></video>
-								<!-- Placeholder (shown when no thumbnail and not hovered) -->
-								<div v-if="!performer.thumbnail_path && !performer.preview_path" class="avatar-placeholder">
-									<font-awesome-icon :icon="['fas', 'user']" size="4x" />
-								</div>
+				<!-- Hero Section -->
+				<div class="performer-hero">
+					<div class="hero-content">
+						<!-- Large Avatar -->
+						<div class="performer-avatar" @mouseenter="startAvatarVideo" @mouseleave="stopAvatarVideo">
+							<video
+								v-if="performer.preview_path"
+								ref="avatarVideo"
+								:key="`video-${performer.id}`"
+								:src="getAssetURL(performer.preview_path)"
+								loop
+								muted
+								playsinline
+								autoplay
+								class="avatar-video"
+								:poster="performer.thumbnail_path ? getAssetURL(performer.thumbnail_path) : ''"
+							></video>
+							<div v-else class="avatar-placeholder">
+								<font-awesome-icon :icon="['fas', 'user']" size="4x" />
 								<button class="btn-generate-thumbnail" @click="generateThumbnail" :disabled="generatingThumbnail" title="Generate Thumbnail">
 									<font-awesome-icon :icon="['fas', generatingThumbnail ? 'spinner' : 'camera']" :spin="generatingThumbnail" />
 								</button>
 							</div>
+						</div>
 
-							<!-- Basic Info -->
-							<div class="flex-grow-1">
-								<div class="d-flex align-items-center gap-3 mb-2">
-									<h1 class="mb-0">{{ performer.name }}</h1>
-									<button class="btn btn-sm btn-outline-light" @click="editMode = !editMode">
-										<font-awesome-icon :icon="['fas', editMode ? 'times' : 'edit']" class="me-1" />
+						<!-- Hero Info -->
+						<div class="hero-info">
+							<div class="col">
+								<div class="d-flex align-items-center gap-3 mb-3">
+									<h1>{{ performer.name }}</h1>
+									<button class="btn btn-outline-light" @click="editMode = !editMode">
+										<font-awesome-icon :icon="['fas', editMode ? 'times' : 'edit']" class="me-2" />
 										{{ editMode ? 'Cancel' : 'Edit' }}
 									</button>
 								</div>
 
-								<div class="performer-meta d-flex gap-3 mt-2">
+								<!-- Badges -->
+								<div class="d-flex gap-2 mb-3 flex-wrap">
 									<span v-if="performerAge" class="badge bg-secondary">
 										<font-awesome-icon :icon="['fas', 'calendar']" class="me-1" />
 										{{ performerAge }} years
@@ -89,53 +80,126 @@
 								</div>
 
 								<!-- Quick Stats -->
-								<div class="quick-stats mt-3">
+								<div class="quick-stats">
 									<div class="stat-item">
-										<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
+										<font-awesome-icon :icon="['fas', 'video']" />
 										<strong>{{ performer.video_count || 0 }}</strong> Videos
 									</div>
 									<div class="stat-item" v-if="stats.totalDuration">
-										<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
+										<font-awesome-icon :icon="['fas', 'clock']" />
 										<strong>{{ formatDuration(stats.totalDuration) }}</strong> Total
 									</div>
 									<div class="stat-item" v-if="stats.avgRating">
-										<font-awesome-icon :icon="['fas', 'star']" class="me-1 text-warning" />
+										<font-awesome-icon :icon="['fas', 'star']" class="text-warning" />
 										<strong>{{ stats.avgRating.toFixed(1) }}</strong> Avg Rating
 									</div>
 									<div class="stat-item" v-if="previewVideos.length">
-										<font-awesome-icon :icon="['fas', 'play-circle']" class="me-1" />
+										<font-awesome-icon :icon="['fas', 'play-circle']" />
 										<strong>{{ previewVideos.length }}</strong> Previews
 									</div>
 								</div>
-							</div>
-						</div>
 
-						<!-- Action Buttons -->
-						<div class="action-buttons">
-							<button class="btn btn-outline-primary" @click="fetchMetadata" :disabled="fetchingMetadata">
-								<font-awesome-icon :icon="['fas', fetchingMetadata ? 'spinner' : 'cloud-download-alt']" :spin="fetchingMetadata" class="me-2" />
-								Fetch Metadata
-							</button>
-							<button class="btn btn-outline-warning" @click="resetMetadata">
-								<font-awesome-icon :icon="['fas', 'undo']" class="me-2" />
-								Reset
-							</button>
-							<button class="btn btn-outline-secondary" @click="$router.back()">
-								<font-awesome-icon :icon="['fas', 'arrow-left']" class="me-2" />
-								Back
-							</button>
+								<!-- Action Buttons -->
+								<div class="action-buttons mt-3">
+									<button class="btn btn-primary" @click="fetchMetadata" :disabled="fetchingMetadata">
+										<font-awesome-icon :icon="['fas', fetchingMetadata ? 'spinner' : 'cloud-download-alt']" :spin="fetchingMetadata" class="me-2" />
+										Fetch Metadata
+									</button>
+									<button class="btn btn-danger" @click="resetMetadata">
+										<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+										Reset Metadata
+									</button>
+								</div>
+							</div>
+							<div class="col"></div>
 						</div>
 					</div>
 				</div>
 
+				<!-- Stats Grid -->
+				<div class="stats-grid">
+					<div class="stat-box">
+						<div class="stat-value">{{ performer.video_count || 0 }}</div>
+						<div class="stat-label">Total Videos</div>
+					</div>
+					<div class="stat-box">
+						<div class="stat-value">{{ previewVideos.length }}</div>
+						<div class="stat-label">Preview Videos</div>
+					</div>
+					<div class="stat-box">
+						<div class="stat-value">{{ stats.totalDuration ? formatDuration(stats.totalDuration) : '0:00' }}</div>
+						<div class="stat-label">Total Duration</div>
+					</div>
+					<div class="stat-box">
+						<div class="stat-value">{{ stats.avgRating ? stats.avgRating.toFixed(1) : 'N/A' }}</div>
+						<div class="stat-label">Avg Rating</div>
+					</div>
+				</div>
+
+				<!-- Preview Videos Section - Full Width & Prominent -->
+				<div v-if="previewVideos.length > 0" class="preview-section">
+					<div class="view-controls">
+						<h3>
+							<font-awesome-icon :icon="['fas', 'play-circle']" class="me-2" />
+							Preview Videos ({{ previewVideos.length }})
+						</h3>
+						<div class="btn-group">
+							<button :class="['btn', previewViewMode === 'grid' ? 'btn-primary' : 'btn-outline-primary']" @click="previewViewMode = 'grid'">
+								<font-awesome-icon :icon="['fas', 'th']" />
+								Grid
+							</button>
+							<button :class="['btn', previewViewMode === 'carousel' ? 'btn-primary' : 'btn-outline-primary']" @click="previewViewMode = 'carousel'">
+								<font-awesome-icon :icon="['fas', 'ellipsis-h']" />
+								Carousel
+							</button>
+						</div>
+					</div>
+
+					<!-- Grid View -->
+					<div v-if="previewViewMode === 'grid'" class="preview-grid">
+						<div v-for="preview in previewVideos" :key="preview.id" class="preview-card" @click="playPreview(preview)">
+							<div class="preview-thumbnail">
+								<video :src="getAssetURL(preview.file_path)" preload="metadata" muted playsinline></video>
+								<div class="play-overlay">
+									<font-awesome-icon :icon="['fas', 'play-circle']" size="3x" />
+								</div>
+								<div class="preview-duration" v-if="preview.duration">{{ formatDuration(preview.duration) }}</div>
+							</div>
+							<div class="preview-title">{{ preview.title || `Preview ${preview.id}` }}</div>
+						</div>
+					</div>
+
+					<!-- Carousel View -->
+					<div v-else class="preview-carousel">
+						<button class="carousel-btn prev" @click="scrollPreviews(-1)">
+							<font-awesome-icon :icon="['fas', 'chevron-left']" />
+						</button>
+						<div class="carousel-container" ref="previewCarousel">
+							<div v-for="preview in previewVideos" :key="preview.id" class="carousel-preview" @click="playPreview(preview)">
+								<div class="preview-thumbnail">
+									<video :src="getAssetURL(preview.file_path)" preload="metadata" muted playsinline></video>
+									<div class="play-overlay">
+										<font-awesome-icon :icon="['fas', 'play-circle']" size="2x" />
+									</div>
+									<div class="preview-duration" v-if="preview.duration">{{ formatDuration(preview.duration) }}</div>
+								</div>
+								<div class="preview-title">{{ preview.title || `Preview ${preview.id}` }}</div>
+							</div>
+						</div>
+						<button class="carousel-btn next" @click="scrollPreviews(1)">
+							<font-awesome-icon :icon="['fas', 'chevron-right']" />
+						</button>
+					</div>
+				</div>
+
 				<!-- Main Content Grid -->
-				<div class="row g-4">
-					<!-- Left Column - Details & Previews -->
-					<div class="col-lg-8">
-						<!-- Edit Form (when in edit mode) -->
-						<div v-if="editMode" class="detail-card mb-4">
+				<div class="content-grid">
+					<!-- Left Column - Master Tags -->
+					<div>
+						<!-- Edit Form -->
+						<div v-if="editMode" class="detail-card">
 							<h3>
-								<font-awesome-icon :icon="['fas', 'edit']" class="me-2" />
+								<font-awesome-icon :icon="['fas', 'edit']" />
 								Edit Performer Details
 							</h3>
 							<form @submit.prevent="saveChanges">
@@ -163,10 +227,10 @@
 							</form>
 						</div>
 
-						<!-- Appearance / Physical Attributes -->
-						<div v-else class="detail-card mb-4">
+						<!-- Appearance Data -->
+						<div v-else class="detail-card">
 							<h3>
-								<font-awesome-icon :icon="['fas', 'user-circle']" class="me-2" />
+								<font-awesome-icon :icon="['fas', 'user-circle']" />
 								Appearance
 							</h3>
 							<div v-if="appearanceData && Object.keys(appearanceData).length > 0" class="row g-3">
@@ -235,81 +299,17 @@
 								</button>
 							</div>
 						</div>
+						<!-- Master Tags -->
+					</div>
 
-						<!-- Preview Videos Gallery -->
-						<div v-if="previewVideos.length > 0" class="detail-card mb-4">
-							<div class="d-flex justify-content-between align-items-center mb-3">
-								<h3>
-									<font-awesome-icon :icon="['fas', 'play-circle']" class="me-2" />
-									Preview Videos ({{ previewVideos.length }})
-								</h3>
-								<div class="btn-group btn-group-sm">
-									<button
-										:class="['btn', previewViewMode === 'grid' ? 'btn-primary' : 'btn-outline-primary']"
-										@click="previewViewMode = 'grid'"
-										title="Grid View"
-									>
-										<font-awesome-icon :icon="['fas', 'th']" />
-									</button>
-									<button
-										:class="['btn', previewViewMode === 'carousel' ? 'btn-primary' : 'btn-outline-primary']"
-										@click="previewViewMode = 'carousel'"
-										title="Carousel View"
-									>
-										<font-awesome-icon :icon="['fas', 'ellipsis-h']" />
-									</button>
-								</div>
-							</div>
-
-							<!-- Grid View -->
-							<div v-if="previewViewMode === 'grid'" class="preview-grid">
-								<div v-for="preview in previewVideos" :key="preview.id" class="preview-card" @click="playPreview(preview)">
-									<div class="preview-thumbnail">
-										<video :src="getAssetURL(preview.file_path)" preload="metadata" muted></video>
-										<div class="play-overlay">
-											<font-awesome-icon :icon="['fas', 'play-circle']" size="3x" />
-										</div>
-										<div class="preview-duration" v-if="preview.duration">{{ formatDuration(preview.duration) }}</div>
-									</div>
-									<div class="preview-title">{{ preview.title || `Preview ${preview.id}` }}</div>
-								</div>
-							</div>
-
-							<!-- Carousel View -->
-							<div v-else class="preview-carousel">
-								<button class="carousel-btn prev" @click="scrollPreviews(-1)" :disabled="previewScroll === 0">
-									<font-awesome-icon :icon="['fas', 'chevron-left']" />
-								</button>
-								<div class="carousel-container" ref="previewCarousel">
-									<div
-										v-for="preview in previewVideos"
-										:key="preview.id"
-										class="carousel-preview"
-										@click="playPreview(preview)"
-									>
-										<div class="preview-thumbnail">
-											<video :src="getAssetURL(preview.file_path)" preload="metadata" muted></video>
-											<div class="play-overlay">
-												<font-awesome-icon :icon="['fas', 'play-circle']" size="2x" />
-											</div>
-										</div>
-										<div class="preview-title">{{ preview.title || `Preview ${preview.id}` }}</div>
-									</div>
-								</div>
-								<button class="carousel-btn next" @click="scrollPreviews(1)">
-									<font-awesome-icon :icon="['fas', 'chevron-right']" />
-								</button>
-							</div>
-						</div>
-
+					<!-- Right Column - Details & Videos -->
+					<div>
 						<!-- Videos Section -->
-						<div class="detail-card">
-							<div class="d-flex justify-content-between align-items-center mb-3">
-								<h3>
-									<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
-									Videos ({{ filteredVideos.length }})
-								</h3>
-								<div class="d-flex gap-2">
+						<div class="detail-card videos-section">
+							<h3>
+								<font-awesome-icon :icon="['fas', 'video']" />
+								Videos ({{ performerVideos.length }})
+								<div class="d-flex gap-2 ms-auto">
 									<select v-model="videoSort" class="form-select form-select-sm" style="width: auto">
 										<option value="date">Sort by Date</option>
 										<option value="title">Sort by Title</option>
@@ -317,69 +317,63 @@
 										<option value="duration">Sort by Duration</option>
 									</select>
 									<div class="btn-group btn-group-sm">
-										<button
-											:class="['btn', videoViewMode === 'grid' ? 'btn-primary' : 'btn-outline-primary']"
-											@click="videoViewMode = 'grid'"
-										>
+										<button :class="['btn', videoViewMode === 'grid' ? 'btn-primary' : 'btn-outline-primary']" @click="videoViewMode = 'grid'">
 											<font-awesome-icon :icon="['fas', 'th']" />
 										</button>
-										<button
-											:class="['btn', videoViewMode === 'list' ? 'btn-primary' : 'btn-outline-primary']"
-											@click="videoViewMode = 'list'"
-										>
+										<button :class="['btn', videoViewMode === 'list' ? 'btn-primary' : 'btn-outline-primary']" @click="videoViewMode = 'list'">
 											<font-awesome-icon :icon="['fas', 'list']" />
 										</button>
 									</div>
 								</div>
-							</div>
+							</h3>
 
 							<!-- Loading State -->
 							<div v-if="loadingVideos" class="text-center py-4">
-								<div class="spinner-border spinner-border-sm text-primary" role="status">
-									<span class="visually-hidden">Loading videos...</span>
-								</div>
+								<div class="spinner-border text-primary" role="status"></div>
 							</div>
 
 							<!-- Grid View -->
-							<div v-else-if="filteredVideos.length > 0 && videoViewMode === 'grid'" class="videos-grid">
+							<div v-else-if="videoViewMode === 'grid'" class="videos-grid">
 								<div v-for="video in filteredVideos" :key="video.id" class="video-grid-card" @click="openVideo(video.id)">
 									<div class="video-thumbnail">
-										<img :src="getThumbnailURL(video)" :alt="video.title || video.filename" loading="lazy" @error="handleThumbnailError" />
-										<div class="video-duration" v-if="video.duration">{{ formatDuration(video.duration) }}</div>
+										<img :src="getThumbnailURL(video)" :alt="video.title || video.filename" @error="handleThumbnailError" />
 										<div class="video-rating" v-if="video.rating">
-											<font-awesome-icon :icon="['fas', 'star']" class="text-warning" />
+											<font-awesome-icon :icon="['fas', 'star']" />
 											{{ video.rating }}
 										</div>
+										<div class="video-duration" v-if="video.duration">{{ formatDuration(video.duration) }}</div>
 									</div>
 									<div class="video-info">
 										<div class="video-title">{{ video.title || video.filename }}</div>
 										<div class="video-meta">
-											<span v-if="video.date">
-												<font-awesome-icon :icon="['fas', 'calendar']" class="me-1" />
-												{{ formatDate(video.date) }}
-											</span>
+											<span v-if="video.date">{{ formatDate(video.date) }}</span>
+											<span v-if="video.duration">{{ formatDuration(video.duration) }}</span>
 										</div>
 									</div>
 								</div>
 							</div>
 
 							<!-- List View -->
-							<div v-else-if="filteredVideos.length > 0" class="video-list">
+							<div v-else class="video-list">
 								<div v-for="video in filteredVideos" :key="video.id" class="video-item" @click="openVideo(video.id)">
 									<div class="video-thumbnail">
-										<img :src="getThumbnailURL(video)" :alt="video.title || video.filename" loading="lazy" @error="handleThumbnailError" />
+										<img :src="getThumbnailURL(video)" :alt="video.title || video.filename" @error="handleThumbnailError" />
 										<div class="video-duration" v-if="video.duration">{{ formatDuration(video.duration) }}</div>
 									</div>
 									<div class="video-info">
 										<div class="video-title">{{ video.title || video.filename }}</div>
 										<div class="video-meta">
 											<span v-if="video.date">
-												<font-awesome-icon :icon="['fas', 'calendar']" class="me-1" />
+												<font-awesome-icon :icon="['fas', 'calendar']" />
 												{{ formatDate(video.date) }}
 											</span>
-											<span v-if="video.rating" class="ms-2">
-												<font-awesome-icon :icon="['fas', 'star']" class="me-1 text-warning" />
-												{{ video.rating }}/5
+											<span v-if="video.duration">
+												<font-awesome-icon :icon="['fas', 'clock']" />
+												{{ formatDuration(video.duration) }}
+											</span>
+											<span v-if="video.rating">
+												<font-awesome-icon :icon="['fas', 'star']" />
+												{{ video.rating }} / 5
 											</span>
 										</div>
 									</div>
@@ -387,86 +381,49 @@
 							</div>
 
 							<!-- Empty State -->
-							<div v-else class="text-muted text-center py-4">
-								<font-awesome-icon :icon="['fas', 'video-slash']" size="2x" class="mb-2" />
-								<p>No videos featuring this performer yet</p>
-							</div>
-						</div>
-					</div>
-
-					<!-- Right Column - Master Tags & Stats -->
-					<div class="col-lg-4">
-						<!-- Statistics Card -->
-						<div class="detail-card mb-4">
-							<h3>
-								<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-								Statistics
-							</h3>
-							<div class="stats-grid">
-								<div class="stat-box">
-									<div class="stat-value">{{ performer.video_count || 0 }}</div>
-									<div class="stat-label">Total Videos</div>
-								</div>
-								<div class="stat-box" v-if="previewVideos.length">
-									<div class="stat-value">{{ previewVideos.length }}</div>
-									<div class="stat-label">Preview Videos</div>
-								</div>
-								<div class="stat-box" v-if="stats.totalDuration">
-									<div class="stat-value">{{ formatDuration(stats.totalDuration) }}</div>
-									<div class="stat-label">Total Duration</div>
-								</div>
-								<div class="stat-box" v-if="stats.avgRating">
-									<div class="stat-value">
-										{{ stats.avgRating.toFixed(1) }}
-										<font-awesome-icon :icon="['fas', 'star']" class="text-warning ms-1" size="sm" />
-									</div>
-									<div class="stat-label">Average Rating</div>
-								</div>
+							<div v-if="!loadingVideos && performerVideos.length === 0" class="text-center text-muted py-5">
+								<font-awesome-icon :icon="['fas', 'video-slash']" size="3x" class="mb-3" />
+								<p>No videos found for this performer</p>
 							</div>
 						</div>
 
-						<!-- Master Tags -->
 						<div class="detail-card">
-							<div class="d-flex justify-content-between align-items-center mb-3">
-								<h3>
-									<font-awesome-icon :icon="['fas', 'tags']" class="me-2" />
-									Master Tags
-								</h3>
-								<button class="btn btn-sm btn-primary" @click="showAddTagModal = true">
-									<font-awesome-icon :icon="['fas', 'plus']" />
-								</button>
-							</div>
-
+							<h3>
+								<font-awesome-icon :icon="['fas', 'tags']" />
+								Master Tags
+							</h3>
 							<div class="tags-info mb-3">
-								<small class="text-muted">
-									<font-awesome-icon :icon="['fas', 'info-circle']" class="me-1" />
-									Master tags automatically apply to all videos featuring this performer
-								</small>
+								<p class="small mb-0">Master tags are automatically applied to all videos featuring this performer</p>
 							</div>
 
 							<!-- Tag List -->
-							<div v-if="performerTags.length > 0" class="tag-list">
+							<div v-if="performerTags.length > 0" class="tag-list mb-3">
 								<div v-for="tag in performerTags" :key="tag.id" class="tag-item">
-									<span class="tag-name">{{ tag.name }}</span>
+									<span class="tag-name">
+										<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" class="me-2" />
+										{{ tag.name }}
+									</span>
 									<button class="btn-remove-tag" @click="removeTag(tag.id)" title="Remove tag">
 										<font-awesome-icon :icon="['fas', 'times']" />
 									</button>
 								</div>
 							</div>
 							<div v-else class="text-muted text-center py-3">
-								<p class="mb-2">No master tags assigned</p>
-								<button class="btn btn-sm btn-outline-primary" @click="showAddTagModal = true">Add Your First Tag</button>
+								<p class="mb-0">No master tags assigned</p>
 							</div>
 
+							<button class="btn btn-outline-primary w-100 mb-3" @click="showAddTagModal = true">
+								<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
+								Add Master Tag
+							</button>
+
 							<!-- Sync Button -->
-							<div v-if="performerTags.length > 0" class="mt-3">
+							<div v-if="performerTags.length > 0">
 								<button class="btn btn-outline-primary w-100" @click="syncTagsToVideos" :disabled="syncing">
 									<font-awesome-icon :icon="['fas', syncing ? 'spinner' : 'sync']" :spin="syncing" class="me-2" />
 									{{ syncing ? 'Syncing...' : 'Sync Tags to All Videos' }}
 								</button>
-								<small class="text-muted d-block mt-2 text-center">
-									Apply these master tags to all {{ performer.video_count || 0 }} videos
-								</small>
+								<small class="text-muted d-block mt-2 text-center"> Apply these master tags to all {{ performer.video_count || 0 }} videos </small>
 							</div>
 						</div>
 					</div>
@@ -475,8 +432,8 @@
 
 			<!-- Error State -->
 			<div v-else class="text-center py-5">
-				<font-awesome-icon :icon="['fas', 'exclamation-triangle']" size="3x" class="text-warning mb-3" />
-				<p class="text-muted">Performer not found</p>
+				<p class="text-danger">Failed to load performer details</p>
+				<button class="btn btn-primary" @click="loadPerformer">Try Again</button>
 			</div>
 		</div>
 
@@ -485,23 +442,22 @@
 			<div class="modal-dialog">
 				<div class="modal-content">
 					<div class="modal-header">
-						<h5 class="modal-title">Add Master Tag</h5>
-						<button type="button" class="btn-close" @click="showAddTagModal = false"></button>
+						<h5 class="modal-title">
+							<font-awesome-icon :icon="['fas', 'tag']" class="me-2" />
+							Add Master Tag
+						</h5>
+						<button class="btn-close" @click="showAddTagModal = false"></button>
 					</div>
 					<div class="modal-body">
-						<div class="mb-3">
-							<label class="form-label">Select Tag</label>
-							<select v-model="selectedTagId" class="form-select">
-								<option value="">Choose a tag...</option>
-								<option v-for="tag in availableTags" :key="tag.id" :value="tag.id">
-									{{ tag.name }}
-								</option>
-							</select>
-						</div>
+						<label class="form-label">Select Tag</label>
+						<select v-model="selectedTagId" class="form-select">
+							<option value="">Choose a tag...</option>
+							<option v-for="tag in availableTags" :key="tag.id" :value="tag.id">{{ tag.name }}</option>
+						</select>
 					</div>
 					<div class="modal-footer">
-						<button type="button" class="btn btn-secondary" @click="showAddTagModal = false">Cancel</button>
-						<button type="button" class="btn btn-primary" @click="addTag" :disabled="!selectedTagId">Add Tag</button>
+						<button class="btn btn-secondary" @click="showAddTagModal = false">Cancel</button>
+						<button class="btn btn-primary" @click="addTag" :disabled="!selectedTagId">Add Tag</button>
 					</div>
 				</div>
 			</div>
@@ -511,11 +467,11 @@
 		<div v-if="playingPreview" class="modal-overlay" @click.self="closePreview">
 			<div class="preview-player-modal">
 				<div class="preview-player-header">
-					<h5>{{ playingPreview.title || 'Preview Video' }}</h5>
+					<h5>{{ playingPreview.title || `Preview ${playingPreview.id}` }}</h5>
 					<button class="btn-close" @click="closePreview"></button>
 				</div>
 				<div class="preview-player-body">
-					<video ref="previewPlayer" :src="getAssetURL(playingPreview.file_path)" controls autoplay></video>
+					<video ref="previewPlayer" :src="getAssetURL(playingPreview.file_path)" controls></video>
 				</div>
 			</div>
 		</div>
@@ -550,10 +506,9 @@ const editMode = ref(false)
 const videoSort = ref('date')
 const videoViewMode = ref('grid')
 const previewViewMode = ref('grid')
-const previewScroll = ref(0)
 const playingPreview = ref(null)
 const previewCarousel = ref(null)
-const hoveredAvatar = ref(false)
+const avatarVideo = ref(null)
 
 // Edit form
 const editForm = ref({
@@ -875,13 +830,28 @@ const handleThumbnailError = (event) => {
 	event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="160" height="90"%3E%3Crect fill="%23333" width="160" height="90"/%3E%3C/svg%3E'
 }
 
+// Start avatar video on hover
+const startAvatarVideo = () => {
+	if (avatarVideo.value) {
+		avatarVideo.value.play()
+	}
+}
+
+// Stop avatar video when not hovering
+const stopAvatarVideo = () => {
+	if (avatarVideo.value) {
+		avatarVideo.value.pause()
+		avatarVideo.value.currentTime = 0
+	}
+}
+
 // Watch for route changes (when navigating between performers)
 watch(
 	() => route.params.id,
 	(newId, oldId) => {
 		if (newId && newId !== oldId) {
-			// Reset hover state when switching performers
-			hoveredAvatar.value = false
+			// Stop avatar video when switching performers
+			stopAvatarVideo()
 			// Reload performer data
 			loadPerformer()
 		}
@@ -897,409 +867,4 @@ onMounted(() => {
 
 <style scoped>
 @import '@/styles/pages/performers_details_page.css';
-
-/* Additional styles for new features */
-.breadcrumb {
-	background: rgba(255, 255, 255, 0.05);
-	padding: 0.75rem 1rem;
-	border-radius: 8px;
-	margin-bottom: 1rem;
-}
-
-.breadcrumb-item {
-	color: rgba(255, 255, 255, 0.6);
-}
-
-.breadcrumb-item.active {
-	color: #fff;
-}
-
-.breadcrumb-item a {
-	color: #667eea;
-	text-decoration: none;
-	transition: color 0.2s;
-}
-
-.breadcrumb-item a:hover {
-	color: #764ba2;
-}
-
-.header-content {
-	display: flex;
-	justify-content: space-between;
-	align-items: flex-start;
-	gap: 2rem;
-}
-
-.performer-avatar {
-	position: relative;
-	width: 150px;
-	height: 150px;
-	border-radius: 50%;
-	overflow: hidden;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.avatar-image,
-.avatar-video {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.avatar-placeholder {
-	width: 100%;
-	height: 100%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: rgba(255, 255, 255, 0.5);
-}
-
-.btn-generate-thumbnail {
-	position: absolute;
-	bottom: 0;
-	right: 0;
-	width: 40px;
-	height: 40px;
-	border-radius: 50%;
-	background: rgba(102, 126, 234, 0.9);
-	border: 2px solid rgba(255, 255, 255, 0.2);
-	color: #fff;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	cursor: pointer;
-	transition: all 0.2s;
-}
-
-.btn-generate-thumbnail:hover:not(:disabled) {
-	background: #667eea;
-	transform: scale(1.1);
-}
-
-.btn-generate-thumbnail:disabled {
-	opacity: 0.6;
-	cursor: not-allowed;
-}
-
-.quick-stats {
-	display: flex;
-	gap: 1.5rem;
-	flex-wrap: wrap;
-}
-
-.stat-item {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	color: rgba(255, 255, 255, 0.8);
-	font-size: 0.9rem;
-}
-
-.action-buttons {
-	display: flex;
-	gap: 0.5rem;
-	flex-shrink: 0;
-}
-
-.stats-grid {
-	display: grid;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 1rem;
-}
-
-.stat-box {
-	background: rgba(102, 126, 234, 0.1);
-	border: 1px solid rgba(102, 126, 234, 0.3);
-	border-radius: 8px;
-	padding: 1rem;
-	text-align: center;
-}
-
-.stat-value {
-	font-size: 1.5rem;
-	font-weight: 700;
-	color: #fff;
-	margin-bottom: 0.25rem;
-}
-
-.stat-label {
-	font-size: 0.75rem;
-	color: rgba(255, 255, 255, 0.6);
-	text-transform: uppercase;
-	letter-spacing: 0.5px;
-}
-
-.preview-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-	gap: 1rem;
-}
-
-.preview-card {
-	cursor: pointer;
-	border-radius: 8px;
-	overflow: hidden;
-	background: rgba(255, 255, 255, 0.05);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.2s;
-}
-
-.preview-card:hover {
-	transform: translateY(-4px);
-	border-color: rgba(102, 126, 234, 0.5);
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
-.preview-thumbnail {
-	position: relative;
-	width: 100%;
-	aspect-ratio: 16/9;
-	background: #000;
-	overflow: hidden;
-}
-
-.preview-thumbnail video {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.play-overlay {
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	background: rgba(0, 0, 0, 0.5);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	color: #fff;
-	opacity: 0;
-	transition: opacity 0.2s;
-}
-
-.preview-card:hover .play-overlay {
-	opacity: 1;
-}
-
-.preview-duration {
-	position: absolute;
-	bottom: 8px;
-	right: 8px;
-	background: rgba(0, 0, 0, 0.8);
-	color: #fff;
-	padding: 4px 8px;
-	border-radius: 4px;
-	font-size: 0.75rem;
-	font-weight: 600;
-}
-
-.preview-title {
-	padding: 0.75rem;
-	font-size: 0.9rem;
-	font-weight: 500;
-	color: #fff;
-	text-align: center;
-}
-
-.preview-carousel {
-	position: relative;
-	display: flex;
-	align-items: center;
-	gap: 1rem;
-}
-
-.carousel-container {
-	display: flex;
-	gap: 1rem;
-	overflow-x: auto;
-	scroll-behavior: smooth;
-	padding: 0.5rem 0;
-	scrollbar-width: none;
-}
-
-.carousel-container::-webkit-scrollbar {
-	display: none;
-}
-
-.carousel-preview {
-	flex-shrink: 0;
-	width: 250px;
-	cursor: pointer;
-	border-radius: 8px;
-	overflow: hidden;
-	background: rgba(255, 255, 255, 0.05);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.2s;
-}
-
-.carousel-preview:hover {
-	border-color: rgba(102, 126, 234, 0.5);
-	transform: scale(1.05);
-}
-
-.carousel-btn {
-	background: rgba(102, 126, 234, 0.8);
-	border: none;
-	color: #fff;
-	width: 40px;
-	height: 40px;
-	border-radius: 50%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	cursor: pointer;
-	transition: all 0.2s;
-	flex-shrink: 0;
-}
-
-.carousel-btn:hover:not(:disabled) {
-	background: #667eea;
-	transform: scale(1.1);
-}
-
-.carousel-btn:disabled {
-	opacity: 0.3;
-	cursor: not-allowed;
-}
-
-.videos-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-	gap: 1rem;
-}
-
-.video-grid-card {
-	cursor: pointer;
-	border-radius: 8px;
-	overflow: hidden;
-	background: rgba(255, 255, 255, 0.03);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.2s;
-}
-
-.video-grid-card:hover {
-	background: rgba(255, 255, 255, 0.08);
-	border-color: rgba(102, 126, 234, 0.5);
-	transform: translateY(-4px);
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
-.video-grid-card .video-thumbnail {
-	position: relative;
-	width: 100%;
-	aspect-ratio: 16/9;
-	background: rgba(255, 255, 255, 0.05);
-}
-
-.video-grid-card .video-thumbnail img {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.video-rating {
-	position: absolute;
-	top: 8px;
-	left: 8px;
-	background: rgba(0, 0, 0, 0.8);
-	color: #fff;
-	padding: 4px 8px;
-	border-radius: 4px;
-	font-size: 0.75rem;
-	font-weight: 600;
-	display: flex;
-	align-items: center;
-	gap: 4px;
-}
-
-.video-grid-card .video-info {
-	padding: 0.75rem;
-}
-
-.preview-player-modal {
-	background: #1e1e2e;
-	border-radius: 12px;
-	max-width: 90vw;
-	max-height: 90vh;
-	overflow: hidden;
-	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
-}
-
-.preview-player-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	padding: 1rem 1.5rem;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.preview-player-header h5 {
-	margin: 0;
-	font-size: 1.1rem;
-	color: #fff;
-}
-
-.preview-player-body {
-	padding: 0;
-}
-
-.preview-player-body video {
-	width: 100%;
-	max-height: 80vh;
-	display: block;
-}
-
-.form-check-input {
-	background-color: rgba(255, 255, 255, 0.1);
-	border-color: rgba(255, 255, 255, 0.3);
-}
-
-.form-check-input:checked {
-	background-color: #667eea;
-	border-color: #667eea;
-}
-
-.form-check-label {
-	color: rgba(255, 255, 255, 0.9);
-}
-
-@media (max-width: 1200px) {
-	.header-content {
-		flex-direction: column;
-	}
-
-	.action-buttons {
-		width: 100%;
-		justify-content: flex-start;
-	}
-
-	.stats-grid {
-		grid-template-columns: repeat(2, 1fr);
-	}
-}
-
-@media (max-width: 768px) {
-	.videos-grid,
-	.preview-grid {
-		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-	}
-
-	.quick-stats {
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-
-	.action-buttons {
-		flex-direction: column;
-	}
-
-	.action-buttons .btn {
-		width: 100%;
-	}
-}
 </style>

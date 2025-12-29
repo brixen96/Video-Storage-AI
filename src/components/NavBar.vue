@@ -5,6 +5,10 @@
 			<router-link to="/" class="navbar-brand d-flex align-items-center">
 				<font-awesome-icon :icon="['fas', 'video']" class="me-2 brand-icon" />
 				<span class="brand-text">Video Storage AI</span>
+				<!-- WebSocket Status Indicator -->
+				<span class="ws-status-indicator ms-3" :class="{ connected: wsConnected, disconnected: !wsConnected }" :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'">
+					<font-awesome-icon :icon="['fas', 'circle']" class="status-dot" />
+				</span>
 			</router-link>
 
 			<!-- Mobile toggle button -->
@@ -110,6 +114,7 @@
 
 <script>
 import ActivityStatusWidget from './ActivityStatusWidget.vue'
+import websocketService from '@/services/websocket'
 
 export default {
 	name: 'NavBar',
@@ -119,6 +124,27 @@ export default {
 	data() {
 		return {
 			searchQuery: '',
+			wsConnected: false,
+			unsubscribeConnection: null,
+		}
+	},
+	mounted() {
+		// Subscribe to WebSocket connection status
+		this.unsubscribeConnection = websocketService.on('connected', (data) => {
+			this.wsConnected = data.connected
+		})
+
+		// Check initial connection status
+		this.wsConnected = websocketService.isConnected()
+
+		// Connect WebSocket if not already connected
+		if (!websocketService.isConnected()) {
+			websocketService.connect()
+		}
+	},
+	beforeUnmount() {
+		if (this.unsubscribeConnection) {
+			this.unsubscribeConnection()
 		}
 	},
 	methods: {

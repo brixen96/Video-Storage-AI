@@ -399,7 +399,6 @@ const checkCompanionConnection = async () => {
 	} catch (error) {
 		// LM Studio not available, will use backend AI instead
 		companionConnected.value = true // Still mark as connected since we have fallback
-		console.log('LM Studio not connected, using backend AI fallback:', error)
 	}
 }
 
@@ -517,14 +516,11 @@ Remember: You are the AI core of "Video Storage AI" - be intelligent, proactive,
 
 			// Check if AI wants to call a tool
 			if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
-				console.log('AI is calling tools:', responseMessage.tool_calls)
-
 				// Execute each tool call
 				for (const toolCall of responseMessage.tool_calls) {
 					const toolName = toolCall.function.name
 					const toolArgs = JSON.parse(toolCall.function.arguments)
 
-					console.log(`Executing tool: ${toolName}`, toolArgs)
 
 					try {
 						const toolResult = await executeTool(toolName, toolArgs)
@@ -593,7 +589,6 @@ Remember: You are the AI core of "Video Storage AI" - be intelligent, proactive,
 				})),
 			})
 
-			console.log('Backend AI response:', response)
 
 			// Handle response - backend returns { success: true, message: "..." }
 			const aiResponse = response.data?.message || response.message || 'I processed your request.'

@@ -126,10 +126,15 @@ import {
 	faClone,
 	faLightbulb,
 	faMicrophone,
+	faWrench,
+	faTools,
+	faCheckSquare,
+	faTrashAlt,
+	faUserCircle,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
-import { faFileImage, faHeart as farHeart, faStar as farStar, faUserCircle } from '@fortawesome/free-regular-svg-icons'
+import { faFileImage, faHeart as farHeart, faStar as farStar } from '@fortawesome/free-regular-svg-icons'
 
 // Import brand icons
 import { faTwitter, faInstagram } from '@fortawesome/free-brands-svg-icons'
@@ -264,7 +269,11 @@ library.add(
 	faTerminal,
 	faClone,
 	faLightbulb,
-	faMicrophone
+	faMicrophone,
+	faWrench,
+	faTools,
+	faCheckSquare,
+	faTrashAlt
 )
 
 export default FontAwesomeIcon

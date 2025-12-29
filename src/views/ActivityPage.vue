@@ -35,6 +35,10 @@
 									<font-awesome-icon :icon="['fas', 'sync']" :spin="loading" class="me-2" />
 									Refresh
 								</button>
+								<button class="btn btn-outline-success me-1" @click="exportActivities" :disabled="loading || activities.length === 0">
+									<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
+									Export
+								</button>
 								<button class="btn btn-outline-danger" @click="confirmCleanOld" :disabled="loading">
 									<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
 									Clean Old
@@ -278,11 +282,26 @@
 						<div class="d-flex justify-content-between align-items-center mb-4">
 							<div>
 								<p class="lead mb-0">System console logs from API, AI Companion, and Frontend</p>
+							<div class="log-level-filters mt-2">
+								<button
+									v-for="level in logLevels"
+									:key="level"
+									class="btn btn-sm me-1"
+									:class="consoleLogFilter === level ? 'btn-primary' : 'btn-outline-secondary'"
+									@click="setConsoleLogFilter(level)"
+								>
+									{{ level }}
+								</button>
+							</div>
 							</div>
 							<div class="btn-group">
 								<button class="btn btn-outline-primary me-1" @click="loadConsoleLogs" :disabled="consoleLoading">
 									<font-awesome-icon :icon="['fas', 'sync']" :spin="consoleLoading" class="me-2" />
 									Refresh
+								</button>
+								<button class="btn btn-outline-success me-1" @click="exportConsoleLogs" :disabled="consoleLoading || consoleLogs.length === 0">
+									<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
+									Export
 								</button>
 								<button class="btn btn-outline-danger" @click="confirmClearConsoleLogs" :disabled="consoleLoading">
 									<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
@@ -355,7 +374,7 @@
 									</div>
 									<div v-else-if="consoleLogs.length > 0" class="console-log-list">
 										<div
-											v-for="log in consoleLogs"
+											v-for="log in filteredConsoleLogs"
 											:key="log.id"
 											class="console-log-entry"
 											:class="'log-level-' + log.level"
@@ -414,6 +433,9 @@ export default {
 			},
 			expandedDetails: {},
 			failedTaskTimers: {}, // Track timers for auto-dismissing failed tasks
+			unsubscribeStatus: null,
+			unsubscribeActivity: null,
+			unsubscribeConsoleLog: null,
 			// Console Log tab data
 			consoleLogs: [],
 			consoleLoading: false,
@@ -423,12 +445,20 @@ export default {
 				search: '',
 				limit: 100,
 			},
+			consoleLogFilter: 'ALL',
+			logLevels: ['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'],
 			expandedLogDetails: {},
 		}
 	},
 	computed: {
 		runningTasks() {
 			return this.activities.filter((activity) => activity.status === 'running')
+		},
+		filteredConsoleLogs() {
+			if (this.consoleLogFilter === 'ALL') {
+				return this.consoleLogs
+			}
+			return this.consoleLogs.filter((log) => log.level === this.consoleLogFilter)
 		},
 	},
 	async mounted() {
@@ -467,6 +497,18 @@ export default {
 				}, 10000)
 			}
 		})
+
+		// Subscribe to console log updates via WebSocket
+		this.unsubscribeConsoleLog = websocketService.on('console_log', (logData) => {
+			// Add new console log to the beginning of the list
+			if (this.activeTab === 'console') {
+				this.consoleLogs.unshift(logData)
+				// Keep only the last 500 logs in memory
+				if (this.consoleLogs.length > 500) {
+					this.consoleLogs = this.consoleLogs.slice(0, 500)
+				}
+			}
+		})
 	},
 	beforeUnmount() {
 		if (this.unsubscribeStatus) {
@@ -474,6 +516,9 @@ export default {
 		}
 		if (this.unsubscribeActivity) {
 			this.unsubscribeActivity()
+		}
+		if (this.unsubscribeConsoleLog) {
+			this.unsubscribeConsoleLog()
 		}
 		// Clean up all failed task timers
 		Object.values(this.failedTaskTimers).forEach((timer) => clearTimeout(timer))
@@ -625,6 +670,64 @@ export default {
 			} finally {
 				this.consoleLoading = false
 			}
+		},
+		setConsoleLogFilter(level) {
+			this.consoleLogFilter = level
+		},
+		exportActivities() {
+			// Convert activities to CSV
+			const headers = ['ID', 'Task Type', 'Status', 'Message', 'Progress', 'Created At', 'Updated At']
+			const csvRows = [headers.join(',')]
+
+			this.activities.forEach((activity) => {
+				const row = [
+					activity.id,
+					`"${activity.task_type}"`,
+					activity.status,
+					`"${(activity.message || '').replace(/"/g, '""')}"`,
+					activity.progress || 0,
+					activity.created_at,
+					activity.updated_at,
+				]
+				csvRows.push(row.join(','))
+			})
+
+			const csvContent = csvRows.join('\n')
+			const blob = new Blob([csvContent], { type: 'text/csv' })
+			const url = window.URL.createObjectURL(blob)
+			const a = document.createElement('a')
+			a.href = url
+			a.download = `activities_${new Date().toISOString().split('T')[0]}.csv`
+			a.click()
+			window.URL.revokeObjectURL(url)
+			this.$toast.success('Activities exported successfully')
+		},
+		exportConsoleLogs() {
+			// Convert console logs to CSV
+			const headers = ['ID', 'Source', 'Level', 'Message', 'Details', 'Created At']
+			const csvRows = [headers.join(',')]
+
+			this.consoleLogs.forEach((log) => {
+				const row = [
+					log.id,
+					`"${log.source}"`,
+					log.level,
+					`"${(log.message || '').replace(/"/g, '""')}"`,
+					`"${log.details ? JSON.stringify(log.details).replace(/"/g, '""') : ''}"`,
+					log.created_at,
+				]
+				csvRows.push(row.join(','))
+			})
+
+			const csvContent = csvRows.join('\n')
+			const blob = new Blob([csvContent], { type: 'text/csv' })
+			const url = window.URL.createObjectURL(blob)
+			const a = document.createElement('a')
+			a.href = url
+			a.download = `console_logs_${new Date().toISOString().split('T')[0]}.csv`
+			a.click()
+			window.URL.revokeObjectURL(url)
+			this.$toast.success('Console logs exported successfully')
 		},
 		async confirmClearConsoleLogs() {
 			if (confirm('Are you sure you want to clear all console logs?')) {

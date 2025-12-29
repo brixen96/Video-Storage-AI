@@ -315,27 +315,16 @@ export default {
 		this.loadDatabaseInfo()
 		this.connectWebSocket()
 		this.loadActiveTasks()
-
-		// Refresh active tasks every 2 seconds as backup
-		this.refreshInterval = setInterval(() => {
-			this.loadActiveTasks()
-		}, 2000)
 	},
 	beforeUnmount() {
 		if (this.wsUnsubscribe) {
 			this.wsUnsubscribe()
 		}
-		if (this.refreshInterval) {
-			clearInterval(this.refreshInterval)
-		}
 	},
 	methods: {
 		connectWebSocket() {
-			console.log('TasksPage: Connecting to WebSocket...')
-
 			// Subscribe to activity updates
 			this.wsUnsubscribe = websocketService.on('activity_update', (data) => {
-				console.log('TasksPage: Activity update received:', data)
 				this.handleActivityUpdate(data)
 			})
 
@@ -434,7 +423,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Scan Started', 'Library scan has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to scan libraries:', error)
@@ -448,7 +436,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Preview Generation Started', 'Preview generation has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to generate previews:', error)
@@ -462,7 +449,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Thumbnail Generation Started', 'Video thumbnail generation has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to generate video thumbnails:', error)
@@ -476,7 +462,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Performer Scan Started', 'Performer scan has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to scan performers:', error)
@@ -490,7 +475,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Thumbnail Generation Started', 'Performer thumbnail generation has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to generate performer thumbnails:', error)
@@ -504,7 +488,6 @@ export default {
 
 				if (response.status === 202 || response.status === 200) {
 					this.$toast.success('Metadata Fetch Started', 'Metadata fetching has been initiated. Watch the progress above!')
-					this.loadActiveTasks()
 				}
 			} catch (error) {
 				console.error('Failed to fetch metadata:', error)
@@ -652,6 +635,32 @@ export default {
 	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
 }
 
+/* Force all cards and elements to dark theme */
+.tasks-page .card {
+	background: rgba(0, 0, 0, 0.3) !important;
+	border: 1px solid rgba(0, 217, 255, 0.2) !important;
+	color: #fff !important;
+}
+
+.tasks-page .card-body {
+	background: transparent !important;
+	color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.tasks-page .card-header {
+	background: rgba(0, 217, 255, 0.1) !important;
+	border-bottom: 1px solid rgba(0, 217, 255, 0.2) !important;
+	color: #00d9ff !important;
+}
+
+.tasks-page label {
+	color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.tasks-page h1, .tasks-page h2, .tasks-page h3, .tasks-page h4, .tasks-page h5, .tasks-page h6 {
+	color: #fff !important;
+}
+
 .page-header h1 {
 	color: #00d9ff;
 	font-weight: 700;
@@ -695,10 +704,15 @@ export default {
 }
 
 .task-card {
-	background: rgba(0, 0, 0, 0.3);
-	border: 1px solid rgba(0, 217, 255, 0.2);
+	background: rgba(0, 0, 0, 0.3) !important;
+	border: 1px solid rgba(0, 217, 255, 0.2) !important;
 	backdrop-filter: blur(10px);
 	transition: all 0.3s ease;
+}
+
+.task-card .card-body {
+	background: transparent !important;
+	color: rgba(255, 255, 255, 0.9) !important;
 }
 
 .task-card:hover {
@@ -707,13 +721,13 @@ export default {
 }
 
 .task-card .card-header {
-	background: rgba(0, 217, 255, 0.1);
-	border-bottom: 1px solid rgba(0, 217, 255, 0.2);
+	background: rgba(0, 217, 255, 0.1) !important;
+	border-bottom: 1px solid rgba(0, 217, 255, 0.2) !important;
 	padding: 1rem 1.5rem;
 }
 
 .task-card .card-header h5 {
-	color: #00d9ff;
+	color: #00d9ff !important;
 	font-weight: 600;
 	margin: 0;
 }
@@ -723,9 +737,13 @@ export default {
 }
 
 .task-item h6 {
-	color: #fff;
+	color: #fff !important;
 	font-weight: 600;
 	margin-bottom: 0.5rem;
+}
+
+.task-item p {
+	color: rgba(255, 255, 255, 0.8) !important;
 }
 
 .task-item .btn {
@@ -755,19 +773,19 @@ export default {
 .stat-item {
 	text-align: center;
 	padding: 1rem;
-	background: rgba(0, 0, 0, 0.2);
+	background: rgba(0, 0, 0, 0.2) !important;
 	border-radius: 8px;
 }
 
 .stat-item label {
-	color: rgba(255, 255, 255, 0.6);
+	color: rgba(255, 255, 255, 0.6) !important;
 	font-size: 0.875rem;
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 }
 
 .stat-item h4 {
-	color: #00d9ff;
+	color: #00d9ff !important;
 	margin-top: 0.5rem;
 	font-weight: 600;
 }

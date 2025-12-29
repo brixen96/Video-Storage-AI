@@ -40,7 +40,7 @@ func (s *DatabaseService) GetStats() (*DatabaseStats, error) {
 	stats := &DatabaseStats{}
 
 	// Get file size
-	dbPath := "./video-storage.db"
+	dbPath := database.GetDBPath()
 	fileInfo, err := os.Stat(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database file info: %w", err)
@@ -137,7 +137,7 @@ func (s *DatabaseService) Backup() (*BackupResult, error) {
 
 	// Close current connections and perform backup
 	// SQLite doesn't support online backup easily, so we'll use file copy
-	dbPath := "./video-storage.db"
+	dbPath := database.GetDBPath()
 
 	// Open source file
 	sourceFile, err := os.Open(dbPath)
@@ -195,7 +195,7 @@ func (s *DatabaseService) RestoreFromBackup(backupPath string) error {
 		log.Printf("Warning: Failed to create pre-restore backup: %v", err)
 	}
 
-	dbPath := "./video-storage.db"
+	dbPath := database.GetDBPath()
 
 	// Note: Database restore requires restarting the application to properly close
 	// and reopen the database connection. For now, we'll perform a file copy

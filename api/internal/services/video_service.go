@@ -1102,14 +1102,30 @@ func (s *VideoService) updateVideoPreviewPath(videoID int64, previewPath string)
 func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 	log.Println("Starting preview generation for all videos...")
 
+	// Create activity log
+	activity, err := s.activityService.StartTask(
+		"preview_generation",
+		"Generating preview storyboards for all videos",
+		map[string]interface{}{},
+	)
+	if err != nil {
+		log.Printf("Failed to create activity log: %v", err)
+	}
+
 	// Get all libraries
 	libraries, err := s.libraryService.GetAll()
 	if err != nil {
+		if activity != nil {
+			s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Failed: %v", err))
+		}
 		return fmt.Errorf("failed to get libraries: %w", err)
 	}
 
 	if len(libraries) == 0 {
 		log.Println("No libraries found")
+		if activity != nil {
+			s.activityService.CompleteTask(int64(activity.ID), "No libraries found")
+		}
 		return nil
 	}
 
@@ -1158,6 +1174,11 @@ func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 
 	wg.Wait()
 	log.Println("All preview generation completed")
+
+	// Complete activity log
+	if activity != nil {
+		s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Completed preview generation for %d libraries", len(libraries)))
+	}
 
 	return nil
 }

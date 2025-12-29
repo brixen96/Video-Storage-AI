@@ -103,6 +103,52 @@
 	min-width: fit-content;
 }
 
+/* WebSocket Status Indicator */
+.ws-status-indicator {
+	display: inline-flex;
+	align-items: center;
+	font-size: 0.6rem;
+	cursor: help;
+}
+
+.ws-status-indicator .status-dot {
+	transition: all 0.3s ease;
+}
+
+.ws-status-indicator.connected .status-dot {
+	color: #00ff88;
+	animation: pulse-green 2s ease-in-out infinite;
+}
+
+.ws-status-indicator.disconnected .status-dot {
+	color: #ff4444;
+	animation: pulse-red 2s ease-in-out infinite;
+}
+
+@keyframes pulse-green {
+	0%,
+	100% {
+		opacity: 1;
+		filter: drop-shadow(0 0 3px #00ff88);
+	}
+	50% {
+		opacity: 0.6;
+		filter: drop-shadow(0 0 6px #00ff88);
+	}
+}
+
+@keyframes pulse-red {
+	0%,
+	100% {
+		opacity: 1;
+		filter: drop-shadow(0 0 3px #ff4444);
+	}
+	50% {
+		opacity: 0.6;
+		filter: drop-shadow(0 0 6px #ff4444);
+	}
+}
+
 /* Mobile responsiveness */
 @media (max-width: 991px) {
 	.nav-link {

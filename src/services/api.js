@@ -249,6 +249,10 @@ export const getAssetURL = (path) => {
 			return `http://localhost:8080/assets/${relativePath.replace(/\\/g, '/')}`
 		}
 	}
+	// Check if path already starts with /assets/ to avoid double prefix
+	if (path.startsWith('/assets/')) {
+		return `http://localhost:8080${path}`
+	}
 	return `http://localhost:8080/assets/${path}`
 }
 

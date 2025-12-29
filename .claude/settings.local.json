@@ -75,7 +75,8 @@
       "Bash(start /B video-storage-ai.exe)",
       "Bash(cmd /c \"cd /d C:\\\\Repos\\\\Video Storage AI && bin\\\\video-storage-ai.exe\")",
       "Bash(cmd /c \"cd /d C:\\\\Repos\\\\Video Storage AI && timeout 60 bin\\\\video-storage-ai.exe\")",
-      "Bash(cmd /c \"start /B bin\\\\video-storage-ai.exe\")"
+      "Bash(cmd /c \"start /B bin\\\\video-storage-ai.exe\")",
+      "Bash(Select-Object -First 20)"
     ],
     "deny": [],
     "ask": []
