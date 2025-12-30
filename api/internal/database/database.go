@@ -30,17 +30,20 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database connection
-	db, err := sql.Open("sqlite3", cfg.Database.Path)
+	// Open database connection with optimized settings
+	// Enable WAL mode for better concurrent read performance
+	dbPath := cfg.Database.Path + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=10000&_foreign_keys=ON"
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool settings
-	// SQLite only supports one writer at a time, so limit connections to prevent lock errors
-	db.SetMaxOpenConns(1) // Critical: SQLite doesn't support concurrent writes
-	db.SetMaxIdleConns(1) // Keep connection alive
-	db.SetConnMaxLifetime(time.Hour)
+	// Set connection pool settings optimized for SQLite with WAL mode
+	// WAL mode allows multiple concurrent readers with one writer
+	db.SetMaxOpenConns(25)  // Allow up to 25 concurrent connections (mostly readers)
+	db.SetMaxIdleConns(5)   // Keep 5 idle connections ready for fast reuse
+	db.SetConnMaxLifetime(time.Hour) // Recycle connections every hour
+	db.SetConnMaxIdleTime(10 * time.Minute) // Close idle connections after 10 minutes
 
 	// Test connection
 	if err := db.Ping(); err != nil {

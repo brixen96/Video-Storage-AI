@@ -7,6 +7,7 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/middleware"
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +23,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	router.Use(middleware.Logger())
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
+
+	// Add gzip compression for API responses
+	router.Use(gzip.Gzip(gzip.DefaultCompression))
 
 	// Add config to context for handlers
 	router.Use(func(c *gin.Context) {

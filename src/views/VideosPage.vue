@@ -260,6 +260,7 @@
 						<VideoCard
 							v-for="video in videos"
 							:key="video.id"
+							v-memo="[video.id, video.title, video.rating, selectedVideos.includes(video.id)]"
 							:video="video"
 							:is-selected="selectedVideos.includes(video.id)"
 							@toggle-select="toggleVideoSelection"
@@ -291,7 +292,12 @@
 								</tr>
 							</thead>
 							<tbody>
-								<tr v-for="video in videos" :key="video.id" :class="{ selected: selectedVideos.includes(video.id) }">
+								<tr
+									v-for="video in videos"
+									:key="video.id"
+									v-memo="[video.id, video.title, selectedVideos.includes(video.id)]"
+									:class="{ selected: selectedVideos.includes(video.id) }"
+								>
 									<td @click.stop>
 										<input type="checkbox" :checked="selectedVideos.includes(video.id)" @change="toggleVideoSelection(video)" />
 									</td>
@@ -401,12 +407,15 @@
 </template>
 
 <script>
+import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
-import VideoPlayerModal from '@/components/VideoPlayerModal.vue'
-import EditMetadataModal from '@/components/EditMetadataModal.vue'
-import AddTagModal from '@/components/AddTagModal.vue'
 import { videosAPI, librariesAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
+
+// Lazy load heavy modal components
+const VideoPlayerModal = defineAsyncComponent(() => import('@/components/VideoPlayerModal.vue'))
+const EditMetadataModal = defineAsyncComponent(() => import('@/components/EditMetadataModal.vue'))
+const AddTagModal = defineAsyncComponent(() => import('@/components/AddTagModal.vue'))
 
 export default {
 	name: 'VideosPage',

@@ -178,6 +178,7 @@
 				<div
 					v-for="performer in filteredPerformers"
 					:key="performer.id"
+					v-memo="[performer.id, performer.name, performer.video_count]"
 					class="performer-card text-center"
 					@click="openDetails(performer)"
 					@contextmenu.prevent="openContextMenu($event, performer)"

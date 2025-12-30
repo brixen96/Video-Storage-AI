@@ -12,9 +12,12 @@
 </template>
 
 <script>
+import { defineAsyncComponent } from 'vue'
 import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
-import AICompanionChat from '@/components/AICompanionChat.vue'
+
+// Lazy load heavy component
+const AICompanionChat = defineAsyncComponent(() => import('@/components/AICompanionChat.vue'))
 
 export default {
 	name: 'App',
