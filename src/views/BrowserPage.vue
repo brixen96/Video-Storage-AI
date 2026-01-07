@@ -78,146 +78,30 @@
 									</div>
 
 									<!-- Breadcrumb Navigation -->
-									<div v-if="getTabById(tabId).libraryId" class="breadcrumb-nav mb-3 d-flex align-items-center gap-2">
-										<button
-											v-if="getTabById(tabId).pathSegments.length > 0 && !getTabById(tabId).showNotInterested && !getTabById(tabId).showEditList"
-											class="btn btn-outline-primary btn-back"
-											@click="goBack(getTabById(tabId))"
-											title="Go back"
-										>
-											<font-awesome-icon :icon="['fas', 'arrow-left']" />
-										</button>
-										<nav aria-label="breadcrumb" class="flex-grow-1">
-											<!-- Filtering indicator -->
-											<div
-												v-if="getTabById(tabId).showNotInterested || getTabById(tabId).showEditList"
-												class="alert alert-info mb-0 py-2 d-flex align-items-center gap-2"
-											>
-												<font-awesome-icon :icon="['fas', 'info-circle']" />
-												<span>
-													Showing all
-													<strong>{{ getTabById(tabId).showNotInterested ? 'Not Interested' : 'Edit List' }}</strong> videos from library
-												</span>
-											</div>
-
-											<!-- Normal breadcrumb -->
-											<ol v-else class="breadcrumb mb-0">
-												<li class="breadcrumb-item">
-													<a href="#" class="breadcrumb-link" @click.prevent="navigateToPath(getTabById(tabId), '')">
-														<font-awesome-icon :icon="['fas', 'home']" />
-													</a>
-												</li>
-												<li
-													v-for="(segment, index) in getTabById(tabId).pathSegments"
-													:key="index"
-													class="breadcrumb-item"
-													:class="{ active: index === getTabById(tabId).pathSegments.length - 1 }"
-												>
-													<a
-														v-if="index < getTabById(tabId).pathSegments.length - 1"
-														href="#"
-														class="breadcrumb-link"
-														@click.prevent="navigateToSegment(getTabById(tabId), index)"
-													>
-														{{ segment }}
-													</a>
-													<span v-else class="breadcrumb-current">{{ segment }}</span>
-												</li>
-											</ol>
-										</nav>
-									</div>
+									<BrowserBreadcrumbNav
+										v-if="getTabById(tabId).libraryId"
+										:pathSegments="getTabById(tabId).pathSegments"
+										:showNotInterested="getTabById(tabId).showNotInterested"
+										:showEditList="getTabById(tabId).showEditList"
+										@navigate-to="navigateToSegment(getTabById(tabId), $event)"
+										@back="goBack(getTabById(tabId))"
+									/>
 
 									<!-- Search and Filter Bar -->
-									<div v-if="getTabById(tabId).libraryId" class="search-filter-bar mb-3">
-										<div class="row g-2">
-											<!-- Search -->
-											<div class="col-md-6">
-												<div class="input-group">
-													<span class="input-group-text bg-dark border-secondary">
-														<font-awesome-icon :icon="['fas', 'search']" />
-													</span>
-													<input
-														v-model="getTabById(tabId).searchQuery"
-														@input="applyFilters(getTabById(tabId))"
-														type="text"
-														class="form-control bg-dark text-white border-secondary"
-														placeholder="Search videos..."
-													/>
-													<button v-if="getTabById(tabId).searchQuery" class="btn btn-outline-secondary" @click="clearSearch(getTabById(tabId))">
-														<font-awesome-icon :icon="['fas', 'times']" />
-													</button>
-												</div>
-											</div>
-
-											<!-- Filters -->
-											<div class="col-md-6">
-												<div class="d-flex gap-2 filter-buttons">
-													<!-- Filter Type -->
-													<div class="btn-group" role="group">
-														<button
-															type="button"
-															class="btn btn-sm btn-outline-secondary"
-															:class="{ active: getTabById(tabId).filterType === 'all' }"
-															@click="setFilterType(getTabById(tabId), 'all')"
-														>
-															All
-														</button>
-														<button
-															type="button"
-															class="btn btn-sm btn-outline-secondary"
-															:class="{ active: getTabById(tabId).filterType === 'videos' }"
-															@click="setFilterType(getTabById(tabId), 'videos')"
-														>
-															Videos
-														</button>
-														<button
-															type="button"
-															class="btn btn-sm btn-outline-secondary"
-															:class="{ active: getTabById(tabId).filterType === 'folders' }"
-															@click="setFilterType(getTabById(tabId), 'folders')"
-														>
-															Folders
-														</button>
-													</div>
-
-													<!-- Sort -->
-													<select v-model="getTabById(tabId).sortBy" class="form-select form-select-sm bg-dark text-white border-secondary">
-														<option value="name">Name</option>
-														<option value="date">Date</option>
-														<option value="size">Size</option>
-														<option value="duration">Duration</option>
-													</select>
-													<button class="btn btn-sm btn-outline-secondary" @click="toggleSortOrder(getTabById(tabId))" :title="getTabById(tabId).sortOrder">
-														<font-awesome-icon :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" />
-													</button>
-
-													<!-- Mark Filters -->
-													<button
-														class="btn btn-sm btn-outline-danger"
-														:class="{ active: getTabById(tabId).showNotInterested }"
-														@click="toggleShowNotInterested(getTabById(tabId))"
-														title="Show Not Interested"
-													>
-														<font-awesome-icon :icon="['fas', 'times-circle']" />
-													</button>
-													<button
-														class="btn btn-sm btn-outline-success"
-														:class="{ active: getTabById(tabId).showEditList }"
-														@click="toggleShowEditList(getTabById(tabId))"
-														title="Show Edit List"
-													>
-														<font-awesome-icon :icon="['fas', 'list']" />
-													</button>
-
-													<div class="vr d-none d-md-block"></div>
-													<button class="btn btn-sm btn-outline-primary" @click="refreshCurrentFolder(getTabById(tabId))" title="Refresh folder">
-														<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': getTabById(tabId).loading }" />
-														<span class="ms-1 d-none d-lg-inline">Refresh</span>
-													</button>
-												</div>
-											</div>
-										</div>
-									</div>
+									<BrowserSearchFilterBar
+										v-if="getTabById(tabId).libraryId"
+										v-model:searchQuery="getTabById(tabId).searchQuery"
+										v-model:filterType="getTabById(tabId).filterType"
+										v-model:sortBy="getTabById(tabId).sortBy"
+										v-model:sortOrder="getTabById(tabId).sortOrder"
+										v-model:showNotInterested="getTabById(tabId).showNotInterested"
+										v-model:showEditList="getTabById(tabId).showEditList"
+										:isLoading="getTabById(tabId).loading"
+										@update:searchQuery="applyFilters(getTabById(tabId))"
+										@update:showNotInterested="toggleShowNotInterested(getTabById(tabId))"
+										@update:showEditList="toggleShowEditList(getTabById(tabId))"
+										@refresh="refreshCurrentFolder(getTabById(tabId))"
+									/>
 
 									<!-- Loading State -->
 									<div v-if="getTabById(tabId).loading" class="text-center py-5">
@@ -288,58 +172,14 @@
 									</div>
 
 									<!-- Pagination -->
-									<div v-if="getTabById(tabId).libraryId && totalPages(getTabById(tabId)) > 1" class="pagination-controls">
-										<div class="pagination-info">
-											Showing {{ (getTabById(tabId).currentPage - 1) * getTabById(tabId).itemsPerPage + 1 }} -
-											{{ Math.min(getTabById(tabId).currentPage * getTabById(tabId).itemsPerPage, getTabById(tabId).totalItems) }} of
-											{{ getTabById(tabId).totalItems }} items
-										</div>
-										<div class="pagination-buttons">
-											<button
-												class="btn btn-sm btn-outline-primary"
-												:disabled="getTabById(tabId).currentPage === 1"
-												@click="changePage(getTabById(tabId), 1)"
-											>
-												<font-awesome-icon :icon="['fas', 'chevron-left']" />
-												<font-awesome-icon :icon="['fas', 'chevron-left']" />
-											</button>
-											<button
-												class="btn btn-sm btn-outline-primary"
-												:disabled="getTabById(tabId).currentPage === 1"
-												@click="changePage(getTabById(tabId), getTabById(tabId).currentPage - 1)"
-											>
-												<font-awesome-icon :icon="['fas', 'chevron-left']" />
-											</button>
-											<span class="pagination-current"> Page {{ getTabById(tabId).currentPage }} of {{ totalPages(getTabById(tabId)) }} </span>
-											<button
-												class="btn btn-sm btn-outline-primary"
-												:disabled="getTabById(tabId).currentPage === totalPages(getTabById(tabId))"
-												@click="changePage(getTabById(tabId), getTabById(tabId).currentPage + 1)"
-											>
-												<font-awesome-icon :icon="['fas', 'chevron-right']" />
-											</button>
-											<button
-												class="btn btn-sm btn-outline-primary"
-												:disabled="getTabById(tabId).currentPage === totalPages(getTabById(tabId))"
-												@click="changePage(getTabById(tabId), totalPages(getTabById(tabId)))"
-											>
-												<font-awesome-icon :icon="['fas', 'chevron-right']" />
-												<font-awesome-icon :icon="['fas', 'chevron-right']" />
-											</button>
-										</div>
-										<div class="pagination-size">
-											<select
-												v-model.number="getTabById(tabId).itemsPerPage"
-												class="form-select form-select-sm bg-dark text-white border-secondary"
-												@change="getTabById(tabId).currentPage = 1"
-											>
-												<option :value="50">50 per page</option>
-												<option :value="100">100 per page</option>
-												<option :value="200">200 per page</option>
-												<option :value="500">500 per page</option>
-											</select>
-										</div>
-									</div>
+									<BrowserPaginationControls
+										v-if="getTabById(tabId).libraryId"
+										:currentPage="getTabById(tabId).currentPage"
+										:itemsPerPage="getTabById(tabId).itemsPerPage"
+										:totalItems="getTabById(tabId).totalItems"
+										@update:currentPage="getTabById(tabId).currentPage = $event"
+										@update:itemsPerPage="getTabById(tabId).itemsPerPage = $event; getTabById(tabId).currentPage = 1"
+									/>
 								</div>
 							</template>
 						</div>
@@ -352,30 +192,17 @@
 		</div>
 
 		<!-- Context Menu -->
-		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
-			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="playVideo(contextMenu.item); closeContextMenu()">
-				<font-awesome-icon :icon="['fas', 'play']" class="me-2" />
-				Play Video
-			</div>
-			<div v-if="contextMenu.item?.type === 'folder'" class="context-menu-item" @click="navigateToFolder(contextMenu.tab, contextMenu.item.path); closeContextMenu()">
-				<font-awesome-icon :icon="['fas', 'folder-open']" class="me-2" />
-				Open Folder
-			</div>
-			<div class="context-menu-divider"></div>
-			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="toggleNotInterested(contextMenu.tab, contextMenu.item); closeContextMenu()">
-				<font-awesome-icon :icon="['fas', 'times-circle']" class="me-2" />
-				{{ contextMenu.item.not_interested ? 'Remove from Not Interested' : 'Mark as Not Interested' }}
-			</div>
-			<div v-if="contextMenu.item?.type === 'video'" class="context-menu-item" @click="toggleEditList(contextMenu.tab, contextMenu.item); closeContextMenu()">
-				<font-awesome-icon :icon="['fas', 'list']" class="me-2" />
-				{{ contextMenu.item.in_edit_list ? 'Remove from Edit List' : 'Add to Edit List' }}
-			</div>
-			<div class="context-menu-divider"></div>
-			<div class="context-menu-item" @click="copyPathToClipboard(contextMenu.item); closeContextMenu()">
-				<font-awesome-icon :icon="['fas', 'check']" class="me-2" />
-				Copy Path
-			</div>
-		</div>
+		<BrowserContextMenu
+			:visible="contextMenu.visible"
+			:x="contextMenu.x"
+			:y="contextMenu.y"
+			:item="contextMenu.item"
+			@play="playVideo(contextMenu.item); closeContextMenu()"
+			@open="navigateToFolder(contextMenu.tab, contextMenu.item.path); closeContextMenu()"
+			@toggle-not-interested="toggleNotInterested(contextMenu.tab, contextMenu.item); closeContextMenu()"
+			@toggle-edit-list="toggleEditList(contextMenu.tab, contextMenu.item); closeContextMenu()"
+			@copy-path="copyPathToClipboard(contextMenu.item); closeContextMenu()"
+		/>
 
 		<!-- Video Preview on Hover -->
 		<div
@@ -416,11 +243,17 @@
 <script>
 import { librariesAPI, videosAPI, filesAPI, getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
+import { BrowserPaginationControls, BrowserSearchFilterBar, BrowserBreadcrumbNav, BrowserContextMenu } from '@/components/browser'
+import { useFormatters } from '@/composables/useFormatters'
 
 export default {
 	name: 'BrowserPage',
 	components: {
 		VideoPlayer,
+		BrowserPaginationControls,
+		BrowserSearchFilterBar,
+		BrowserBreadcrumbNav,
+		BrowserContextMenu,
 	},
 	data() {
 		return {
@@ -472,6 +305,12 @@ export default {
 			if (this.previewFrames.length === 0) return null
 			return this.previewFrames[this.previewFrameIndex]
 		},
+	},
+	created() {
+		// Initialize formatters composable
+		const formatters = useFormatters()
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDuration = formatters.formatDuration
 	},
 	async mounted() {
 		await this.loadLibraries()
@@ -1209,16 +1048,7 @@ export default {
 			}
 			this.loadLibraryContent(tab)
 		},
-		formatDuration(seconds) {
-			const hours = Math.floor(seconds / 3600)
-			const minutes = Math.floor((seconds % 3600) / 60)
-			const secs = Math.floor(seconds % 60)
-
-			if (hours > 0) {
-				return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-			}
-			return `${minutes}:${String(secs).padStart(2, '0')}`
-		},
+		// formatDuration now provided by useFormatters composable
 		getAssetURL(path) {
 			return getAssetURL(path)
 		},

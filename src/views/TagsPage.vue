@@ -65,10 +65,7 @@
 				<div class="row g-3">
 					<!-- Search -->
 					<div class="col-md-4">
-						<div class="search-box">
-							<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
-							<input v-model="searchQuery" type="text" class="form-control" placeholder="Search tags..." />
-						</div>
+						<SearchBox v-model="searchQuery" placeholder="Search tags..." />
 					</div>
 
 					<!-- Category Filter -->
@@ -93,9 +90,9 @@
 
 					<!-- Bulk Actions -->
 					<div class="col-md-3">
-						<button class="btn btn-outline-danger w-100" :disabled="selectedTags.length === 0" @click="bulkDelete">
+						<button class="btn btn-outline-danger w-100" :disabled="selectedCount === 0" @click="bulkDelete">
 							<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-							Delete Selected ({{ selectedTags.length }})
+							Delete Selected ({{ selectedCount }})
 						</button>
 					</div>
 				</div>
@@ -133,9 +130,9 @@
 								<button class="btn btn-primary btn-sm" @click="openCreateModal">Create Your First Tag</button>
 							</td>
 						</tr>
-						<tr v-for="tag in filteredTags" :key="tag.id" :class="{ selected: selectedTags.includes(tag.id) }">
+						<tr v-for="tag in filteredTags" :key="tag.id" :class="{ selected: isSelected(tag.id) }">
 							<td>
-								<input type="checkbox" class="form-check-input" :checked="selectedTags.includes(tag.id)" @change="toggleSelect(tag.id)" />
+								<input type="checkbox" class="form-check-input" :checked="isSelected(tag.id)" @change="toggleSelection(tag.id)" />
 							</td>
 							<td class="text-light fw-bold">{{ tag.name }}</td>
 							<td>
@@ -194,20 +191,7 @@
 								<font-awesome-icon :icon="['fas', 'layer-group']" class="me-2" />
 								Category
 							</label>
-							<div class="category-selector">
-								<div :class="['category-option', { active: createForm.category === 'regular' }]" @click="createForm.category = 'regular'">
-									<font-awesome-icon :icon="['fas', 'user']" size="2x" />
-									<span>Regular</span>
-								</div>
-								<div :class="['category-option', { active: createForm.category === 'zoo' }]" @click="createForm.category = 'zoo'">
-									<font-awesome-icon :icon="['fas', 'dog']" size="2x" />
-									<span>Zoo</span>
-								</div>
-								<div :class="['category-option', { active: createForm.category === '3d' }]" @click="createForm.category = '3d'">
-									<font-awesome-icon :icon="['fas', 'cube']" size="2x" />
-									<span>3D</span>
-								</div>
-							</div>
+							<CategorySelector v-model="createForm.category" />
 							<small class="form-text text-muted">Tags will only appear for content matching this category</small>
 						</div>
 
@@ -287,20 +271,7 @@
 						<!-- Category Selection -->
 						<div class="mb-4">
 							<label class="form-label fw-bold">Select Category for All Tags</label>
-							<div class="category-selector">
-								<div :class="['category-option', { active: batchForm.category === 'regular' }]" @click="batchForm.category = 'regular'">
-									<font-awesome-icon :icon="['fas', 'user']" size="2x" />
-									<span>Regular</span>
-								</div>
-								<div :class="['category-option', { active: batchForm.category === 'zoo' }]" @click="batchForm.category = 'zoo'">
-									<font-awesome-icon :icon="['fas', 'dog']" size="2x" />
-									<span>Zoo</span>
-								</div>
-								<div :class="['category-option', { active: batchForm.category === '3d' }]" @click="batchForm.category = '3d'">
-									<font-awesome-icon :icon="['fas', 'cube']" size="2x" />
-									<span>3D</span>
-								</div>
-							</div>
+							<CategorySelector v-model="batchForm.category" />
 						</div>
 
 						<!-- Quick Presets -->
@@ -425,27 +396,50 @@ Anal"
 		</div>
 
 		<div v-if="showCreateModal || showMergeModal || showBatchCreateModal" class="modal-backdrop show"></div>
+
+		<!-- Delete Confirmation Modal -->
+		<DeleteConfirmationModal
+			:visible="deleteModal.show"
+			:title="deleteModal.isBulk ? 'Confirm Bulk Delete' : 'Confirm Delete'"
+			message="Are you sure you want to delete"
+			:itemName="deleteModal.isBulk ? `${selectedCount} selected tags` : deleteModal.tag?.name"
+			warningMessage="This will remove the tag(s) from all videos."
+			@confirm="deleteModal.isBulk ? confirmBulkDelete() : confirmDeleteTag()"
+			@cancel="deleteModal.show = false"
+		/>
 	</div>
 </template>
 
 <script>
 import { tagsAPI } from '@/services/api'
+import { DeleteConfirmationModal, CategorySelector, SearchBox } from '@/components/shared'
+import { useTableSelectionOptionsAPI } from '@/composables/useTableSelection'
 
 export default {
 	name: 'TagsPage',
+	components: {
+		DeleteConfirmationModal,
+		CategorySelector,
+		SearchBox,
+	},
 	data() {
 		return {
 			tags: [],
 			searchQuery: '',
 			categoryFilter: '',
 			sortBy: 'name',
-			selectedTags: [],
+			...useTableSelectionOptionsAPI().data(),
 			showCreateModal: false,
 			showBatchCreateModal: false,
 			showMergeModal: false,
 			editingTag: null,
 			mergeSourceTag: null,
 			mergeTargetId: null,
+			deleteModal: {
+				show: false,
+				tag: null,
+				isBulk: false,
+			},
 			createForm: {
 				name: '',
 				color: '#6c757d',
@@ -559,6 +553,9 @@ Spooning`,
 		}
 	},
 	computed: {
+		...useTableSelectionOptionsAPI().computed(function () {
+			return this.filteredTags
+		}),
 		filteredTags() {
 			let result = this.tags
 
@@ -579,9 +576,6 @@ Spooning`,
 				if (this.sortBy === 'category') return (a.category || 'regular').localeCompare(b.category || 'regular')
 				return new Date(b.created_at) - new Date(a.created_at)
 			})
-		},
-		allSelected() {
-			return this.filteredTags.length > 0 && this.selectedTags.length === this.filteredTags.length
 		},
 		availableTargetTags() {
 			if (!this.mergeSourceTag) return this.tags
@@ -610,6 +604,9 @@ Spooning`,
 		this.loadTags()
 	},
 	methods: {
+		...useTableSelectionOptionsAPI().methods(function () {
+			return this.filteredTags
+		}),
 		async loadTags() {
 			try {
 				const response = await tagsAPI.getAll()
@@ -617,14 +614,6 @@ Spooning`,
 			} catch (err) {
 				console.error('Failed to load tags:', err)
 			}
-		},
-		toggleSelect(tagId) {
-			const index = this.selectedTags.indexOf(tagId)
-			if (index > -1) this.selectedTags.splice(index, 1)
-			else this.selectedTags.push(tagId)
-		},
-		toggleSelectAll() {
-			this.selectedTags = this.allSelected ? [] : this.filteredTags.map((tag) => tag.id)
 		},
 		openCreateModal() {
 			this.editingTag = null
@@ -713,26 +702,35 @@ Spooning`,
 				console.error('Failed to update tag:', err)
 			}
 		},
-		async deleteTag(tag) {
-			if (!confirm(`Delete tag "${tag.name}"? This will remove it from all videos.`)) return
-
+		deleteTag(tag) {
+			this.deleteModal.tag = tag
+			this.deleteModal.isBulk = false
+			this.deleteModal.show = true
+		},
+		async confirmDeleteTag() {
 			try {
-				await tagsAPI.delete(tag.id)
+				await tagsAPI.delete(this.deleteModal.tag.id)
 				await this.loadTags()
 			} catch (err) {
 				console.error('Failed to delete tag:', err)
 			}
+			this.deleteModal.show = false
+			this.deleteModal.tag = null
 		},
-		async bulkDelete() {
-			if (!confirm(`Delete ${this.selectedTags.length} selected tags? This will remove them from all videos.`)) return
-
+		bulkDelete() {
+			this.deleteModal.isBulk = true
+			this.deleteModal.show = true
+		},
+		async confirmBulkDelete() {
 			try {
-				await Promise.all(this.selectedTags.map((id) => tagsAPI.delete(id)))
-				this.selectedTags = []
+				await Promise.all(this.selectedItems.map((id) => tagsAPI.delete(id)))
+				this.clearSelection()
 				await this.loadTags()
 			} catch (err) {
 				console.error('Failed to delete tags:', err)
 			}
+			this.deleteModal.show = false
+			this.deleteModal.isBulk = false
 		},
 		openMergeModal(tag) {
 			this.mergeSourceTag = tag

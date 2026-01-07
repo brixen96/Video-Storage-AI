@@ -12,10 +12,7 @@
 			</div>
 
 			<!-- Loading State -->
-			<div v-if="loading" class="text-center py-5">
-				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" class="text-primary" />
-				<p class="mt-3">Loading libraries...</p>
-			</div>
+			<LoadingState v-if="loading" spinner="fontawesome" show-text loading-text="Loading libraries..." />
 
 			<!-- Libraries List -->
 			<div v-else-if="libraries.length > 0" class="row g-4">
@@ -60,15 +57,14 @@
 			</div>
 
 			<!-- Empty State -->
-			<div v-else class="empty-state text-center py-5">
-				<font-awesome-icon :icon="['fas', 'folder']" size="5x" class="mb-3" />
-				<h3>No Libraries Yet</h3>
-				<p class="">Get started by adding your first library</p>
-				<button class="btn btn-primary btn-lg" @click="showCreateModal = true">
-					<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-					Add Your First Library
-				</button>
-			</div>
+			<EmptyState v-else :icon="['fas', 'folder']" icon-size="5x" title="No Libraries Yet" message="Get started by adding your first library">
+				<template #actions>
+					<button class="btn btn-primary btn-lg" @click="showCreateModal = true">
+						<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
+						Add Your First Library
+					</button>
+				</template>
+			</EmptyState>
 		</div>
 
 		<!-- Create/Edit Modal -->
@@ -119,9 +115,14 @@
 
 <script>
 import { librariesAPI } from '@/services/api'
+import { LoadingState, EmptyState } from '@/components/shared'
 
 export default {
 	name: 'LibrariesPage',
+	components: {
+		LoadingState,
+		EmptyState,
+	},
 	data() {
 		return {
 			libraries: [],

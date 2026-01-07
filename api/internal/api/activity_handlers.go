@@ -271,3 +271,155 @@ func getRecentActivities(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.SuccessResponse(activities, "Recent activities retrieved successfully"))
 }
+
+// pauseActivity pauses a running task
+func pauseActivity(c *gin.Context) {
+	svc := ensureActivityService()
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid activity ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get checkpoint data from request body (optional)
+	var req struct {
+		Checkpoint map[string]interface{} `json:"checkpoint"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// If no body provided, use empty checkpoint
+		req.Checkpoint = make(map[string]interface{})
+	}
+
+	err = svc.PauseTask(id, req.Checkpoint)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to pause activity",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get updated activity to return
+	activity, err := svc.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusOK, models.SuccessResponse(nil, "Activity paused successfully"))
+		return
+	}
+
+	// Broadcast the paused activity via WebSocket for instant UI update
+	if wsHub != nil {
+		wsHub.BroadcastActivityUpdate(activity)
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(activity, "Activity paused successfully"))
+}
+
+// resumeActivity resumes a paused task
+func resumeActivity(c *gin.Context) {
+	svc := ensureActivityService()
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid activity ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get the activity to check its type and details
+	activity, err := svc.GetByID(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get activity",
+			err.Error(),
+		))
+		return
+	}
+
+	// Unmarshal details to get task-specific data
+	if err := activity.UnmarshalDetails(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to parse activity details",
+			err.Error(),
+		))
+		return
+	}
+
+	// Resume the task (clears pause flag)
+	checkpoint, err := svc.ResumeTask(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to resume activity",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get updated activity to broadcast via WebSocket
+	updatedActivity, _ := svc.GetByID(id)
+	if updatedActivity != nil && wsHub != nil {
+		wsHub.BroadcastActivityUpdate(updatedActivity)
+	}
+
+	// Actually restart the task based on its type
+	if activity.TaskType == "forum_scrape" {
+		// Get forum URL from details
+		forumURL, ok := activity.DetailsObj["forum_url"].(string)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+				"Failed to resume activity",
+				"Forum URL not found in activity details",
+			))
+			return
+		}
+
+		// Restart the forum scraper in the background with existing activity ID
+		scraperSvc := ensureScraperService()
+		go func() {
+			if err := scraperSvc.ResumeForumScrape(forumURL, int(id)); err != nil {
+				log.Printf("Error resuming forum scrape: %v", err)
+			}
+		}()
+
+		c.JSON(http.StatusOK, models.SuccessResponse(nil, "Forum scraping resumed in background"))
+		return
+	}
+
+	// For other task types, just return the checkpoint
+	result := map[string]interface{}{
+		"checkpoint": checkpoint,
+		"message":    "Activity resumed - manual restart may be required",
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(result, "Activity resumed successfully"))
+}
+
+// getPausedActivities retrieves all currently paused tasks
+func getPausedActivities(c *gin.Context) {
+	svc := ensureActivityService()
+
+	// Get all running tasks that are paused
+	activities, err := svc.GetAll("running", "", 100)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to retrieve paused activities",
+			err.Error(),
+		))
+		return
+	}
+
+	// Filter for paused tasks
+	pausedActivities := make([]*models.Activity, 0)
+	for i := range activities {
+		if activities[i].IsPaused {
+			pausedActivities = append(pausedActivities, &activities[i])
+		}
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(pausedActivities, "Paused activities retrieved successfully"))
+}

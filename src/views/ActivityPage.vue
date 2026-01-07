@@ -189,10 +189,7 @@
 			</div>
 
 			<!-- Loading State -->
-			<div v-if="loading && activities.length === 0" class="text-center py-5">
-				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" class="text-primary" />
-				<p class="mt-3">Loading activities...</p>
-			</div>
+			<LoadingState v-if="loading && activities.length === 0" spinner="fontawesome" show-text loading-text="Loading activities..." />
 
 			<!-- Activity Timeline -->
 			<div v-else-if="activities.length > 0" class="row">
@@ -416,9 +413,13 @@
 <script>
 import { activityAPI, consoleLogAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
+import { LoadingState } from '@/components/shared'
 
 export default {
 	name: 'ActivityPage',
+	components: {
+		LoadingState,
+	},
 	data() {
 		return {
 			activeTab: 'activities',
@@ -433,6 +434,7 @@ export default {
 			},
 			expandedDetails: {},
 			failedTaskTimers: {}, // Track timers for auto-dismissing failed tasks
+			staleTaskCleanup: null, // Interval for cleaning up completed tasks
 			unsubscribeStatus: null,
 			unsubscribeActivity: null,
 			unsubscribeConsoleLog: null,
@@ -458,7 +460,15 @@ export default {
 			if (this.consoleLogFilter === 'ALL') {
 				return this.consoleLogs
 			}
-			return this.consoleLogs.filter((log) => log.level === this.consoleLogFilter)
+			return this.consoleLogs.filter((log) => log.level.toUpperCase() === this.consoleLogFilter)
+		},
+	},
+	watch: {
+		// Load console logs when switching to console tab
+		activeTab(newTab) {
+			if (newTab === 'console' && this.consoleLogs.length === 0) {
+				this.loadConsoleLogs()
+			}
 		},
 	},
 	async mounted() {
@@ -472,31 +482,65 @@ export default {
 		})
 
 		this.unsubscribeActivity = websocketService.on('activity_update', (activity) => {
+			// Clear any existing timer for this activity first
+			if (this.failedTaskTimers[activity.id]) {
+				clearTimeout(this.failedTaskTimers[activity.id])
+				delete this.failedTaskTimers[activity.id]
+			}
+
+			// If task is completed or failed, remove it from the list immediately and show toast
+			if (activity.status === 'completed') {
+				const idx = this.activities.findIndex((a) => a.id === activity.id)
+				if (idx !== -1) {
+					this.activities.splice(idx, 1)
+					this.$toast.success('Task completed', `"${activity.message}" finished successfully`)
+				}
+				return
+			}
+
+			if (activity.status === 'failed') {
+				const idx = this.activities.findIndex((a) => a.id === activity.id)
+				if (idx !== -1) {
+					this.activities.splice(idx, 1)
+					this.$toast.error('Task failed', `"${activity.message}" failed`)
+				}
+				return
+			}
+
+			// For running/pending tasks, update or add to list
 			const index = this.activities.findIndex((a) => a.id === activity.id)
 			if (index !== -1) {
 				this.activities.splice(index, 1, activity)
 			} else {
 				this.activities.unshift(activity)
 			}
-
-			// Auto-dismiss failed tasks after 10 seconds
-			if (activity.status === 'failed') {
-				// Clear any existing timer for this activity
-				if (this.failedTaskTimers[activity.id]) {
-					clearTimeout(this.failedTaskTimers[activity.id])
-				}
-
-				// Set new timer to auto-dismiss after 10 seconds
-				this.failedTaskTimers[activity.id] = setTimeout(() => {
-					const idx = this.activities.findIndex((a) => a.id === activity.id)
-					if (idx !== -1) {
-						this.activities.splice(idx, 1)
-						this.$toast.info('Failed task auto-dismissed', `"${activity.message}" has been automatically removed`)
-					}
-					delete this.failedTaskTimers[activity.id]
-				}, 10000)
-			}
 		})
+
+		// Poll every 10 seconds to clean up stale tasks that may have completed without websocket notification
+		this.staleTaskCleanup = setInterval(async () => {
+			if (this.activities.length > 0) {
+				// Refresh the activities list from the server
+				try {
+					const response = await activityAPI.getAll({ status: 'running', limit: 100 })
+					const runningTasks = response.data || []
+					const runningIds = new Set(runningTasks.map(t => t.id))
+
+					// Remove any tasks that are no longer running on the backend
+					const staleCount = this.activities.length
+					this.activities = this.activities.filter(a => runningIds.has(a.id))
+
+					if (this.activities.length < staleCount) {
+						// Some tasks were removed as stale/completed
+						const removed = staleCount - this.activities.length
+						if (removed > 0) {
+							this.$toast.success('Tasks completed', `${removed} task${removed > 1 ? 's' : ''} finished`)
+						}
+					}
+				} catch (error) {
+					// Silently fail - not critical
+				}
+			}
+		}, 10000)
 
 		// Subscribe to console log updates via WebSocket
 		this.unsubscribeConsoleLog = websocketService.on('console_log', (logData) => {
@@ -519,6 +563,10 @@ export default {
 		}
 		if (this.unsubscribeConsoleLog) {
 			this.unsubscribeConsoleLog()
+		}
+		// Clean up stale task cleanup interval
+		if (this.staleTaskCleanup) {
+			clearInterval(this.staleTaskCleanup)
 		}
 		// Clean up all failed task timers
 		Object.values(this.failedTaskTimers).forEach((timer) => clearTimeout(timer))

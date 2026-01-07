@@ -240,6 +240,7 @@
 <script>
 import { videosAPI } from '@/services/api'
 import { getAssetURL } from '@/services/api'
+import { useFormatters } from '@/composables/useFormatters'
 
 export default {
 	name: 'VideoPlayerPage',
@@ -276,6 +277,12 @@ export default {
 			}
 			return mimeTypes[ext] || 'video/mp4'
 		},
+	},
+	created() {
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDate = formatters.formatDate
 	},
 	async mounted() {
 		const videoId = this.$route.params.id
@@ -476,23 +483,7 @@ export default {
 			if (!path) return ''
 			return path.split(/[\\/]/).pop()
 		},
-		formatDuration(seconds) {
-			if (!seconds) return '0:00'
-			const hours = Math.floor(seconds / 3600)
-			const mins = Math.floor((seconds % 3600) / 60)
-			const secs = Math.floor(seconds % 60)
-			if (hours > 0) {
-				return `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-			}
-			return `${mins}:${String(secs).padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (!bytes) return ''
-			if (bytes < 1024) return bytes + ' B'
-			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-			return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-		},
+		// formatDuration, formatFileSize, and formatDate now provided by useFormatters composable
 		formatBitrate(bitrate) {
 			if (!bitrate) return ''
 			const kbps = bitrate / 1000
@@ -502,11 +493,6 @@ export default {
 		formatFPS(fps) {
 			if (!fps) return ''
 			return parseFloat(fps.toFixed(2))
-		},
-		formatDate(dateString) {
-			if (!dateString) return ''
-			const date = new Date(dateString)
-			return date.toLocaleString()
 		},
 	},
 	watch: {

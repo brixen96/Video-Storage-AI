@@ -13,6 +13,7 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/api"
 	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
+	"github.com/brixen96/video-storage-ai/internal/logger"
 	"github.com/brixen96/video-storage-ai/internal/services"
 )
 
@@ -37,6 +38,27 @@ func main() {
 	}()
 
 	log.Println("Database initialized successfully")
+
+	// Initialize custom logger to capture all console output
+	consoleLogService := services.NewConsoleLogService()
+	logger.SetupLogger(consoleLogService)
+	log.Println("Console logger initialized - all logs will be captured")
+
+	// Check for paused tasks and notify
+	activityService := services.NewActivityService()
+	pausedActivities, err := activityService.GetAll("running", "", 100)
+	if err == nil {
+		pausedCount := 0
+		for _, activity := range pausedActivities {
+			if activity.IsPaused {
+				pausedCount++
+				log.Printf("📍 Found paused task: [%s] %s (ID: %d)", activity.TaskType, activity.Message, activity.ID)
+			}
+		}
+		if pausedCount > 0 {
+			log.Printf("ℹ️ Found %d paused task(s). You can resume them from the Activity page.", pausedCount)
+		}
+	}
 
 	// Run startup performer scan
 	log.Println("Running startup performer scan...")

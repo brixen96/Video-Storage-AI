@@ -1,6 +1,6 @@
 .activity-tracker {
 	position: fixed;
-	bottom: 20px;
+	bottom: 100px;
 	right: 20px;
 	background: rgba(20, 20, 30, 0.95);
 	border: 1px solid rgba(0, 217, 255, 0.3);
@@ -9,7 +9,7 @@
 	backdrop-filter: blur(10px);
 	min-width: 300px;
 	max-width: 400px;
-	z-index: 9998;
+	z-index: 999;
 	overflow: hidden;
 }
 
@@ -40,17 +40,55 @@
 	display: flex;
 	gap: 12px;
 	align-items: flex-start;
+	transition: background 0.2s;
+}
+
+.activity-item:hover {
+	background: rgba(255, 255, 255, 0.02);
 }
 
 .activity-icon {
 	color: #00d9ff;
 	font-size: 1.1rem;
 	flex-shrink: 0;
+	margin-top: 2px;
 }
 
 .activity-details {
 	flex: 1;
 	min-width: 0;
+}
+
+.activity-actions {
+	flex-shrink: 0;
+	display: flex;
+	gap: 6px;
+}
+
+.activity-actions .btn {
+	padding: 4px 8px;
+	font-size: 0.85rem;
+	border-radius: 6px;
+}
+
+.activity-actions .btn-outline-warning {
+	color: #ffc107;
+	border-color: rgba(255, 193, 7, 0.3);
+}
+
+.activity-actions .btn-outline-warning:hover {
+	background: rgba(255, 193, 7, 0.1);
+	border-color: #ffc107;
+}
+
+.activity-actions .btn-outline-success {
+	color: #28a745;
+	border-color: rgba(40, 167, 69, 0.3);
+}
+
+.activity-actions .btn-outline-success:hover {
+	background: rgba(40, 167, 69, 0.1);
+	border-color: #28a745;
 }
 
 .activity-message {

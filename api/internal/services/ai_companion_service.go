@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -146,13 +147,32 @@ func (s *AICompanionService) GetStatus() map[string]interface{} {
 }
 
 // SubscribeToEvents allows clients to receive real-time events
-func (s *AICompanionService) SubscribeToEvents() <-chan CompanionEvent {
+// Returns the event channel and an unsubscribe function
+func (s *AICompanionService) SubscribeToEvents() (<-chan CompanionEvent, func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	eventChan := make(chan CompanionEvent, 10)
 	s.subscribers = append(s.subscribers, eventChan)
-	return eventChan
+
+	// Return unsubscribe function
+	unsubscribe := func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
+		// Find and remove the channel from subscribers
+		for i, sub := range s.subscribers {
+			if sub == eventChan {
+				// Remove by swapping with last element and truncating
+				s.subscribers[i] = s.subscribers[len(s.subscribers)-1]
+				s.subscribers = s.subscribers[:len(s.subscribers)-1]
+				close(eventChan)
+				break
+			}
+		}
+	}
+
+	return eventChan, unsubscribe
 }
 
 // startFileWatchers initializes file system watchers for all libraries
@@ -325,11 +345,20 @@ func (s *AICompanionService) processEvents() {
 			// Broadcast to all subscribers
 			s.mu.RLock()
 			for _, subscriber := range s.subscribers {
-				select {
-				case subscriber <- event:
-				default:
-					// Skip if subscriber channel is full
-				}
+				// Use select with default to avoid blocking
+				// Also wrap in recover to handle closed channel panics
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// Channel was closed, ignore
+						}
+					}()
+					select {
+					case subscriber <- event:
+					default:
+						// Skip if subscriber channel is full
+					}
+				}()
 			}
 			s.mu.RUnlock()
 
@@ -895,6 +924,110 @@ func (s *AICompanionService) GetTaggedVideos(tagName string) ([]string, error) {
 	}
 
 	return results, nil
+}
+
+// CountPostsWithKeyword counts posts containing a specific keyword
+func (s *AICompanionService) CountPostsWithKeyword(keyword string, threadID ...int64) (int, error) {
+	var query string
+	var args []interface{}
+	var count int
+
+	if len(threadID) > 0 && threadID[0] > 0 {
+		query = "SELECT COUNT(*) FROM scraped_posts WHERE thread_id = ? AND plain_text LIKE ?"
+		args = []interface{}{threadID[0], "%" + keyword + "%"}
+	} else {
+		query = "SELECT COUNT(*) FROM scraped_posts WHERE plain_text LIKE ?"
+		args = []interface{}{"%" + keyword + "%"}
+	}
+
+	err := s.db.QueryRow(query, args...).Scan(&count)
+	return count, err
+}
+
+// SearchThreadPosts searches for text in scraped forum posts
+func (s *AICompanionService) SearchThreadPosts(searchTerm string, threadID ...int64) ([]map[string]interface{}, error) {
+	var query string
+	var args []interface{}
+
+	if len(threadID) > 0 && threadID[0] > 0 {
+		// Search within specific thread
+		query = `
+			SELECT sp.id, sp.plain_text, sp.author, sp.post_number, st.title, st.id as thread_id
+			FROM scraped_posts sp
+			INNER JOIN scraped_threads st ON sp.thread_id = st.id
+			WHERE sp.thread_id = ? AND sp.plain_text LIKE ?
+			ORDER BY sp.post_number ASC
+			LIMIT 50
+		`
+		args = []interface{}{threadID[0], "%" + searchTerm + "%"}
+	} else {
+		// Search across all posts
+		query = `
+			SELECT sp.id, sp.plain_text, sp.author, sp.post_number, st.title, st.id as thread_id
+			FROM scraped_posts sp
+			INNER JOIN scraped_threads st ON sp.thread_id = st.id
+			WHERE sp.plain_text LIKE ?
+			ORDER BY st.id, sp.post_number ASC
+			LIMIT 50
+		`
+		args = []interface{}{"%" + searchTerm + "%"}
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []map[string]interface{}{}
+	for rows.Next() {
+		var postID, threadID int64
+		var plainText, author, threadTitle string
+		var postNumber int
+
+		err = rows.Scan(&postID, &plainText, &author, &postNumber, &threadTitle, &threadID)
+		if err != nil {
+			continue
+		}
+
+		// Truncate text to 300 chars for display
+		excerpt := plainText
+		if len(excerpt) > 300 {
+			excerpt = excerpt[:300] + "..."
+		}
+
+		results = append(results, map[string]interface{}{
+			"post_id":      postID,
+			"thread_id":    threadID,
+			"thread_title": threadTitle,
+			"post_number":  postNumber,
+			"author":       author,
+			"excerpt":      excerpt,
+			"full_text":    plainText,
+		})
+	}
+
+	return results, nil
+}
+
+// GetThreadByName finds a thread by partial name match
+func (s *AICompanionService) GetThreadByName(threadName string) (int64, string, error) {
+	var threadID int64
+	var title string
+
+	query := `
+		SELECT id, title
+		FROM scraped_threads
+		WHERE title LIKE ?
+		LIMIT 1
+	`
+
+	err := s.db.QueryRow(query, "%"+threadName+"%").Scan(&threadID, &title)
+	if err != nil {
+		return 0, "", err
+	}
+
+	return threadID, title, nil
 }
 
 // GetRecentVideos returns recently added videos
@@ -1899,6 +2032,116 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 			timeAgo := time.Since(log.CreatedAt)
 			response.WriteString(fmt.Sprintf("%d. [%s] %s (%s ago)\n",
 				i+1, log.Source, log.Message, formatDuration(timeAgo)))
+		}
+
+		return response.String(), nil
+	}
+
+	// Search forum posts for specific keywords
+	if (strings.Contains(messageLower, "post") || strings.Contains(messageLower, "thread")) &&
+		(strings.Contains(messageLower, "contain") || strings.Contains(messageLower, "include") ||
+			strings.Contains(messageLower, "have") || strings.Contains(messageLower, "with") ||
+			strings.Contains(messageLower, "mention") || strings.Contains(messageLower, "about")) {
+
+		// Extract thread name if specified
+		var threadName string
+		var searchKeyword string
+
+		// Look for quoted text first (thread name or keyword)
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+
+		if len(matches) >= 1 {
+			// First quoted text is likely the thread name
+			threadName = matches[0][1]
+		}
+		if len(matches) >= 2 {
+			// Second quoted text is likely the search keyword
+			searchKeyword = matches[1][1]
+		} else if len(matches) == 1 {
+			// Only one quoted text - assume it's the keyword
+			searchKeyword = matches[0][1]
+			threadName = ""
+		}
+
+		// If no quotes, try to extract keyword from common patterns
+		if searchKeyword == "" {
+			words := strings.Fields(message)
+			for i, word := range words {
+				wordLower := strings.ToLower(word)
+				if (wordLower == "containing" || wordLower == "include" || wordLower == "with" ||
+					wordLower == "mention" || wordLower == "about" || wordLower == "have") && i+1 < len(words) {
+					nextWord := words[i+1]
+					// Remove punctuation
+					searchKeyword = strings.TrimRight(nextWord, "?.!")
+					break
+				}
+			}
+		}
+
+		if searchKeyword == "" {
+			return "Please specify what to search for. Try: 'how many posts contain \"BBC\"' or 'search thread \"Marsha May\" for \"IR\"'", nil
+		}
+
+		var response strings.Builder
+
+		// If thread name specified, search within that thread
+		if threadName != "" {
+			threadID, threadTitle, err := s.GetThreadByName(threadName)
+			if err != nil {
+				return fmt.Sprintf("Thread '%s' not found. Try checking the exact thread name on the Scraper page.", threadName), nil
+			}
+
+			count, err := s.CountPostsWithKeyword(searchKeyword, threadID)
+			if err != nil {
+				return "Failed to search posts.", err
+			}
+
+			response.WriteString(fmt.Sprintf("🔍 Search Results\n\n"))
+			response.WriteString(fmt.Sprintf("Thread: \"%s\"\n", threadTitle))
+			response.WriteString(fmt.Sprintf("Keyword: \"%s\"\n\n", searchKeyword))
+			response.WriteString(fmt.Sprintf("**Found %d posts** containing this keyword.\n\n", count))
+
+			// Show sample results if count is reasonable
+			if count > 0 && count <= 20 {
+				results, _ := s.SearchThreadPosts(searchKeyword, threadID)
+				response.WriteString("Sample matches:\n\n")
+				for i, result := range results {
+					if i >= 5 {
+						response.WriteString(fmt.Sprintf("_... and %d more posts_\n", count-5))
+						break
+					}
+					response.WriteString(fmt.Sprintf("**Post #%d** by %s:\n%s\n\n",
+						result["post_number"], result["author"], result["excerpt"]))
+				}
+			}
+
+			return response.String(), nil
+		}
+
+		// Search across all threads
+		count, err := s.CountPostsWithKeyword(searchKeyword)
+		if err != nil {
+			return "Failed to search posts.", err
+		}
+
+		response.WriteString(fmt.Sprintf("🔍 Global Search Results\n\n"))
+		response.WriteString(fmt.Sprintf("Keyword: \"%s\"\n\n", searchKeyword))
+		response.WriteString(fmt.Sprintf("**Found %d posts** across all scraped threads.\n\n", count))
+
+		if count > 0 && count <= 20 {
+			results, _ := s.SearchThreadPosts(searchKeyword)
+			response.WriteString("Recent matches:\n\n")
+			threadCounts := make(map[string]int)
+			for _, result := range results {
+				threadTitle := result["thread_title"].(string)
+				threadCounts[threadTitle]++
+			}
+
+			response.WriteString("Breakdown by thread:\n")
+			for thread, cnt := range threadCounts {
+				response.WriteString(fmt.Sprintf("• %s: %d posts\n", thread, cnt))
+			}
 		}
 
 		return response.String(), nil

@@ -11,9 +11,9 @@
 					<p class="lead">Manage videos queued for editing and processing</p>
 				</div>
 				<div class="header-actions">
-					<button v-if="selectedVideos.length > 0" class="btn btn-danger me-2" @click="removeSelectedFromList">
+					<button v-if="selectedCount > 0" class="btn btn-danger me-2" @click="removeSelectedFromList">
 						<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-						Remove Selected ({{ selectedVideos.length }})
+						Remove Selected ({{ selectedCount }})
 					</button>
 					<button v-if="videos.length > 0" class="btn btn-warning me-2" @click="clearEditList">
 						<font-awesome-icon :icon="['fas', 'broom']" class="me-2" />
@@ -30,48 +30,16 @@
 			<div class="stats-summary mb-4">
 				<div class="row g-3">
 					<div class="col-md-3">
-						<div class="stat-card">
-							<div class="stat-icon bg-primary">
-								<font-awesome-icon :icon="['fas', 'video']" />
-							</div>
-							<div class="stat-content">
-								<div class="stat-value">{{ videos.length }}</div>
-								<div class="stat-label">Videos in List</div>
-							</div>
-						</div>
+						<StatCard :value="videos.length" label="Videos in List" :icon="['fas', 'video']" icon-class="primary" />
 					</div>
 					<div class="col-md-3">
-						<div class="stat-card">
-							<div class="stat-icon bg-success">
-								<font-awesome-icon :icon="['fas', 'check-circle']" />
-							</div>
-							<div class="stat-content">
-								<div class="stat-value">{{ selectedVideos.length }}</div>
-								<div class="stat-label">Selected</div>
-							</div>
-						</div>
+						<StatCard :value="selectedCount" label="Selected" :icon="['fas', 'check-circle']" icon-class="success" />
 					</div>
 					<div class="col-md-3">
-						<div class="stat-card">
-							<div class="stat-icon bg-info">
-								<font-awesome-icon :icon="['fas', 'hdd']" />
-							</div>
-							<div class="stat-content">
-								<div class="stat-value">{{ formatTotalSize(totalSize) }}</div>
-								<div class="stat-label">Total Size</div>
-							</div>
-						</div>
+						<StatCard :value="formatTotalSize(totalSize)" label="Total Size" :icon="['fas', 'hdd']" icon-class="info" />
 					</div>
 					<div class="col-md-3">
-						<div class="stat-card">
-							<div class="stat-icon bg-warning">
-								<font-awesome-icon :icon="['fas', 'clock']" />
-							</div>
-							<div class="stat-content">
-								<div class="stat-value">{{ formatTotalDuration(totalDuration) }}</div>
-								<div class="stat-label">Total Duration</div>
-							</div>
-						</div>
+						<StatCard :value="formatTotalDuration(totalDuration)" label="Total Duration" :icon="['fas', 'clock']" icon-class="warning" />
 					</div>
 				</div>
 			</div>
@@ -123,22 +91,21 @@
 			<!-- Bulk Selection -->
 			<div v-if="filteredVideos.length > 0" class="bulk-actions mb-3">
 				<div class="form-check">
-					<input id="selectAll" v-model="selectAll" type="checkbox" class="form-check-input" @change="toggleSelectAll" />
+					<input id="selectAll" :checked="allSelected" type="checkbox" class="form-check-input" @change="toggleSelectAll" />
 					<label class="form-check-label" for="selectAll"> Select All ({{ filteredVideos.length }}) </label>
 				</div>
 			</div>
 
 			<!-- Videos Display -->
-			<div v-if="loading" class="loading-state">
-				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" class="text-primary" />
-				<p class="mt-3">Loading edit list...</p>
-			</div>
+			<LoadingState v-if="loading" spinner="fontawesome" show-text loading-text="Loading edit list..." />
 
-			<div v-else-if="filteredVideos.length === 0" class="empty-state">
-				<font-awesome-icon :icon="['fas', 'list-check']" size="5x" class="text-muted mb-3" />
-				<h3>{{ searchQuery ? 'No videos found' : 'Edit List is Empty' }}</h3>
-				<p class="text-muted">{{ searchQuery ? 'Try adjusting your search query' : 'Add videos to your edit list from the Videos or Browser page' }}</p>
-			</div>
+			<EmptyState
+				v-else-if="filteredVideos.length === 0"
+				:icon="['fas', 'list-check']"
+				icon-size="5x"
+				:title="searchQuery ? 'No videos found' : 'Edit List is Empty'"
+				:message="searchQuery ? 'Try adjusting your search query' : 'Add videos to your edit list from the Videos or Browser page'"
+			/>
 
 			<!-- Grid View -->
 			<div v-else-if="viewMode === 'grid'" class="videos-grid">
@@ -244,11 +211,17 @@
 import { videosAPI } from '@/services/api'
 import { getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
+import { useFormatters } from '@/composables/useFormatters'
+import { useTableSelectionOptionsAPI } from '@/composables/useTableSelection'
+import { LoadingState, EmptyState, StatCard } from '@/components/shared'
 
 export default {
 	name: 'EditListPage',
 	components: {
 		VideoPlayer,
+		LoadingState,
+		EmptyState,
+		StatCard,
 	},
 	data() {
 		return {
@@ -259,13 +232,15 @@ export default {
 			sortBy: 'added_date',
 			sortOrder: 'desc',
 			viewMode: 'grid',
-			selectedVideos: [],
-			selectAll: false,
+			...useTableSelectionOptionsAPI().data(),
 			playerVisible: false,
 			selectedVideo: null,
 		}
 	},
 	computed: {
+		...useTableSelectionOptionsAPI().computed(function () {
+			return this.filteredVideos
+		}),
 		totalSize() {
 			return this.videos.reduce((sum, v) => sum + (v.file_size || 0), 0)
 		},
@@ -273,10 +248,21 @@ export default {
 			return this.videos.reduce((sum, v) => sum + (v.duration || 0), 0)
 		},
 	},
+	created() {
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDate = formatters.formatDate
+		this.formatTotalDuration = formatters.formatTotalDuration
+		// formatTotalSize is custom, keep it local
+	},
 	async mounted() {
 		await this.loadEditList()
 	},
 	methods: {
+		...useTableSelectionOptionsAPI().methods(function () {
+			return this.filteredVideos
+		}),
 		async loadEditList() {
 			this.loading = true
 			try {
@@ -328,28 +314,6 @@ export default {
 				}
 			})
 		},
-		isSelected(videoId) {
-			return this.selectedVideos.includes(videoId)
-		},
-		toggleSelection(videoId) {
-			const index = this.selectedVideos.indexOf(videoId)
-			if (index > -1) {
-				this.selectedVideos.splice(index, 1)
-			} else {
-				this.selectedVideos.push(videoId)
-			}
-			this.updateSelectAll()
-		},
-		toggleSelectAll() {
-			if (this.selectAll) {
-				this.selectedVideos = this.filteredVideos.map((v) => v.id)
-			} else {
-				this.selectedVideos = []
-			}
-		},
-		updateSelectAll() {
-			this.selectAll = this.filteredVideos.length > 0 && this.selectedVideos.length === this.filteredVideos.length
-		},
 		async removeFromList(videoId) {
 			if (!confirm('Remove this video from the edit list?')) return
 
@@ -357,7 +321,7 @@ export default {
 				const video = this.videos.find((v) => v.id === videoId)
 				await videosAPI.update(videoId, { in_edit_list: false })
 				this.videos = this.videos.filter((v) => v.id !== videoId)
-				this.selectedVideos = this.selectedVideos.filter((id) => id !== videoId)
+				this.selectedItems = this.selectedItems.filter((id) => id !== videoId)
 				this.filterVideos()
 				this.$toast.success('Removed', `"${video.title}" removed from edit list`)
 			} catch (error) {
@@ -366,15 +330,15 @@ export default {
 			}
 		},
 		async removeSelectedFromList() {
-			if (!confirm(`Remove ${this.selectedVideos.length} videos from the edit list?`)) return
+			if (!confirm(`Remove ${this.selectedCount} videos from the edit list?`)) return
 
 			try {
-				for (const videoId of this.selectedVideos) {
+				for (const videoId of this.selectedItems) {
 					await videosAPI.update(videoId, { in_edit_list: false })
 				}
-				this.videos = this.videos.filter((v) => !this.selectedVideos.includes(v.id))
-				const count = this.selectedVideos.length
-				this.selectedVideos = []
+				this.videos = this.videos.filter((v) => !this.selectedItems.includes(v.id))
+				const count = this.selectedCount
+				this.clearSelection()
 				this.filterVideos()
 				this.$toast.success('Removed', `${count} videos removed from edit list`)
 			} catch (error) {
@@ -391,7 +355,7 @@ export default {
 				}
 				const count = this.videos.length
 				this.videos = []
-				this.selectedVideos = []
+				this.clearSelection()
 				this.filterVideos()
 				this.$toast.success('Cleared', `Edit list cleared (${count} videos removed)`)
 			} catch (error) {
@@ -413,31 +377,10 @@ export default {
 			}
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
 		},
-		formatDuration(seconds) {
-			const mins = Math.floor(seconds / 60)
-			const secs = Math.floor(seconds % 60)
-			return `${mins}:${secs.toString().padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (bytes < 1024) return bytes + ' B'
-			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-			return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-		},
+		// formatDuration, formatFileSize, formatDate, and formatTotalDuration now provided by useFormatters composable
 		formatTotalSize(bytes) {
 			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(0) + ' MB'
 			return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-		},
-		formatTotalDuration(seconds) {
-			const hours = Math.floor(seconds / 3600)
-			const mins = Math.floor((seconds % 3600) / 60)
-			if (hours > 0) return `${hours}h ${mins}m`
-			return `${mins}m`
-		},
-		formatDate(dateString) {
-			if (!dateString) return '-'
-			const date = new Date(dateString)
-			return date.toLocaleDateString()
 		},
 	},
 }

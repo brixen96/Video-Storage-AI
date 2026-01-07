@@ -42,13 +42,7 @@
 
 			<!-- Search and Filters Bar -->
 			<div class="filters-bar">
-				<div class="search-box">
-					<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
-					<input v-model="searchQuery" type="text" placeholder="Search posts, links, or content..." class="search-input" />
-					<button v-if="searchQuery" @click="searchQuery = ''" class="clear-btn">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</div>
+				<SearchBox v-model="searchQuery" placeholder="Search posts, links, or content..." />
 				<div class="filter-group">
 					<select v-model="filterProvider" class="filter-select">
 						<option value="">All Providers</option>
@@ -165,6 +159,7 @@
 import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import DOMPurify from 'dompurify'
+import { SearchBox } from '@/components/shared'
 
 const route = useRoute()
 const { proxy } = getCurrentInstance()

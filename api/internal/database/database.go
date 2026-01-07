@@ -547,6 +547,13 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_source ON console_logs(source)`,
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_level ON console_logs(level)`,
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_created ON console_logs(created_at DESC)`,
+		// Migration 26: Add pause/resume support to activities
+		`ALTER TABLE activities ADD COLUMN is_paused BOOLEAN DEFAULT 0`,
+		`ALTER TABLE activities ADD COLUMN paused_at DATETIME`,
+		`ALTER TABLE activities ADD COLUMN checkpoint TEXT DEFAULT '{}'`, // JSON checkpoint data
+		`ALTER TABLE activity_logs ADD COLUMN is_paused BOOLEAN DEFAULT 0`,
+		`ALTER TABLE activity_logs ADD COLUMN paused_at DATETIME`,
+		`ALTER TABLE activity_logs ADD COLUMN checkpoint TEXT DEFAULT '{}'`,
 	}
 
 	for _, migration := range migrations {

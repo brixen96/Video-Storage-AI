@@ -21,6 +21,7 @@ type WebSocketHub interface {
 	BroadcastActivityUpdate(activity *models.Activity)
 	BroadcastStatusUpdate(status *models.ActivityStatus)
 	BroadcastSystemEvent(event string)
+	BroadcastConsoleLog(log *models.ConsoleLog)
 }
 
 // Global WebSocket hub reference (will be set by API layer)
@@ -75,14 +76,17 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 // GetByID retrieves an activity log by ID
 func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 	query := `
-		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at
+		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at,
+		       is_paused, paused_at, checkpoint
 		FROM activity_logs
 		WHERE id = ?
 	`
 
 	var activity models.Activity
 	var detailsJSON []byte
+	var checkpointJSON []byte
 	var completedAt sql.NullTime
+	var pausedAt sql.NullTime
 
 	err := s.db.QueryRow(query, id).Scan(
 		&activity.ID,
@@ -94,6 +98,9 @@ func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 		&activity.StartedAt,
 		&activity.UpdatedAt,
 		&completedAt,
+		&activity.IsPaused,
+		&pausedAt,
+		&checkpointJSON,
 	)
 
 	if err == sql.ErrNoRows {
@@ -107,9 +114,18 @@ func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 		activity.CompletedAt = &completedAt.Time
 	}
 
+	if pausedAt.Valid {
+		activity.PausedAt = &pausedAt.Time
+	}
+
 	// Details is stored as JSON string in the database
 	if len(detailsJSON) > 0 {
 		activity.Details = string(detailsJSON)
+	}
+
+	// Checkpoint is stored as JSON string in the database
+	if len(checkpointJSON) > 0 {
+		activity.Checkpoint = string(checkpointJSON)
 	}
 
 	return &activity, nil
@@ -118,7 +134,8 @@ func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 // GetAll retrieves all activity logs with optional filtering
 func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]models.Activity, error) {
 	query := `
-		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at, error
+		SELECT id, task_type, status, message, progress, details, started_at, updated_at, completed_at, error,
+		       is_paused, paused_at, checkpoint
 		FROM activity_logs
 		WHERE 1=1
 	`
@@ -154,7 +171,9 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 	for rows.Next() {
 		var activity models.Activity
 		var detailsJSON []byte
+		var checkpointJSON []byte
 		var completedAt sql.NullTime
+		var pausedAt sql.NullTime
 		var errorMsg sql.NullString
 
 		err := rows.Scan(
@@ -168,6 +187,9 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 			&activity.UpdatedAt,
 			&completedAt,
 			&errorMsg,
+			&activity.IsPaused,
+			&pausedAt,
+			&checkpointJSON,
 		)
 		if err != nil {
 			continue
@@ -177,6 +199,10 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 			activity.CompletedAt = &completedAt.Time
 		}
 
+		if pausedAt.Valid {
+			activity.PausedAt = &pausedAt.Time
+		}
+
 		if errorMsg.Valid {
 			activity.Error = &errorMsg.String
 		}
@@ -184,6 +210,11 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 		// Details is stored as JSON string in the database
 		if len(detailsJSON) > 0 {
 			activity.Details = string(detailsJSON)
+		}
+
+		// Checkpoint is stored as JSON string in the database
+		if len(checkpointJSON) > 0 {
+			activity.Checkpoint = string(checkpointJSON)
 		}
 
 		activities = append(activities, activity)
@@ -1025,5 +1056,118 @@ func (s *ActivityService) BroadcastStatusUpdate() error {
 	if hub != nil {
 		hub.BroadcastStatusUpdate(status)
 	}
+	return nil
+}
+
+// PauseTask pauses a running task and saves its checkpoint state
+func (s *ActivityService) PauseTask(id int64, checkpoint map[string]interface{}) error {
+	// Marshal checkpoint data
+	checkpointJSON := "{}"
+	if checkpoint != nil {
+		data, err := json.Marshal(checkpoint)
+		if err != nil {
+			return fmt.Errorf("failed to marshal checkpoint: %w", err)
+		}
+		checkpointJSON = string(data)
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE activity_logs
+		SET is_paused = 1, paused_at = ?, checkpoint = ?
+		WHERE id = ? AND status = 'running'
+	`
+
+	result, err := s.db.Exec(query, now, checkpointJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to pause task: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("task not found or not running")
+	}
+
+	// Get updated activity for broadcast
+	activity, err := s.GetByID(id)
+	if err == nil && activity != nil {
+		log.Printf("✅ Task %d paused successfully", id)
+		s.BroadcastUpdate(activity)
+		s.BroadcastStatusUpdate()
+	}
+
+	return nil
+}
+
+// ResumeTask resumes a paused task and returns the checkpoint data
+func (s *ActivityService) ResumeTask(id int64) (map[string]interface{}, error) {
+	// First get the task to verify it's paused and get checkpoint
+	activity, err := s.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
+	if !activity.IsPaused {
+		return nil, fmt.Errorf("task is not paused")
+	}
+
+	// Unmarshal checkpoint before clearing it
+	if err := activity.UnmarshalCheckpoint(); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal checkpoint: %w", err)
+	}
+
+	// Store checkpoint data before we clear it
+	checkpointData := activity.CheckpointObj
+
+	// Clear paused state
+	query := `
+		UPDATE activity_logs
+		SET is_paused = 0, paused_at = NULL
+		WHERE id = ?
+	`
+
+	_, err = s.db.Exec(query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resume task: %w", err)
+	}
+
+	// Get updated activity for broadcast
+	resumedActivity, err := s.GetByID(id)
+	if err == nil && resumedActivity != nil {
+		s.BroadcastUpdate(resumedActivity)
+		s.BroadcastStatusUpdate()
+	}
+
+	log.Printf("Task %d resumed from checkpoint", id)
+	return checkpointData, nil
+}
+
+// SaveCheckpoint saves task checkpoint data without pausing
+func (s *ActivityService) SaveCheckpoint(id int64, checkpoint map[string]interface{}) error {
+	// Marshal checkpoint data
+	checkpointJSON := "{}"
+	if checkpoint != nil {
+		data, err := json.Marshal(checkpoint)
+		if err != nil {
+			return fmt.Errorf("failed to marshal checkpoint: %w", err)
+		}
+		checkpointJSON = string(data)
+	}
+
+	query := `
+		UPDATE activity_logs
+		SET checkpoint = ?
+		WHERE id = ?
+	`
+
+	_, err := s.db.Exec(query, checkpointJSON, id)
+	if err != nil {
+		return fmt.Errorf("failed to save checkpoint: %w", err)
+	}
+
 	return nil
 }

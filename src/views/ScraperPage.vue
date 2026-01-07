@@ -39,48 +39,16 @@
 			<!-- Statistics Cards -->
 			<div class="row g-3 mb-4">
 				<div class="col-md-3">
-					<div class="stat-card">
-						<div class="stat-icon threads">
-							<font-awesome-icon :icon="['fas', 'comments']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ stats.total_threads || 0 }}</div>
-							<div class="stat-label">Threads Scraped</div>
-						</div>
-					</div>
+					<StatCard :value="stats.total_threads || 0" label="Threads Scraped" :icon="['fas', 'comments']" icon-class="threads" />
 				</div>
 				<div class="col-md-3">
-					<div class="stat-card">
-						<div class="stat-icon posts">
-							<font-awesome-icon :icon="['fas', 'comment-dots']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ stats.total_posts || 0 }}</div>
-							<div class="stat-label">Posts Collected</div>
-						</div>
-					</div>
+					<StatCard :value="stats.total_posts || 0" label="Posts Collected" :icon="['fas', 'comment-dots']" icon-class="posts" />
 				</div>
 				<div class="col-md-3">
-					<div class="stat-card">
-						<div class="stat-icon links">
-							<font-awesome-icon :icon="['fas', 'link']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ stats.total_download_links || 0 }}</div>
-							<div class="stat-label">Download Links</div>
-						</div>
-					</div>
+					<StatCard :value="stats.total_download_links || 0" label="Download Links" :icon="['fas', 'link']" icon-class="links" />
 				</div>
 				<div class="col-md-3">
-					<div class="stat-card">
-						<div class="stat-icon active">
-							<font-awesome-icon :icon="['fas', 'check-circle']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ stats.active_links || 0 }}</div>
-							<div class="stat-label">Active Links</div>
-						</div>
-					</div>
+					<StatCard :value="stats.active_links || 0" label="Active Links" :icon="['fas', 'check-circle']" icon-class="active" />
 				</div>
 			</div>
 
@@ -106,19 +74,7 @@
 			<div class="filters-section mb-4">
 				<div class="row g-3">
 					<div class="col-md-12">
-						<div class="search-box">
-							<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
-							<input
-								v-model="searchQuery"
-								type="text"
-								class="form-control"
-								placeholder="Search threads by title or author..."
-								@input="searchThreads"
-							/>
-							<button v-if="searchQuery" class="btn-clear" @click="clearSearch">
-								<font-awesome-icon :icon="['fas', 'times']" />
-							</button>
-						</div>
+						<SearchBox v-model="searchQuery" placeholder="Search threads by title or author..." @input="searchThreads" />
 					</div>
 				</div>
 				<div class="row g-3 mt-2">
@@ -193,23 +149,17 @@
 			</div>
 
 			<!-- Loading State -->
-			<div v-if="loading" class="loading-state">
-				<div class="spinner-border text-primary" role="status">
-					<span class="visually-hidden">Loading...</span>
-				</div>
-				<p class="mt-3">Loading scraped threads...</p>
-			</div>
+			<LoadingState v-if="loading" show-text loading-text="Loading scraped threads..." />
 
 			<!-- Empty State -->
-			<div v-else-if="threads.length === 0 && !loading" class="empty-state">
-				<font-awesome-icon :icon="['fas', 'inbox']" size="4x" class="mb-3 text-muted" />
-				<h3>No Threads Found</h3>
-				<p class="text-muted">Start scraping to collect thread data</p>
-				<button class="btn btn-primary mt-3" @click="showScrapeModal = true">
-					<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-					Start Scraping
-				</button>
-			</div>
+			<EmptyState v-else-if="threads.length === 0 && !loading" :icon="['fas', 'inbox']" icon-size="4x" title="No Threads Found" message="Start scraping to collect thread data">
+				<template #actions>
+					<button class="btn btn-primary mt-3" @click="showScrapeModal = true">
+						<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
+						Start Scraping
+					</button>
+				</template>
+			</EmptyState>
 
 			<!-- Threads Grid View -->
 			<div v-else-if="viewMode === 'grid'" class="threads-grid">
@@ -523,72 +473,43 @@
 		</div>
 
 		<!-- Delete Selected Confirmation Modal -->
-		<div v-if="showDeleteConfirmModal" class="modal-overlay" @click="showDeleteConfirmModal = false">
-			<div class="modal-dialog" @click.stop>
-				<div class="modal-content">
-					<div class="modal-header">
-						<h5 class="modal-title">
-							<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-2 text-warning" />
-							Confirm Deletion
-						</h5>
-						<button type="button" class="btn-close" @click="showDeleteConfirmModal = false"></button>
-					</div>
-					<div class="modal-body">
-						<p>Are you sure you want to delete <strong>{{ selectedCount }}</strong> selected thread(s)?</p>
-						<div class="alert alert-danger">
-							<font-awesome-icon :icon="['fas', 'exclamation-circle']" class="me-2" />
-							<strong>Warning:</strong> This action cannot be undone. All posts and download links associated with these threads will also be deleted.
-						</div>
-					</div>
-					<div class="modal-footer">
-						<button type="button" class="btn btn-secondary" @click="showDeleteConfirmModal = false">Cancel</button>
-						<button type="button" class="btn btn-danger" @click="confirmDeleteSelected">
-							<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-							Delete {{ selectedCount }} Thread(s)
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		<DeleteConfirmationModal
+			:visible="showDeleteConfirmModal"
+			title="Confirm Deletion"
+			message="Are you sure you want to delete"
+			:itemName="`${selectedCount} selected thread(s)`"
+			warningMessage="This action cannot be undone. All posts and download links associated with these threads will also be deleted."
+			:confirmText="`Delete ${selectedCount} Thread(s)`"
+			:icon="['fas', 'trash']"
+			@confirm="confirmDeleteSelected"
+			@cancel="showDeleteConfirmModal = false"
+		/>
 
 		<!-- Delete All Confirmation Modal -->
-		<div v-if="showDeleteAllConfirmModal" class="modal-overlay" @click="showDeleteAllConfirmModal = false">
-			<div class="modal-dialog" @click.stop>
-				<div class="modal-content">
-					<div class="modal-header">
-						<h5 class="modal-title">
-							<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-2 text-danger" />
-							Confirm Delete All
-						</h5>
-						<button type="button" class="btn-close" @click="showDeleteAllConfirmModal = false"></button>
-					</div>
-					<div class="modal-body">
-						<p>Are you sure you want to delete <strong>ALL {{ totalThreads }}</strong> scraped threads?</p>
-						<div class="alert alert-danger">
-							<font-awesome-icon :icon="['fas', 'skull-crossbones']" class="me-2" />
-							<strong>DANGER:</strong> This will permanently delete ALL scraped threads, posts, and download links from the database. This action cannot be undone!
-						</div>
-					</div>
-					<div class="modal-footer">
-						<button type="button" class="btn btn-secondary" @click="showDeleteAllConfirmModal = false">Cancel</button>
-						<button type="button" class="btn btn-danger" @click="confirmDeleteAll">
-							<font-awesome-icon :icon="['fas', 'trash-alt']" class="me-2" />
-							Yes, Delete Everything
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		<DeleteConfirmationModal
+			:visible="showDeleteAllConfirmModal"
+			title="Confirm Delete All"
+			message="Are you sure you want to delete"
+			:itemName="`ALL ${totalThreads} scraped threads`"
+			warningMessage="DANGER: This will permanently delete ALL scraped threads, posts, and download links from the database. This action cannot be undone!"
+			confirmText="Yes, Delete Everything"
+			:icon="['fas', 'trash-alt']"
+			@confirm="confirmDeleteAll"
+			@cancel="showDeleteAllConfirmModal = false"
+		/>
 	</div>
 </template>
 
 <script setup>
 import { ref, onMounted, computed, getCurrentInstance } from 'vue'
 import { useRouter } from 'vue-router'
+import { DeleteConfirmationModal, LoadingState, EmptyState, StatCard, SearchBox } from '@/components/shared'
+import { useFormatters } from '@/composables/useFormatters'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
 const router = useRouter()
+const { formatDateTime } = useFormatters()
 
 // State
 const loading = ref(false)
@@ -733,11 +654,6 @@ const searchThreads = () => {
 	loadThreads()
 }
 
-const clearSearch = () => {
-	searchQuery.value = ''
-	searchThreads()
-}
-
 const handleSortChange = () => {
 	currentPage.value = 1
 	loadThreads()
@@ -826,16 +742,8 @@ const openThreadURL = (url) => {
 	window.open(url, '_blank')
 }
 
-const formatDate = (dateString) => {
-	const date = new Date(dateString)
-	return date.toLocaleDateString('en-US', {
-		year: 'numeric',
-		month: 'short',
-		day: 'numeric',
-		hour: '2-digit',
-		minute: '2-digit'
-	})
-}
+// formatDate replaced with formatDateTime from useFormatters composable
+const formatDate = formatDateTime
 
 const startForumScrape = async () => {
 	if (!forumURL.value) {

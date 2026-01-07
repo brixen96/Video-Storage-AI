@@ -35,9 +35,9 @@
 								<font-awesome-icon :icon="['fas', 'filter']" />
 								Filters
 							</button>
-							<button v-if="selectedVideos.length > 0" class="btn btn-primary" @click="showBulkActions = true">
+							<button v-if="selectedCount > 0" class="btn btn-primary" @click="showBulkActions = true">
 								<font-awesome-icon :icon="['fas', 'tasks']" />
-								Bulk ({{ selectedVideos.length }})
+								Bulk ({{ selectedCount }})
 							</button>
 							<button class="btn btn-outline-primary" @click="refreshVideos" title="Refresh video list">
 								<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': loading }" />
@@ -260,10 +260,10 @@
 						<VideoCard
 							v-for="video in videos"
 							:key="video.id"
-							v-memo="[video.id, video.title, video.rating, selectedVideos.includes(video.id)]"
+							v-memo="[video.id, video.title, video.rating, isSelected(video.id)]"
 							:video="video"
-							:is-selected="selectedVideos.includes(video.id)"
-							@toggle-select="toggleVideoSelection"
+							:is-selected="isSelected(video.id)"
+							@toggle-select="(video) => toggleSelection(video.id)"
 							@context-menu="showContextMenu"
 							@play="playVideo"
 							@add-tag="openTagModal"
@@ -295,11 +295,11 @@
 								<tr
 									v-for="video in videos"
 									:key="video.id"
-									v-memo="[video.id, video.title, selectedVideos.includes(video.id)]"
-									:class="{ selected: selectedVideos.includes(video.id) }"
+									v-memo="[video.id, video.title, isSelected(video.id)]"
+									:class="{ selected: isSelected(video.id) }"
 								>
 									<td @click.stop>
-										<input type="checkbox" :checked="selectedVideos.includes(video.id)" @change="toggleVideoSelection(video)" />
+										<input type="checkbox" :checked="isSelected(video.id)" @change="toggleSelection(video.id)" />
 									</td>
 									<td>{{ video.title }}</td>
 									<td>{{ formatDuration(video.duration) }}</td>
@@ -319,21 +319,13 @@
 					</div>
 
 					<!-- Pagination -->
-					<div v-if="totalPages > 1" class="vp-pagination-controls mt-4">
-						<nav>
-							<ul class="pagination justify-content-center">
-								<li class="vp-page-item" :class="{ disabled: currentPage === 1 }">
-									<a class="vp-page-link" @click="goToPage(currentPage - 1)">Previous</a>
-								</li>
-								<li v-for="page in visiblePages" :key="page" class="vp-page-item" :class="{ active: page === currentPage }">
-									<a class="vp-page-link" @click="goToPage(page)">{{ page }}</a>
-								</li>
-								<li class="vp-page-item" :class="{ disabled: currentPage === totalPages }">
-									<a class="vp-page-link" @click="goToPage(currentPage + 1)">Next</a>
-								</li>
-							</ul>
-						</nav>
-					</div>
+					<BrowserPaginationControls
+						:currentPage="currentPage"
+						:itemsPerPage="pageSize"
+						:totalItems="totalVideos"
+						@update:currentPage="currentPage = $event; loadVideos()"
+						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos()"
+					/>
 				</div>
 			</div>
 		</div>
@@ -371,7 +363,7 @@
 			<div class="modal-dialog modal-dialog-centered">
 				<div class="modal-content text-bg-dark">
 					<div class="modal-header">
-						<h5 class="modal-title">Bulk Actions ({{ selectedVideos.length }} videos)</h5>
+						<h5 class="modal-title">Bulk Actions ({{ selectedCount }} videos)</h5>
 						<button type="button" class="btn-close" @click="showBulkActions = false"></button>
 					</div>
 					<div class="modal-body">
@@ -403,6 +395,16 @@
 
 		<!-- Add Tags Modal -->
 		<AddTagModal :show="showTagModal" :video="videoForModal" @close="onTagModalClose" @saved="onTagModalSaved" />
+
+		<!-- Delete Confirmation Modal -->
+		<DeleteConfirmationModal
+			:visible="deleteModal.show"
+			:title="deleteModal.isBulk ? 'Confirm Bulk Delete' : 'Confirm Delete'"
+			message="Are you sure you want to delete"
+			:itemName="deleteModal.isBulk ? `${selectedCount} videos` : deleteModal.video?.title"
+			@confirm="deleteModal.isBulk ? confirmBulkDelete() : confirmDeleteVideo()"
+			@cancel="deleteModal.show = false"
+		/>
 	</div>
 </template>
 
@@ -411,6 +413,10 @@ import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
 import { videosAPI, librariesAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
+import { BrowserPaginationControls } from '@/components/browser'
+import { DeleteConfirmationModal } from '@/components/shared'
+import { useFormatters } from '@/composables/useFormatters'
+import { useTableSelectionOptionsAPI } from '@/composables/useTableSelection'
 
 // Lazy load heavy modal components
 const VideoPlayerModal = defineAsyncComponent(() => import('@/components/VideoPlayerModal.vue'))
@@ -424,6 +430,8 @@ export default {
 		VideoPlayerModal,
 		EditMetadataModal,
 		AddTagModal,
+		BrowserPaginationControls,
+		DeleteConfirmationModal,
 	},
 	data() {
 		const settings = settingsService.getSettings()
@@ -456,7 +464,7 @@ export default {
 			currentPage: 1,
 			pageSize: 60,
 			totalVideos: 0,
-			selectedVideos: [],
+			...useTableSelectionOptionsAPI().data(),
 			showBulkActions: false,
 			contextMenu: {
 				show: false,
@@ -475,21 +483,20 @@ export default {
 			showTagModal: false,
 			videoForModal: null,
 			previewingPerformer: null,
+			deleteModal: {
+				show: false,
+				video: null,
+				isBulk: false,
+			},
 			performerPreviewTimeouts: {},
 		}
 	},
 	computed: {
+		...useTableSelectionOptionsAPI().computed(function () {
+			return this.videos
+		}),
 		totalPages() {
 			return Math.ceil(this.totalVideos / this.pageSize)
-		},
-		visiblePages() {
-			const pages = []
-			const start = Math.max(1, this.currentPage - 2)
-			const end = Math.min(this.totalPages, this.currentPage + 2)
-			for (let i = start; i <= end; i++) {
-				pages.push(i)
-			}
-			return pages
 		},
 		activeFiltersCount() {
 			let count = 0
@@ -541,6 +548,13 @@ export default {
 			return this.tags.filter(t => t.category === this.filters.contentType)
 		},
 	},
+	created() {
+		// Initialize formatters composable
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDate = formatters.formatDate
+	},
 	mounted() {
 		this.loadVideos()
 		this.loadPerformers()
@@ -565,6 +579,9 @@ export default {
 		},
 	},
 	methods: {
+		...useTableSelectionOptionsAPI().methods(function () {
+			return this.videos
+		}),
 		getAssetURL,
 		async loadVideos() {
 			this.loading = true
@@ -694,12 +711,6 @@ export default {
 			this.selectedLibrary = ''
 			this.loadVideos()
 		},
-		goToPage(page) {
-			if (page >= 1 && page <= this.totalPages) {
-				this.currentPage = page
-				this.loadVideos()
-			}
-		},
 		async scanVideos() {
 			try {
 				// Use selected library or primary library
@@ -716,21 +727,6 @@ export default {
 			} catch (error) {
 				console.error('Failed to start scan:', error)
 				this.$toast.error('Failed to start video scan: ' + (error.response?.data?.error || error.message))
-			}
-		},
-		toggleVideoSelection(video) {
-			const index = this.selectedVideos.indexOf(video.id)
-			if (index > -1) {
-				this.selectedVideos.splice(index, 1)
-			} else {
-				this.selectedVideos.push(video.id)
-			}
-		},
-		toggleSelectAll(event) {
-			if (event.target.checked) {
-				this.selectedVideos = this.videos.map((v) => v.id)
-			} else {
-				this.selectedVideos = []
 			}
 		},
 		showContextMenu({ video, x, y }) {
@@ -762,21 +758,26 @@ export default {
 				this.$toast.error('Failed to fetch metadata')
 			}
 		},
-		async deleteVideo(video) {
-			if (!confirm(`Are you sure you want to delete "${video.title}"?`)) return
-
+		deleteVideo(video) {
+			this.deleteModal.video = video
+			this.deleteModal.isBulk = false
+			this.deleteModal.show = true
+			this.hideContextMenu()
+		},
+		async confirmDeleteVideo() {
 			try {
-				await videosAPI.delete(video.id)
+				await videosAPI.delete(this.deleteModal.video.id)
 				this.$toast.success('Video deleted successfully')
 				this.loadVideos()
-				if (this.selectedVideo?.id === video.id) {
+				if (this.selectedVideo?.id === this.deleteModal.video.id) {
 					this.selectedVideo = null
 				}
 			} catch (error) {
 				console.error('Failed to delete video:', error)
 				this.$toast.error('Failed to delete video')
 			}
-			this.hideContextMenu()
+			this.deleteModal.show = false
+			this.deleteModal.video = null
 		},
 		openTagModal(video) {
 			this.videoForModal = video
@@ -789,47 +790,39 @@ export default {
 			this.$router.push(`/studios/${studio.id}`)
 		},
 		bulkAddTags() {
-			console.log('Bulk add tags to:', this.selectedVideos)
+			console.log('Bulk add tags to:', this.selectedItems)
 			// Implement bulk tag operation
 		},
 		async bulkFetchMetadata() {
 			try {
-				await videosAPI.bulk('fetch_metadata', this.selectedVideos)
+				await videosAPI.bulk('fetch_metadata', this.selectedItems)
 				this.$toast.success('Bulk metadata fetch started')
 				this.showBulkActions = false
-				this.selectedVideos = []
+				this.clearSelection()
 			} catch (error) {
 				console.error('Bulk fetch failed:', error)
 				this.$toast.error('Bulk fetch failed')
 			}
 		},
-		async bulkDelete() {
-			if (!confirm(`Are you sure you want to delete ${this.selectedVideos.length} videos?`)) return
-
+		bulkDelete() {
+			this.deleteModal.isBulk = true
+			this.deleteModal.show = true
+		},
+		async confirmBulkDelete() {
 			try {
-				await videosAPI.bulk('delete', this.selectedVideos)
+				await videosAPI.bulk('delete', this.selectedItems)
 				this.$toast.success('Videos deleted successfully')
 				this.showBulkActions = false
-				this.selectedVideos = []
+				this.clearSelection()
 				this.loadVideos()
 			} catch (error) {
 				console.error('Bulk delete failed:', error)
 				this.$toast.error('Bulk delete failed')
 			}
+			this.deleteModal.show = false
+			this.deleteModal.isBulk = false
 		},
-		formatDuration(seconds) {
-			if (!seconds) return 'N/A'
-			const mins = Math.floor(seconds / 60)
-			const secs = Math.floor(seconds % 60)
-			return `${mins}:${secs.toString().padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (!bytes) return 'N/A'
-			if (bytes < 1024) return bytes + ' B'
-			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-			return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
-		},
+		// formatDuration and formatFileSize now provided by useFormatters composable
 		formatBitrate(bitrate) {
 			if (!bitrate) return 'N/A'
 			return (bitrate / 1000000).toFixed(1) + ' Mbps'

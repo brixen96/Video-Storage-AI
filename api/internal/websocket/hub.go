@@ -90,6 +90,19 @@ func (h *Hub) BroadcastSystemEvent(event string) {
 	}
 }
 
+// BroadcastConsoleLog broadcasts a console log entry to all clients.
+func (h *Hub) BroadcastConsoleLog(log *models.ConsoleLog) {
+	// Wrap message with type
+	wrapper := map[string]interface{}{
+		"type": "console_log",
+		"data": log,
+	}
+	message, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(message)
+	}
+}
+
 // Register registers a new client with the hub.
 func (h *Hub) Register(client *Client) {
 	h.register <- client

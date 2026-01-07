@@ -162,12 +162,15 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			activity.GET("/recent", getRecentActivities) // Get recent activities
 			activity.GET("/status", getActivityStatus)   // Get current running tasks
 			activity.GET("/stats", getActivityStats)     // Get statistics by type
+			activity.GET("/paused", getPausedActivities) // Get all paused tasks
 			activity.GET("/:id", getActivity)            // Get single activity
 			activity.POST("", createActivity)            // Create activity log
 			activity.PUT("/:id", updateActivity)         // Update activity
 			activity.DELETE("/:id", deleteActivity)      // Delete activity
 			activity.POST("/clean", cleanOldActivities)  // Clean old activities
 			activity.POST("/clear-all", clearAllActivities) // Clear all activities
+			activity.POST("/:id/pause", pauseActivity)   // Pause a running task
+			activity.POST("/:id/resume", resumeActivity) // Resume a paused task
 		}
 
 		// File operations endpoints

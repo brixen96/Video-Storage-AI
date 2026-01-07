@@ -78,7 +78,9 @@
       "Bash(cmd /c \"start /B bin\\\\video-storage-ai.exe\")",
       "Bash(Select-Object -First 20)",
       "Bash(yarn remove:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []
