@@ -80,7 +80,9 @@
       "Bash(yarn remove:*)",
       "Bash(node -e:*)",
       "Bash(wc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(cmd /c \"C:\\\\Repos\\\\Video Storage AI\\\\bin\\\\video-storage-ai.exe\")",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

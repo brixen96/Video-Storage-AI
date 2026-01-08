@@ -95,7 +95,11 @@ type ScrapedDownloadLink struct {
 	Filename       string                       `json:"filename" db:"filename"`
 	FileSize       int64                        `json:"file_size" db:"file_size"`
 	FileType       string                       `json:"file_type" db:"file_type"`     // video/mp4, image/jpeg, etc.
-	Status         string                       `json:"status" db:"status"`           // active, dead, expired
+	Status         string                       `json:"status" db:"status"`           // active, dead, expired (link health)
+	DownloadStatus string                       `json:"download_status" db:"download_status"` // pending, downloaded, failed, in_progress
+	DownloadedAt   *time.Time                   `json:"downloaded_at" db:"downloaded_at"`
+	DownloadPath   string                       `json:"download_path" db:"download_path"`
+	DownloadNotes  string                       `json:"download_notes" db:"download_notes"`
 	Metadata       string                       `json:"-" db:"metadata"`
 	MetadataObj    *DownloadLinkMetadata        `json:"metadata,omitempty" db:"-"`
 	DiscoveredAt   time.Time                    `json:"discovered_at" db:"discovered_at"`

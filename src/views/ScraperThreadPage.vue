@@ -66,6 +66,63 @@
 				</div>
 			</div>
 
+			<!-- Link Health Stats -->
+			<div v-if="linkStats" class="link-stats-bar">
+				<div class="stats-group">
+					<div class="stat-item stat-total">
+						<font-awesome-icon :icon="['fas', 'link']" />
+						<span class="stat-value">{{ totalLinks }}</span>
+						<span class="stat-label">Total Links</span>
+					</div>
+					<div class="stat-item stat-active">
+						<font-awesome-icon :icon="['fas', 'check-circle']" />
+						<span class="stat-value">{{ linkStats.active || 0 }}</span>
+						<span class="stat-label">Active</span>
+					</div>
+					<div class="stat-item stat-dead">
+						<font-awesome-icon :icon="['fas', 'times-circle']" />
+						<span class="stat-value">{{ linkStats.dead || 0 }}</span>
+						<span class="stat-label">Dead</span>
+					</div>
+					<div class="stat-item stat-expired">
+						<font-awesome-icon :icon="['fas', 'exclamation-circle']" />
+						<span class="stat-value">{{ linkStats.expired || 0 }}</span>
+						<span class="stat-label">Expired</span>
+					</div>
+					<div v-if="downloadStats" class="stat-item stat-downloaded">
+						<font-awesome-icon :icon="['fas', 'cloud-download-alt']" />
+						<span class="stat-value">{{ downloadStats.downloaded || 0 }}</span>
+						<span class="stat-label">Downloaded ({{ downloadStats.completion_percent || 0 }}%)</span>
+					</div>
+				</div>
+				<div class="link-actions">
+					<button class="btn btn-primary" @click="verifyLinks" :disabled="verifying">
+						<font-awesome-icon :icon="['fas', verifying ? 'spinner' : 'sync']" :spin="verifying" />
+						{{ verifying ? 'Verifying...' : 'Verify Links' }}
+					</button>
+					<button
+						class="btn btn-jdownloader"
+						@click="sendToJDownloader"
+						:disabled="totalLinks === 0 || sendingToJD"
+						title="Send to JDownloader"
+					>
+						<font-awesome-icon :icon="['fas', sendingToJD ? 'spinner' : 'cloud-download-alt']" :spin="sendingToJD" />
+						{{ sendingToJD ? 'Sending...' : 'Send to JD' }}
+					</button>
+					<div class="export-controls">
+						<select v-model="exportFormat" class="export-format-select">
+							<option value="txt">TXT</option>
+							<option value="json">JSON</option>
+							<option value="csv">CSV</option>
+						</select>
+						<button class="btn btn-success" @click="exportLinks" :disabled="totalLinks === 0">
+							<font-awesome-icon :icon="['fas', 'download']" />
+							Export Links
+						</button>
+					</div>
+				</div>
+			</div>
+
 			<!-- Loading State -->
 			<div v-if="loading" class="loading-state">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" />
@@ -129,23 +186,57 @@
 								<span>Download Links ({{ getPostLinks(post.id).length }})</span>
 							</div>
 							<div class="download-links">
-								<a
+								<div
 									v-for="link in getPostLinks(post.id)"
 									:key="link.id"
-									:href="link.url"
-									target="_blank"
-									class="download-link"
-									:class="`provider-${link.provider.toLowerCase()}`"
+									class="download-link-wrapper"
+									:class="`status-${link.download_status || 'pending'}`"
 								>
-									<div class="link-icon">
-										<font-awesome-icon :icon="getProviderIcon(link.provider)" />
+									<a
+										:href="link.url"
+										target="_blank"
+										class="download-link"
+										:class="`provider-${link.provider.toLowerCase()}`"
+									>
+										<div class="link-icon">
+											<font-awesome-icon :icon="getProviderIcon(link.provider)" />
+										</div>
+										<div class="link-info">
+											<div class="link-provider">{{ link.provider }}</div>
+											<div class="link-url">{{ truncateURL(link.url) }}</div>
+										</div>
+										<div class="link-status-badge" :class="`status-${link.download_status || 'pending'}`">
+											<font-awesome-icon :icon="getDownloadStatusIcon(link.download_status)" />
+										</div>
+										<font-awesome-icon :icon="['fas', 'external-link-alt']" class="link-arrow" />
+									</a>
+									<div class="link-actions">
+										<button
+											v-if="link.download_status !== 'downloaded'"
+											@click.stop="markAsDownloaded(link.id)"
+											class="action-btn success-btn"
+											title="Mark as downloaded"
+										>
+											<font-awesome-icon :icon="['fas', 'check']" />
+										</button>
+										<button
+											v-if="link.download_status !== 'failed'"
+											@click.stop="markAsFailed(link.id)"
+											class="action-btn danger-btn"
+											title="Mark as failed"
+										>
+											<font-awesome-icon :icon="['fas', 'times']" />
+										</button>
+										<button
+											v-if="link.download_status && link.download_status !== 'pending'"
+											@click.stop="resetDownloadStatus(link.id)"
+											class="action-btn reset-btn"
+											title="Reset status"
+										>
+											<font-awesome-icon :icon="['fas', 'undo']" />
+										</button>
 									</div>
-									<div class="link-info">
-										<div class="link-provider">{{ link.provider }}</div>
-										<div class="link-url">{{ truncateURL(link.url) }}</div>
-									</div>
-									<font-awesome-icon :icon="['fas', 'external-link-alt']" class="link-arrow" />
-								</a>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -170,6 +261,19 @@ const loading = ref(false)
 const thread = ref(null)
 const posts = ref([])
 const downloadLinks = ref([])
+
+// Link verification state
+const linkStats = ref(null)
+const verifying = ref(false)
+
+// Download tracking state
+const downloadStats = ref(null)
+
+// JDownloader state
+const sendingToJD = ref(false)
+
+// Export state
+const exportFormat = ref('txt')
 
 // Filter state
 const searchQuery = ref('')
@@ -238,7 +342,212 @@ const filteredPosts = computed(() => {
 	return filtered
 })
 
+const totalLinks = computed(() => {
+	if (!linkStats.value) return downloadLinks.value.length
+	return (linkStats.value.active || 0) + (linkStats.value.dead || 0) + (linkStats.value.expired || 0)
+})
+
 // Methods
+const loadLinkStats = async () => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${route.params.id}/link-stats`)
+		const data = await response.json()
+		if (data.success) {
+			linkStats.value = data.data
+		}
+	} catch (error) {
+		console.error('Error loading link stats:', error)
+	}
+}
+
+const verifyLinks = async () => {
+	verifying.value = true
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${route.params.id}/verify-links`, {
+			method: 'POST',
+		})
+		const data = await response.json()
+		if (data.success) {
+			toast.success('Link verification started! Check Activity page for progress.')
+			// Reload stats after a delay
+			setTimeout(loadLinkStats, 3000)
+		} else {
+			toast.error(data.message || 'Failed to start verification')
+		}
+	} catch (error) {
+		console.error('Error verifying links:', error)
+		toast.error('Failed to verify links: ' + error.message)
+	} finally {
+		verifying.value = false
+	}
+}
+
+const exportLinks = async () => {
+	try {
+		// Build query params
+		const params = new URLSearchParams({
+			format: exportFormat.value,
+			status: 'active' // Only export active links by default
+		})
+
+		if (filterProvider.value) {
+			params.append('provider', filterProvider.value)
+		}
+
+		// Trigger download
+		const url = `http://localhost:8080/api/v1/scraper/threads/${route.params.id}/export-links?${params.toString()}`
+		window.open(url, '_blank')
+
+		toast.success(`Exporting links as ${exportFormat.value.toUpperCase()}...`)
+	} catch (error) {
+		console.error('Error exporting links:', error)
+		toast.error('Failed to export links: ' + error.message)
+	}
+}
+
+// Download tracking functions
+const loadDownloadStats = async () => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/downloads/threads/${route.params.id}/stats`)
+		const data = await response.json()
+		if (data.success) {
+			downloadStats.value = data.data
+		}
+	} catch (error) {
+		console.error('Error loading download stats:', error)
+	}
+}
+
+const markAsDownloaded = async (linkId) => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/mark-downloaded`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				download_path: '',
+				notes: ''
+			})
+		})
+		const data = await response.json()
+		if (data.success) {
+			toast.success('Link marked as downloaded!')
+			// Update the link in the list
+			const link = downloadLinks.value.find(l => l.id === linkId)
+			if (link) link.download_status = 'downloaded'
+			// Reload stats
+			await loadDownloadStats()
+		} else {
+			toast.error(data.message || 'Failed to mark as downloaded')
+		}
+	} catch (error) {
+		console.error('Error marking link as downloaded:', error)
+		toast.error('Failed to mark as downloaded: ' + error.message)
+	}
+}
+
+const markAsFailed = async (linkId) => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/mark-failed`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ notes: 'User marked as failed' })
+		})
+		const data = await response.json()
+		if (data.success) {
+			toast.success('Link marked as failed')
+			// Update the link in the list
+			const link = downloadLinks.value.find(l => l.id === linkId)
+			if (link) link.download_status = 'failed'
+			// Reload stats
+			await loadDownloadStats()
+		} else {
+			toast.error(data.message || 'Failed to mark as failed')
+		}
+	} catch (error) {
+		console.error('Error marking link as failed:', error)
+		toast.error('Failed to mark as failed: ' + error.message)
+	}
+}
+
+const resetDownloadStatus = async (linkId) => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/reset`, {
+			method: 'POST'
+		})
+		const data = await response.json()
+		if (data.success) {
+			toast.success('Download status reset')
+			// Update the link in the list
+			const link = downloadLinks.value.find(l => l.id === linkId)
+			if (link) link.download_status = 'pending'
+			// Reload stats
+			await loadDownloadStats()
+		} else {
+			toast.error(data.message || 'Failed to reset status')
+		}
+	} catch (error) {
+		console.error('Error resetting download status:', error)
+		toast.error('Failed to reset status: ' + error.message)
+	}
+}
+
+const getDownloadStatusIcon = (status) => {
+	switch (status) {
+		case 'downloaded':
+			return ['fas', 'check-circle']
+		case 'failed':
+			return ['fas', 'times-circle']
+		case 'in_progress':
+			return ['fas', 'spinner']
+		default:
+			return ['fas', 'clock']
+	}
+}
+
+// JDownloader integration
+const sendToJDownloader = async () => {
+	sendingToJD.value = true
+	try {
+		// First check if JDownloader is available
+		const statusResponse = await fetch('http://localhost:8080/api/v1/jdownloader/status')
+		const statusData = await statusResponse.json()
+
+		if (!statusData.success || !statusData.data.available) {
+			toast.error('JDownloader is not running! Please start JDownloader and enable Direct Connection API.')
+			return
+		}
+
+		// Send thread to JDownloader (only active, pending links)
+		const response = await fetch(`http://localhost:8080/api/v1/jdownloader/threads/${route.params.id}/send`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				only_active: true,   // Only send verified active links
+				only_pending: true,  // Only send not-yet-downloaded links
+				auto_start: false    // Don't auto-start downloads
+			})
+		})
+
+		const data = await response.json()
+
+		if (data.success) {
+			const count = data.data.links_sent
+			if (count === 0) {
+				toast.info('No new links to send - all links already downloaded or inactive')
+			} else {
+				toast.success(`🎉 Sent ${count} links to JDownloader! Package: "${data.data.thread_title}"`)
+			}
+		} else {
+			toast.error(data.message || 'Failed to send links to JDownloader')
+		}
+	} catch (error) {
+		console.error('Error sending to JDownloader:', error)
+		toast.error('Failed to connect to JDownloader: ' + error.message)
+	} finally {
+		sendingToJD.value = false
+	}
+}
+
 const loadThread = async () => {
 	loading.value = true
 	try {
@@ -397,6 +706,8 @@ const formatDate = (dateString) => {
 
 onMounted(() => {
 	loadThread()
+	loadLinkStats()
+	loadDownloadStats()
 })
 
 // Watch for route parameter changes (when navigating from one thread to another)
@@ -649,6 +960,138 @@ watch(
 .filter-select option {
 	background: #1a1a2e;
 	color: #fff;
+}
+
+/* Link Stats Bar */
+.link-stats-bar {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	background: rgba(255, 255, 255, 0.05);
+	backdrop-filter: blur(20px);
+	border-radius: 12px;
+	padding: 1rem 1.5rem;
+	margin-bottom: 1.5rem;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stats-group {
+	display: flex;
+	gap: 2rem;
+}
+
+.stat-item {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+}
+
+.stat-item svg {
+	font-size: 1.5rem;
+}
+
+.stat-total svg {
+	color: #4dabf7;
+}
+
+.stat-active svg {
+	color: #51cf66;
+}
+
+.stat-dead svg {
+	color: #ff6b6b;
+}
+
+.stat-expired svg {
+	color: #ffa94d;
+}
+
+.stat-value {
+	font-size: 1.5rem;
+	font-weight: 700;
+	color: #fff;
+	line-height: 1;
+}
+
+.stat-label {
+	font-size: 0.85rem;
+	color: rgba(255, 255, 255, 0.6);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.link-stats-bar .btn {
+	padding: 0.65rem 1.25rem;
+	border-radius: 10px;
+	border: none;
+	background: linear-gradient(135deg, #4dabf7 0%, #339af0 100%);
+	color: #fff;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.link-stats-bar .btn:hover:not(:disabled) {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(74, 171, 247, 0.4);
+}
+
+.link-stats-bar .btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.link-actions {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+}
+
+.export-controls {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.export-format-select {
+	padding: 0.65rem 1rem;
+	border-radius: 10px;
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	background: rgba(255, 255, 255, 0.05);
+	color: #fff;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s;
+	backdrop-filter: blur(10px);
+}
+
+.export-format-select:hover {
+	background: rgba(255, 255, 255, 0.1);
+	border-color: rgba(255, 255, 255, 0.3);
+}
+
+.export-format-select option {
+	background: #1a1a2e;
+	color: #fff;
+}
+
+.btn-success {
+	background: linear-gradient(135deg, #51cf66 0%, #37b24d 100%) !important;
+}
+
+.btn-success:hover:not(:disabled) {
+	box-shadow: 0 4px 12px rgba(81, 207, 102, 0.4) !important;
+}
+
+.btn-jdownloader {
+	background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%) !important;
+}
+
+.btn-jdownloader:hover:not(:disabled) {
+	box-shadow: 0 4px 12px rgba(255, 107, 107, 0.4) !important;
 }
 
 /* Loading & Empty States */
@@ -923,6 +1366,116 @@ watch(
 .link-arrow {
 	color: rgba(255, 255, 255, 0.3);
 	font-size: 0.9rem;
+}
+
+/* Download Tracking Styles */
+.download-link-wrapper {
+	position: relative;
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	transition: all 0.2s;
+}
+
+.download-link-wrapper.status-downloaded {
+	opacity: 0.7;
+}
+
+.download-link-wrapper .download-link {
+	flex: 1;
+}
+
+.link-status-badge {
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.85rem;
+	margin-left: auto;
+}
+
+.link-status-badge.status-downloaded {
+	background: rgba(81, 207, 102, 0.15);
+	color: #51cf66;
+}
+
+.link-status-badge.status-failed {
+	background: rgba(255, 107, 107, 0.15);
+	color: #ff6b6b;
+}
+
+.link-status-badge.status-in_progress {
+	background: rgba(74, 171, 247, 0.15);
+	color: #4dabf7;
+}
+
+.link-status-badge.status-pending {
+	background: rgba(255, 255, 255, 0.05);
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.link-actions {
+	display: flex;
+	gap: 0.25rem;
+	opacity: 0;
+	transition: opacity 0.2s;
+}
+
+.download-link-wrapper:hover .link-actions {
+	opacity: 1;
+}
+
+.action-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.85rem;
+	transition: all 0.2s;
+	background: rgba(255, 255, 255, 0.05);
+	color: #fff;
+}
+
+.action-btn:hover {
+	transform: scale(1.1);
+}
+
+.success-btn {
+	background: rgba(81, 207, 102, 0.15);
+	color: #51cf66;
+}
+
+.success-btn:hover {
+	background: rgba(81, 207, 102, 0.25);
+}
+
+.danger-btn {
+	background: rgba(255, 107, 107, 0.15);
+	color: #ff6b6b;
+}
+
+.danger-btn:hover {
+	background: rgba(255, 107, 107, 0.25);
+}
+
+.reset-btn {
+	background: rgba(255, 255, 255, 0.05);
+	color: rgba(255, 255, 255, 0.6);
+}
+
+.reset-btn:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
+}
+
+.stat-downloaded svg {
+	color: #51cf66;
 }
 
 @media (max-width: 768px) {

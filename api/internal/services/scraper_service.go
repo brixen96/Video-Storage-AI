@@ -18,20 +18,23 @@ import (
 
 // ScraperService handles web scraping operations
 type ScraperService struct {
-	db                 *sql.DB
-	activityService    *ActivityService
-	aiCompanionService *AICompanionService
-	httpClient         *http.Client
-	sessionCookie      string // Store session cookie for authenticated requests
+	db                  *sql.DB
+	activityService     *ActivityService
+	aiCompanionService  *AICompanionService
+	notificationService *NotificationService
+	httpClient          *http.Client
+	sessionCookie       string // Store session cookie for authenticated requests
 }
 
 // NewScraperService creates a new scraper service
 func NewScraperService(activitySvc *ActivityService, aiCompanionSvc *AICompanionService) *ScraperService {
+	db := database.GetDB()
 	svc := &ScraperService{
-		db:                 database.GetDB(),
-		activityService:    activitySvc,
-		aiCompanionService: aiCompanionSvc,
-		sessionCookie:      "",
+		db:                  db,
+		activityService:     activitySvc,
+		aiCompanionService:  aiCompanionSvc,
+		notificationService: NewNotificationService(db),
+		sessionCookie:       "",
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -976,6 +979,14 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID
 			"✓ Thread scraped: %d posts, %d download links",
 			len(posts), len(downloadLinks),
 		))
+	}
+
+	// Send notification
+	if s.notificationService != nil {
+		err := s.notificationService.NotifyScrapeCompleted(thread.ID, thread.Title, len(downloadLinks))
+		if err != nil {
+			log.Printf("Failed to send scrape notification: %v\n", err)
+		}
 	}
 
 	return nil

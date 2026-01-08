@@ -93,6 +93,18 @@
 							Scraper
 						</router-link>
 					</li>
+					<li class="nav-item">
+						<router-link to="/scheduler" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
+							Scheduler
+						</router-link>
+					</li>
+					<li class="nav-item">
+						<router-link to="/link-health" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'heartbeat']" class="me-1" />
+							Link Health
+						</router-link>
+					</li>
 				</ul>
 
 				<!-- Right side items -->
@@ -101,6 +113,14 @@
 					<div class="widget-container d-none d-lg-block">
 						<ActivityStatusWidget />
 					</div>
+
+					<!-- Notifications -->
+					<NotificationBell />
+
+					<!-- System Health -->
+					<router-link to="/system-health" class="btn btn-outline-light btn-sm">
+						<font-awesome-icon :icon="['fas', 'heartbeat']" />
+					</router-link>
 
 					<!-- Settings -->
 					<router-link to="/settings" class="btn btn-outline-light btn-sm">
@@ -114,12 +134,14 @@
 
 <script>
 import ActivityStatusWidget from './ActivityStatusWidget.vue'
+import NotificationBell from './NotificationBell.vue'
 import websocketService from '@/services/websocket'
 
 export default {
 	name: 'NavBar',
 	components: {
 		ActivityStatusWidget,
+		NotificationBell,
 	},
 	data() {
 		return {

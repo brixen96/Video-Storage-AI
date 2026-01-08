@@ -49,7 +49,7 @@ const routes = [
 	{
 		path: '/activity',
 		name: 'Activity',
-		component: () => import(/* webpackChunkName: "activity" */ '@/views/ActivityPage.vue'),
+		component: () => import(/* webpackChunkName: "activity" */ '@/views/ActivityDashboard.vue'),
 	},
 	{
 		path: '/settings',
@@ -75,6 +75,26 @@ const routes = [
 		path: '/scraper/:id',
 		name: 'ScraperThread',
 		component: () => import(/* webpackChunkName: "scraper-thread" */ '@/views/ScraperThreadPage.vue'),
+	},
+	{
+		path: '/scheduler',
+		name: 'Scheduler',
+		component: () => import(/* webpackChunkName: "scheduler" */ '@/views/SchedulerPage.vue'),
+	},
+	{
+		path: '/system-health',
+		name: 'SystemHealth',
+		component: () => import(/* webpackChunkName: "system-health" */ '@/views/SystemHealthPage.vue'),
+	},
+	{
+		path: '/backups',
+		name: 'Backups',
+		component: () => import(/* webpackChunkName: "backups" */ '@/views/BackupsPage.vue'),
+	},
+	{
+		path: '/link-health',
+		name: 'LinkHealth',
+		component: () => import(/* webpackChunkName: "link-health" */ '@/views/LinkHealthPage.vue'),
 	},
 ]
 

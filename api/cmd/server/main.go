@@ -82,6 +82,7 @@ func main() {
 	// Initialize WebSocket hub
 	hub := api.InitWebSocket()
 	services.SetWebSocketHub(hub)
+	services.SetNotificationWebSocketHub(hub)
 
 	// Initialize AI Companion Service
 	log.Println("Initializing AI Companion...")

@@ -136,6 +136,14 @@
 						</div>
 					</div>
 					<div v-if="selectionMode || threads.length > 0" class="d-flex gap-2">
+						<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-info" @click="bulkVerifyLinks" :disabled="bulkOperationInProgress">
+							<font-awesome-icon :icon="['fas', bulkOperationInProgress ? 'spinner' : 'check-double']" :spin="bulkOperationInProgress" class="me-2" />
+							Verify Selected
+						</button>
+						<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-warning" @click="bulkSendToJDownloader" :disabled="bulkOperationInProgress">
+							<font-awesome-icon :icon="['fas', bulkOperationInProgress ? 'spinner' : 'cloud-download-alt']" :spin="bulkOperationInProgress" class="me-2" />
+							Send to JD
+						</button>
 						<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-danger" @click="deleteSelectedThreads">
 							<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
 							Delete Selected
@@ -879,6 +887,112 @@ const allSelectedOnPage = computed(() => {
 })
 
 // Deletion methods
+// Bulk Operations
+const bulkOperationInProgress = ref(false)
+
+const bulkVerifyLinks = async () => {
+	if (selectedThreadIds.value.size === 0) {
+		toast.warning('No threads selected')
+		return
+	}
+
+	bulkOperationInProgress.value = true
+	const threadIds = Array.from(selectedThreadIds.value)
+	let completed = 0
+
+	try {
+		toast.info(`Starting verification for ${threadIds.length} threads...`)
+
+		// Verify each thread sequentially with progress updates
+		for (const threadId of threadIds) {
+			try {
+				const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${threadId}/verify-links`, {
+					method: 'POST'
+				})
+				const data = await response.json()
+
+				if (data.success) {
+					completed++
+					toast.success(`Verified thread ${completed}/${threadIds.length}`, {
+						duration: 2000
+					})
+				}
+			} catch (error) {
+				console.error(`Failed to verify thread ${threadId}:`, error)
+			}
+		}
+
+		toast.success(`✅ Completed! Verified ${completed}/${threadIds.length} threads`)
+		selectedThreadIds.value.clear()
+		selectionMode.value = false
+	} catch (error) {
+		console.error('Bulk verify error:', error)
+		toast.error('Bulk verification failed: ' + error.message)
+	} finally {
+		bulkOperationInProgress.value = false
+	}
+}
+
+const bulkSendToJDownloader = async () => {
+	if (selectedThreadIds.value.size === 0) {
+		toast.warning('No threads selected')
+		return
+	}
+
+	bulkOperationInProgress.value = true
+	const threadIds = Array.from(selectedThreadIds.value)
+	let completed = 0
+	let totalLinksSent = 0
+
+	try {
+		// First check if JDownloader is available
+		const jdStatusResponse = await fetch('http://localhost:8080/api/v1/jdownloader/status')
+		const jdStatusData = await jdStatusResponse.json()
+
+		if (!jdStatusData.success || !jdStatusData.data.available) {
+			toast.error('JDownloader is not running! Please start JDownloader first.')
+			return
+		}
+
+		toast.info(`Sending ${threadIds.length} threads to JDownloader...`)
+
+		// Send each thread to JDownloader
+		for (const threadId of threadIds) {
+			try {
+				const response = await fetch(`http://localhost:8080/api/v1/jdownloader/threads/${threadId}/send`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						only_active: true,
+						only_pending: true,
+						auto_start: false
+					})
+				})
+				const data = await response.json()
+
+				if (data.success) {
+					completed++
+					totalLinksSent += data.data.links_sent || 0
+					toast.success(`Sent thread ${completed}/${threadIds.length} (${data.data.links_sent} links)`, {
+						duration: 2000
+					})
+				}
+			} catch (error) {
+				console.error(`Failed to send thread ${threadId}:`, error)
+			}
+		}
+
+		toast.success(`🎉 Sent ${totalLinksSent} links from ${completed}/${threadIds.length} threads to JDownloader!`)
+		selectedThreadIds.value.clear()
+		selectionMode.value = false
+	} catch (error) {
+		console.error('Bulk JDownloader send error:', error)
+		toast.error('Bulk send failed: ' + error.message)
+	} finally {
+		bulkOperationInProgress.value = false
+	}
+}
+
 const deleteSelectedThreads = async () => {
 	if (selectedThreadIds.value.size === 0) {
 		toast.warning('No threads selected')

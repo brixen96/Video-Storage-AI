@@ -554,6 +554,129 @@ func runMigrations() error {
 		`ALTER TABLE activity_logs ADD COLUMN is_paused BOOLEAN DEFAULT 0`,
 		`ALTER TABLE activity_logs ADD COLUMN paused_at DATETIME`,
 		`ALTER TABLE activity_logs ADD COLUMN checkpoint TEXT DEFAULT '{}'`,
+		// Migration 27: Performance indexes for pause/resume and AI search
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_is_paused ON activity_logs(is_paused) WHERE is_paused = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_status_paused ON activity_logs(status, is_paused)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_posts_plain_text ON scraped_posts(plain_text)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_threads_title ON scraped_threads(title)`,
+		// Migration 28: Additional performance indexes for foreign keys and common queries
+		`CREATE INDEX IF NOT EXISTS idx_video_performers_performer ON video_performers(performer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_studios_studio ON video_studios(studio_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_performer_scraped_threads_thread ON performer_scraped_threads(thread_id)`,
+		// Migration 29: Download tracking fields
+		`ALTER TABLE scraped_download_links ADD COLUMN download_status TEXT DEFAULT 'pending'`, // pending, downloaded, failed, in_progress
+		`ALTER TABLE scraped_download_links ADD COLUMN downloaded_at DATETIME`,
+		`ALTER TABLE scraped_download_links ADD COLUMN download_path TEXT`,
+		`ALTER TABLE scraped_download_links ADD COLUMN download_notes TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_links_download_status ON scraped_download_links(download_status)`,
+		// Migration 30: AI Audit Logging System
+		`CREATE TABLE IF NOT EXISTS ai_audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			interaction_type TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			user_query TEXT,
+			ai_prompt TEXT,
+			ai_response TEXT,
+			context_data TEXT DEFAULT '{}',
+			performer_id INTEGER,
+			thread_id INTEGER,
+			video_id INTEGER,
+			tokens_used INTEGER DEFAULT 0,
+			cost_usd REAL DEFAULT 0.0,
+			response_time_ms INTEGER DEFAULT 0,
+			success BOOLEAN DEFAULT 1,
+			error_message TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (performer_id) REFERENCES performers(id) ON DELETE SET NULL,
+			FOREIGN KEY (thread_id) REFERENCES scraped_threads(id) ON DELETE SET NULL,
+			FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_interaction_type ON ai_audit_logs(interaction_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_operation ON ai_audit_logs(operation)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_created ON ai_audit_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_performer ON ai_audit_logs(performer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_thread ON ai_audit_logs(thread_id)`,
+		// Migration 31: Scheduled Jobs System
+		`CREATE TABLE IF NOT EXISTS scheduled_jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_type TEXT NOT NULL,
+			schedule_type TEXT NOT NULL,
+			schedule_config TEXT DEFAULT '{}',
+			target_type TEXT,
+			target_id INTEGER,
+			enabled BOOLEAN DEFAULT 1,
+			last_run_at DATETIME,
+			next_run_at DATETIME,
+			run_count INTEGER DEFAULT 0,
+			success_count INTEGER DEFAULT 0,
+			failure_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled ON scheduled_jobs(enabled)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(next_run_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_type ON scheduled_jobs(job_type)`,
+		`CREATE TABLE IF NOT EXISTS job_execution_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id INTEGER NOT NULL,
+			status TEXT NOT NULL,
+			started_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			duration_ms INTEGER DEFAULT 0,
+			result_data TEXT DEFAULT '{}',
+			error_message TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_execution_history(job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_execution_history(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_created ON job_execution_history(created_at DESC)`,
+	}
+
+	// Migration 32: Notifications System
+	migration32 := []string{
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			type TEXT NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'normal',
+			title TEXT NOT NULL,
+			message TEXT NOT NULL,
+			category TEXT,
+			action_url TEXT,
+			action_label TEXT,
+			metadata TEXT DEFAULT '{}',
+			is_read BOOLEAN DEFAULT 0,
+			is_archived BOOLEAN DEFAULT 0,
+			related_entity_type TEXT,
+			related_entity_id INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			read_at DATETIME,
+			expires_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_archived ON notifications(is_archived)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_priority ON notifications(priority)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(related_entity_type, related_entity_id)`,
+		`CREATE TABLE IF NOT EXISTS notification_preferences (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			notification_type TEXT UNIQUE NOT NULL,
+			enabled BOOLEAN DEFAULT 1,
+			priority_filter TEXT DEFAULT 'all',
+			delivery_methods TEXT DEFAULT '["in_app"]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+
+	for _, migration := range migration32 {
+		if _, err := DB.Exec(migration); err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("migration 32 failed: %w", err)
+			}
+		}
 	}
 
 	for _, migration := range migrations {

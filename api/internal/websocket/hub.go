@@ -103,6 +103,19 @@ func (h *Hub) BroadcastConsoleLog(log *models.ConsoleLog) {
 	}
 }
 
+// BroadcastNotification broadcasts a notification to all clients.
+func (h *Hub) BroadcastNotification(notification *models.Notification) {
+	// Wrap message with type
+	wrapper := map[string]interface{}{
+		"type": "notification",
+		"data": notification,
+	}
+	message, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(message)
+	}
+}
+
 // Register registers a new client with the hub.
 func (h *Hub) Register(client *Client) {
 	h.register <- client
