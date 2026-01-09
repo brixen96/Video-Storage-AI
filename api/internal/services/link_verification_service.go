@@ -349,3 +349,153 @@ func (s *LinkVerificationService) GetThreadLinkStats(threadID int64) (map[string
 
 	return stats, nil
 }
+
+// ProviderHealth represents health statistics for a download provider
+type ProviderHealth struct {
+	Provider      string  `json:"provider"`
+	TotalLinks    int     `json:"total_links"`
+	ActiveLinks   int     `json:"active_links"`
+	DeadLinks     int     `json:"dead_links"`
+	ExpiredLinks  int     `json:"expired_links"`
+	UncheckedLinks int    `json:"unchecked_links"`
+	HealthScore   float64 `json:"health_score"` // Percentage of active links
+	LastChecked   *time.Time `json:"last_checked,omitempty"`
+}
+
+// GetProviderHealthStats returns health statistics for all providers
+func (s *LinkVerificationService) GetProviderHealthStats() ([]*ProviderHealth, error) {
+	// Query provider statistics grouped by provider and status
+	rows, err := s.db.Query(`
+		SELECT
+			provider,
+			status,
+			COUNT(*) as count,
+			MAX(last_checked_at) as last_checked
+		FROM scraped_download_links
+		GROUP BY provider, status
+		ORDER BY provider, status
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query provider stats: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect data grouped by provider
+	providerData := make(map[string]*ProviderHealth)
+
+	for rows.Next() {
+		var provider, status string
+		var count int
+		var lastChecked sql.NullTime
+
+		if err := rows.Scan(&provider, &status, &count, &lastChecked); err != nil {
+			log.Printf("Error scanning provider stat: %v", err)
+			continue
+		}
+
+		// Initialize provider entry if doesn't exist
+		if _, exists := providerData[provider]; !exists {
+			providerData[provider] = &ProviderHealth{
+				Provider: provider,
+			}
+		}
+
+		ph := providerData[provider]
+		ph.TotalLinks += count
+
+		// Update last checked time if this is more recent
+		if lastChecked.Valid {
+			if ph.LastChecked == nil || lastChecked.Time.After(*ph.LastChecked) {
+				ph.LastChecked = &lastChecked.Time
+			}
+		}
+
+		// Categorize by status
+		switch status {
+		case "active":
+			ph.ActiveLinks += count
+		case "dead":
+			ph.DeadLinks += count
+		case "expired":
+			ph.ExpiredLinks += count
+		default:
+			ph.UncheckedLinks += count
+		}
+	}
+
+	// Calculate health scores and convert to slice
+	var results []*ProviderHealth
+	for _, ph := range providerData {
+		if ph.TotalLinks > 0 {
+			ph.HealthScore = float64(ph.ActiveLinks) / float64(ph.TotalLinks) * 100
+		}
+		results = append(results, ph)
+	}
+
+	// Sort by total links (most popular first)
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].TotalLinks > results[i].TotalLinks {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// GetProviderHealth returns health statistics for a specific provider
+func (s *LinkVerificationService) GetProviderHealth(provider string) (*ProviderHealth, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			status,
+			COUNT(*) as count,
+			MAX(last_checked_at) as last_checked
+		FROM scraped_download_links
+		WHERE provider = ?
+		GROUP BY status
+	`, provider)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query provider health: %w", err)
+	}
+	defer rows.Close()
+
+	ph := &ProviderHealth{
+		Provider: provider,
+	}
+
+	for rows.Next() {
+		var status string
+		var count int
+		var lastChecked sql.NullTime
+
+		if err := rows.Scan(&status, &count, &lastChecked); err != nil {
+			continue
+		}
+
+		ph.TotalLinks += count
+
+		if lastChecked.Valid {
+			if ph.LastChecked == nil || lastChecked.Time.After(*ph.LastChecked) {
+				ph.LastChecked = &lastChecked.Time
+			}
+		}
+
+		switch status {
+		case "active":
+			ph.ActiveLinks += count
+		case "dead":
+			ph.DeadLinks += count
+		case "expired":
+			ph.ExpiredLinks += count
+		default:
+			ph.UncheckedLinks += count
+		}
+	}
+
+	if ph.TotalLinks > 0 {
+		ph.HealthScore = float64(ph.ActiveLinks) / float64(ph.TotalLinks) * 100
+	}
+
+	return ph, nil
+}

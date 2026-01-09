@@ -247,6 +247,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/links/verify-all", verifyAllLinks)              // Verify old/unchecked links
 			scraper.GET("/links/verification-stats", getVerificationStats) // Get overall verification stats
 
+			// Provider health analytics endpoints
+			scraper.GET("/providers/health", getProviderHealthStats)       // Get health stats for all providers
+			scraper.GET("/providers/:provider/health", getProviderHealth)  // Get health stats for specific provider
+
 			// Link export endpoints
 			scraper.GET("/threads/:id/export-links", exportThreadLinks)    // Export links from a thread (formats: txt, json, csv)
 			scraper.GET("/links/export-all", exportAllThreadsLinks)        // Export links from all threads

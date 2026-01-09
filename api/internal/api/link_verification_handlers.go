@@ -149,3 +149,61 @@ func verifyAllLinks(c *gin.Context) {
 		"message":     "Link verification started in background",
 	}, "Verification started"))
 }
+
+// getProviderHealthStats returns health statistics for all download providers
+func getProviderHealthStats(c *gin.Context) {
+	svc := ensureLinkVerificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Link verification service not initialized",
+		))
+		return
+	}
+
+	stats, err := svc.GetProviderHealthStats()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get provider health stats",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"providers": stats,
+		"count":     len(stats),
+	}, "Provider health statistics retrieved successfully"))
+}
+
+// getProviderHealth returns health statistics for a specific provider
+func getProviderHealth(c *gin.Context) {
+	svc := ensureLinkVerificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Link verification service not initialized",
+		))
+		return
+	}
+
+	provider := c.Param("provider")
+	if provider == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			"Provider name is required",
+		))
+		return
+	}
+
+	health, err := svc.GetProviderHealth(provider)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get provider health",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(health, "Provider health retrieved successfully"))
+}
