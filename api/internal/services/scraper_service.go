@@ -303,12 +303,12 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("Scraping page %d", currentPage))
 		}
 
-		// Retry logic for rate limiting
+		// Enhanced retry logic with exponential backoff
 		var resp *http.Response
 		var doc *goquery.Document
 		var err error
-		maxRetries := 3
-		retryDelay := 5 * time.Second
+		maxRetries := 5 // Increased from 3 to 5
+		baseRetryDelay := 3 * time.Second
 
 		for attempt := 0; attempt <= maxRetries; attempt++ {
 			// Create request with authentication
@@ -327,7 +327,17 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 
 			resp, err = s.httpClient.Do(req)
 			if err != nil {
-				return nil, nil, fmt.Errorf("failed to fetch thread: %w", err)
+				// Network error - retry with backoff
+				if attempt < maxRetries {
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt)) // Exponential: 3s, 6s, 12s, 24s, 48s
+					log.Printf("⚠️ Network error on page %d: %v. Retrying in %v (%d/%d)", currentPage, err, waitTime, attempt+1, maxRetries)
+					if aid > 0 {
+						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Network error. Retrying in %v (%d/%d)", waitTime, attempt+1, maxRetries))
+					}
+					time.Sleep(waitTime)
+					continue
+				}
+				return nil, nil, fmt.Errorf("network error after %d retries: %w", maxRetries, err)
 			}
 
 			if resp.StatusCode == http.StatusNotFound {
@@ -340,8 +350,8 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			if resp.StatusCode == http.StatusTooManyRequests {
 				resp.Body.Close()
 				if attempt < maxRetries {
-					waitTime := retryDelay * time.Duration(attempt+1)
-					log.Printf("Rate limited (429). Waiting %v before retry %d/%d", waitTime, attempt+1, maxRetries)
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
+					log.Printf("⚠️ Rate limited (429) on page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
 					if aid > 0 {
 						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Rate limited. Waiting %v before retry %d/%d", waitTime, attempt+1, maxRetries))
 					}
@@ -349,6 +359,21 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 					continue
 				}
 				return nil, nil, fmt.Errorf("rate limited after %d retries (429)", maxRetries)
+			}
+
+			// Handle server errors (500, 502, 503) with retry
+			if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+				resp.Body.Close()
+				if attempt < maxRetries {
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt))
+					log.Printf("⚠️ Server error %d on page %d. Retrying in %v (%d/%d)", resp.StatusCode, currentPage, waitTime, attempt+1, maxRetries)
+					if aid > 0 {
+						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Server error %d. Retrying in %v (%d/%d)", resp.StatusCode, waitTime, attempt+1, maxRetries))
+					}
+					time.Sleep(waitTime)
+					continue
+				}
+				return nil, nil, fmt.Errorf("server error %d after %d retries", resp.StatusCode, maxRetries)
 			}
 
 			if resp.StatusCode != http.StatusOK {
