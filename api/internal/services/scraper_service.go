@@ -26,6 +26,15 @@ type ScraperService struct {
 	sessionCookie       string // Store session cookie for authenticated requests
 }
 
+// AdaptiveRateLimiter tracks server response times and adjusts delays
+type AdaptiveRateLimiter struct {
+	currentDelay    time.Duration
+	minDelay        time.Duration
+	maxDelay        time.Duration
+	responseHistory []time.Duration
+	historySize     int
+}
+
 // NewScraperService creates a new scraper service
 func NewScraperService(activitySvc *ActivityService, aiCompanionSvc *AICompanionService) *ScraperService {
 	db := database.GetDB()
@@ -90,6 +99,70 @@ func (s *ScraperService) SetSessionCookie(cookie string) {
 // GetSessionCookie returns the current session cookie
 func (s *ScraperService) GetSessionCookie() string {
 	return s.sessionCookie
+}
+
+// NewAdaptiveRateLimiter creates a new adaptive rate limiter
+func NewAdaptiveRateLimiter() *AdaptiveRateLimiter {
+	return &AdaptiveRateLimiter{
+		currentDelay:    2500 * time.Millisecond, // Start at 2.5s (current default)
+		minDelay:        1000 * time.Millisecond, // Minimum 1s delay
+		maxDelay:        6000 * time.Millisecond, // Maximum 6s delay
+		responseHistory: make([]time.Duration, 0, 5),
+		historySize:     5, // Track last 5 response times
+	}
+}
+
+// RecordResponse records a server response time and adjusts delay
+func (rl *AdaptiveRateLimiter) RecordResponse(responseTime time.Duration, statusCode int) {
+	// Add response time to history
+	rl.responseHistory = append(rl.responseHistory, responseTime)
+	if len(rl.responseHistory) > rl.historySize {
+		rl.responseHistory = rl.responseHistory[1:]
+	}
+
+	// Calculate average response time
+	var total time.Duration
+	for _, rt := range rl.responseHistory {
+		total += rt
+	}
+	avgResponseTime := total / time.Duration(len(rl.responseHistory))
+
+	// Adjust delay based on server performance
+	if statusCode == 429 || statusCode >= 500 {
+		// Server is stressed - increase delay significantly
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 1.5)
+		if rl.currentDelay > rl.maxDelay {
+			rl.currentDelay = rl.maxDelay
+		}
+	} else if avgResponseTime > 3*time.Second {
+		// Server is slow - increase delay moderately
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 1.2)
+		if rl.currentDelay > rl.maxDelay {
+			rl.currentDelay = rl.maxDelay
+		}
+	} else if avgResponseTime < 1*time.Second && rl.currentDelay > rl.minDelay {
+		// Server is fast and responsive - decrease delay
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 0.9)
+		if rl.currentDelay < rl.minDelay {
+			rl.currentDelay = rl.minDelay
+		}
+	}
+}
+
+// GetDelay returns the current adaptive delay
+func (rl *AdaptiveRateLimiter) GetDelay() time.Duration {
+	return rl.currentDelay
+}
+
+// GetStatus returns a human-readable status message
+func (rl *AdaptiveRateLimiter) GetStatus() string {
+	if rl.currentDelay <= 1500*time.Millisecond {
+		return fmt.Sprintf("🟢 Server responsive (%.1fs delay)", rl.currentDelay.Seconds())
+	} else if rl.currentDelay <= 3000*time.Millisecond {
+		return fmt.Sprintf("🟡 Normal pace (%.1fs delay)", rl.currentDelay.Seconds())
+	} else {
+		return fmt.Sprintf("🟠 Server slow (%.1fs delay)", rl.currentDelay.Seconds())
+	}
 }
 
 // ScrapeCheckpoint stores progress for resuming interrupted scrapes
@@ -296,6 +369,10 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	estimatedTotalPages := 0 // Will be updated after first page scrape
 	var existingPostIDs map[string]bool // Track existing posts for incremental scraping
 
+	// Initialize adaptive rate limiter
+	rateLimiter := NewAdaptiveRateLimiter()
+	log.Printf("⚡ Adaptive rate limiting enabled: %.1fs initial delay", rateLimiter.GetDelay().Seconds())
+
 	// Check for existing posts in this thread for incremental scraping
 	existingPostIDs, err := s.getExistingPostIDs(threadID)
 	if err != nil {
@@ -368,7 +445,10 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			// Add user agent
 			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+			// Track response time for adaptive rate limiting
+			requestStart := time.Now()
 			resp, err = s.httpClient.Do(req)
+			responseTime := time.Since(requestStart)
 			if err != nil {
 				// Network error - retry with backoff
 				if attempt < maxRetries {
@@ -392,6 +472,8 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			// Handle rate limiting with exponential backoff
 			if resp.StatusCode == http.StatusTooManyRequests {
 				resp.Body.Close()
+				// Record rate limit for adaptive adjustment
+				rateLimiter.RecordResponse(responseTime, resp.StatusCode)
 				if attempt < maxRetries {
 					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
 					log.Printf("⚠️ Rate limited (429) on page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
@@ -407,6 +489,8 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			// Handle server errors (500, 502, 503) with retry
 			if resp.StatusCode >= 500 && resp.StatusCode < 600 {
 				resp.Body.Close()
+				// Record server error for adaptive adjustment
+				rateLimiter.RecordResponse(responseTime, resp.StatusCode)
 				if attempt < maxRetries {
 					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt))
 					log.Printf("⚠️ Server error %d on page %d. Retrying in %v (%d/%d)", resp.StatusCode, currentPage, waitTime, attempt+1, maxRetries)
@@ -423,6 +507,9 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 				resp.Body.Close()
 				return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 			}
+
+			// Record successful response for adaptive rate limiting
+			rateLimiter.RecordResponse(responseTime, resp.StatusCode)
 
 			// Success - break out of retry loop
 			break
@@ -589,8 +676,14 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 		}
 		log.Printf(nextPageMsg)
 
-		// Add delay to avoid rate limiting (increased from 1s to 2.5s)
-		time.Sleep(2500 * time.Millisecond)
+		// Adaptive delay based on server performance
+		adaptiveDelay := rateLimiter.GetDelay()
+		statusMsg := rateLimiter.GetStatus()
+		log.Printf("%s - waiting %.1fs before next page", statusMsg, adaptiveDelay.Seconds())
+		if aid > 0 && currentPage%10 == 0 { // Update status every 10 pages
+			s.activityService.UpdateProgressLog(int64(aid), 0, statusMsg)
+		}
+		time.Sleep(adaptiveDelay)
 	}
 
 	// Final summary with duplicate detection statistics
