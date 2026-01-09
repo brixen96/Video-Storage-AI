@@ -335,6 +335,51 @@ func (s *NotificationService) NotifyScrapeCompleted(threadID int64, threadTitle 
 	return err
 }
 
+// NotifyScrapeCompletedEnhanced creates an enhanced notification with comprehensive scrape statistics
+func (s *NotificationService) NotifyScrapeCompletedEnhanced(threadID int64, threadTitle string, postsFound int, linksFound int, duration time.Duration, isIncremental bool) error {
+	// Format duration nicely
+	durationStr := formatDuration(duration)
+
+	// Create appropriate message based on scrape type
+	var message string
+	var priority string = "normal"
+
+	if isIncremental {
+		message = fmt.Sprintf("🔄 Incremental update: %d new posts, %d download links • %s", postsFound, linksFound, durationStr)
+		if postsFound == 0 {
+			message = fmt.Sprintf("✓ Thread up-to-date: No new posts found • %s", durationStr)
+			priority = "low"
+		}
+	} else {
+		message = fmt.Sprintf("✨ New thread scraped: %d posts, %d download links • %s", postsFound, linksFound, durationStr)
+		if linksFound > 50 {
+			priority = "high" // Highlight large finds
+		}
+	}
+
+	req := &models.CreateNotificationRequest{
+		Type:              "scrape_completed",
+		Priority:          priority,
+		Title:             "Scrape Completed",
+		Message:           message,
+		Category:          "scraper",
+		ActionURL:         fmt.Sprintf("/scraper/%d", threadID),
+		ActionLabel:       "View Thread",
+		RelatedEntityType: "thread",
+		RelatedEntityID:   &threadID,
+		Metadata: map[string]interface{}{
+			"thread_title":   threadTitle,
+			"posts_found":    postsFound,
+			"links_found":    linksFound,
+			"duration_ms":    duration.Milliseconds(),
+			"is_incremental": isIncremental,
+		},
+	}
+
+	_, err := s.Create(req)
+	return err
+}
+
 // NotifyLinksVerified creates a notification for link verification results
 func (s *NotificationService) NotifyLinksVerified(threadID int64, threadTitle string, totalLinks int, deadLinks int) error {
 	priority := "normal"

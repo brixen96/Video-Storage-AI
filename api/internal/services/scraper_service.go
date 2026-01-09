@@ -1116,6 +1116,9 @@ func (s *ScraperService) SaveDownloadLink(link *models.ScrapedDownloadLink) erro
 
 // ScrapeThreadComplete scrapes a thread and all its posts in one operation
 func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID ...int) error {
+	// Track scrape start time for duration calculation
+	scrapeStartTime := time.Now()
+
 	// Use parent activity if provided, otherwise create new activity
 	var activityID int
 	var shouldComplete bool = true
@@ -1241,9 +1244,18 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID
 		))
 	}
 
-	// Send notification
+	// Send enhanced notification with comprehensive stats
 	if s.notificationService != nil {
-		err := s.notificationService.NotifyScrapeCompleted(thread.ID, thread.Title, len(downloadLinks))
+		scrapeDuration := time.Since(scrapeStartTime)
+		isIncremental := existingThread != nil
+		err := s.notificationService.NotifyScrapeCompletedEnhanced(
+			thread.ID,
+			thread.Title,
+			len(posts),
+			len(downloadLinks),
+			scrapeDuration,
+			isIncremental,
+		)
 		if err != nil {
 			log.Printf("Failed to send scrape notification: %v\n", err)
 		}
