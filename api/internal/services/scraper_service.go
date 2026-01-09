@@ -92,6 +92,19 @@ func (s *ScraperService) GetSessionCookie() string {
 	return s.sessionCookie
 }
 
+// ScrapeCheckpoint stores progress for resuming interrupted scrapes
+type ScrapeCheckpoint struct {
+	CurrentPage         int                           `json:"current_page"`
+	PostNumber          int                           `json:"post_number"`
+	EstimatedTotalPages int                           `json:"estimated_total_pages"`
+	PostsCollected      int                           `json:"posts_collected"`
+	LinksCollected      int                           `json:"links_collected"`
+	LastPageURL         string                        `json:"last_page_url"`
+	CleanURL            string                        `json:"clean_url"`
+	SavedPosts          []*models.ScrapedPost         `json:"-"` // Not serialized
+	SavedLinks          []*models.ScrapedDownloadLink `json:"-"` // Not serialized
+}
+
 // ScrapeThread scrapes a single thread from simpcity.is
 func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, error) {
 	// Clean the URL: remove common suffixes like /unread, /latest
@@ -281,6 +294,22 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	postNumber := 1
 	currentPage := 1
 	estimatedTotalPages := 0 // Will be updated after first page scrape
+
+	// Check for existing checkpoint to resume from
+	if aid > 0 {
+		checkpoint, err := s.loadCheckpoint(int64(aid))
+		if err == nil && checkpoint != nil {
+			currentPage = checkpoint.CurrentPage
+			postNumber = checkpoint.PostNumber
+			estimatedTotalPages = checkpoint.EstimatedTotalPages
+			allPosts = checkpoint.SavedPosts
+			allDownloadLinks = checkpoint.SavedLinks
+			log.Printf("🔄 Resuming scrape from page %d (had %d posts, %d links)", currentPage, len(allPosts), len(allDownloadLinks))
+			s.activityService.UpdateProgressLog(int64(aid), 0,
+				fmt.Sprintf("🔄 Resuming from page %d/%d (recovered %d posts, %d links)",
+					currentPage, estimatedTotalPages, len(allPosts), len(allDownloadLinks)))
+		}
+	}
 
 	for {
 		// Check if task has been paused
@@ -504,6 +533,24 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			break
 		}
 
+		// Save checkpoint after successful page scrape
+		if aid > 0 {
+			checkpoint := &ScrapeCheckpoint{
+				CurrentPage:         currentPage + 1, // Next page to scrape
+				PostNumber:          postNumber,
+				EstimatedTotalPages: estimatedTotalPages,
+				PostsCollected:      len(allPosts),
+				LinksCollected:      len(allDownloadLinks),
+				LastPageURL:         pageURL,
+				CleanURL:            cleanURL,
+				SavedPosts:          allPosts,
+				SavedLinks:          allDownloadLinks,
+			}
+			if err := s.saveCheckpoint(int64(aid), checkpoint); err != nil {
+				log.Printf("⚠️ Failed to save checkpoint: %v", err)
+			}
+		}
+
 		currentPage++
 		nextPageMsg := fmt.Sprintf("Moving to page %d", currentPage)
 		if estimatedTotalPages > 1 {
@@ -520,6 +567,10 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	log.Printf(summaryMsg)
 	if aid > 0 {
 		s.activityService.UpdateProgressLog(int64(aid), 0, summaryMsg)
+		// Clear checkpoint on successful completion
+		if err := s.clearCheckpoint(int64(aid)); err != nil {
+			log.Printf("⚠️ Failed to clear checkpoint: %v", err)
+		}
 	}
 
 	return allPosts, allDownloadLinks, nil
@@ -2287,5 +2338,142 @@ func (s *ScraperService) DeleteAllThreads() error {
 	}
 
 	log.Println("Successfully deleted all scraped threads")
+	return nil
+}
+
+// saveCheckpoint saves the current scraping progress to the database
+func (s *ScraperService) saveCheckpoint(activityID int64, checkpoint *ScrapeCheckpoint) error {
+	// Serialize posts and links separately to avoid huge JSON
+	postsJSON, err := json.Marshal(checkpoint.SavedPosts)
+	if err != nil {
+		return fmt.Errorf("failed to serialize posts: %w", err)
+	}
+
+	linksJSON, err := json.Marshal(checkpoint.SavedLinks)
+	if err != nil {
+		return fmt.Errorf("failed to serialize links: %w", err)
+	}
+
+	// Create checkpoint data with serialized posts/links
+	checkpointData := map[string]interface{}{
+		"current_page":          checkpoint.CurrentPage,
+		"post_number":           checkpoint.PostNumber,
+		"estimated_total_pages": checkpoint.EstimatedTotalPages,
+		"posts_collected":       checkpoint.PostsCollected,
+		"links_collected":       checkpoint.LinksCollected,
+		"last_page_url":         checkpoint.LastPageURL,
+		"clean_url":             checkpoint.CleanURL,
+		"saved_posts":           string(postsJSON),
+		"saved_links":           string(linksJSON),
+	}
+
+	checkpointJSON, err := json.Marshal(checkpointData)
+	if err != nil {
+		return fmt.Errorf("failed to serialize checkpoint: %w", err)
+	}
+
+	// Update activity checkpoint
+	_, err = s.db.Exec(`
+		UPDATE activities
+		SET checkpoint = ?
+		WHERE id = ?
+	`, string(checkpointJSON), activityID)
+
+	if err != nil {
+		return fmt.Errorf("failed to save checkpoint: %w", err)
+	}
+
+	log.Printf("💾 Checkpoint saved: page %d, %d posts, %d links",
+		checkpoint.CurrentPage, checkpoint.PostsCollected, checkpoint.LinksCollected)
+	return nil
+}
+
+// loadCheckpoint loads a saved scraping checkpoint from the database
+func (s *ScraperService) loadCheckpoint(activityID int64) (*ScrapeCheckpoint, error) {
+	var checkpointJSON string
+	err := s.db.QueryRow(`
+		SELECT checkpoint
+		FROM activities
+		WHERE id = ?
+	`, activityID).Scan(&checkpointJSON)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No checkpoint found
+		}
+		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
+	}
+
+	if checkpointJSON == "" || checkpointJSON == "{}" {
+		return nil, nil // Empty checkpoint
+	}
+
+	// Deserialize checkpoint data
+	var checkpointData map[string]interface{}
+	if err := json.Unmarshal([]byte(checkpointJSON), &checkpointData); err != nil {
+		return nil, fmt.Errorf("failed to deserialize checkpoint: %w", err)
+	}
+
+	checkpoint := &ScrapeCheckpoint{}
+
+	// Extract basic fields
+	if val, ok := checkpointData["current_page"].(float64); ok {
+		checkpoint.CurrentPage = int(val)
+	}
+	if val, ok := checkpointData["post_number"].(float64); ok {
+		checkpoint.PostNumber = int(val)
+	}
+	if val, ok := checkpointData["estimated_total_pages"].(float64); ok {
+		checkpoint.EstimatedTotalPages = int(val)
+	}
+	if val, ok := checkpointData["posts_collected"].(float64); ok {
+		checkpoint.PostsCollected = int(val)
+	}
+	if val, ok := checkpointData["links_collected"].(float64); ok {
+		checkpoint.LinksCollected = int(val)
+	}
+	if val, ok := checkpointData["last_page_url"].(string); ok {
+		checkpoint.LastPageURL = val
+	}
+	if val, ok := checkpointData["clean_url"].(string); ok {
+		checkpoint.CleanURL = val
+	}
+
+	// Deserialize posts
+	if postsStr, ok := checkpointData["saved_posts"].(string); ok && postsStr != "" {
+		var posts []*models.ScrapedPost
+		if err := json.Unmarshal([]byte(postsStr), &posts); err != nil {
+			log.Printf("⚠️ Failed to deserialize saved posts: %v", err)
+		} else {
+			checkpoint.SavedPosts = posts
+		}
+	}
+
+	// Deserialize links
+	if linksStr, ok := checkpointData["saved_links"].(string); ok && linksStr != "" {
+		var links []*models.ScrapedDownloadLink
+		if err := json.Unmarshal([]byte(linksStr), &links); err != nil {
+			log.Printf("⚠️ Failed to deserialize saved links: %v", err)
+		} else {
+			checkpoint.SavedLinks = links
+		}
+	}
+
+	return checkpoint, nil
+}
+
+// clearCheckpoint removes the checkpoint data from the database
+func (s *ScraperService) clearCheckpoint(activityID int64) error {
+	_, err := s.db.Exec(`
+		UPDATE activities
+		SET checkpoint = '{}'
+		WHERE id = ?
+	`, activityID)
+
+	if err != nil {
+		return fmt.Errorf("failed to clear checkpoint: %w", err)
+	}
+
+	log.Printf("🗑️ Checkpoint cleared for activity %d", activityID)
 	return nil
 }
