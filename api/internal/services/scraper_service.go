@@ -280,6 +280,7 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	var allDownloadLinks []*models.ScrapedDownloadLink
 	postNumber := 1
 	currentPage := 1
+	estimatedTotalPages := 0 // Will be updated after first page scrape
 
 	for {
 		// Check if task has been paused
@@ -381,8 +382,37 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 		})
 
 		log.Printf("Found %d posts on page %d", postsOnPage, currentPage)
+
+		// Detect total pages from pagination (only on first page)
+		if currentPage == 1 && estimatedTotalPages == 0 {
+			// Look for the last page number in pagination
+			maxPageNum := 1
+			doc.Find(".pageNav-page").Each(func(i int, sel *goquery.Selection) {
+				pageNumText := strings.TrimSpace(sel.Text())
+				if pageNumText != "" {
+					var num int
+					_, err := fmt.Sscanf(pageNumText, "%d", &num)
+					if err == nil && num > maxPageNum {
+						maxPageNum = num
+					}
+				}
+			})
+			estimatedTotalPages = maxPageNum
+			if estimatedTotalPages > 1 {
+				log.Printf("📄 Detected %d total pages in thread", estimatedTotalPages)
+				if aid > 0 {
+					s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("📄 Thread has %d pages to scrape", estimatedTotalPages))
+				}
+			}
+		}
+
+		// Enhanced progress logging with page count
+		progressMsg := fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage)
+		if estimatedTotalPages > 1 {
+			progressMsg = fmt.Sprintf("Found %d posts on page %d/%d", postsOnPage, currentPage, estimatedTotalPages)
+		}
 		if aid > 0 {
-			s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage))
+			s.activityService.UpdateProgressLog(int64(aid), 0, progressMsg)
 		}
 
 		// Stop if no posts found on this page
@@ -416,42 +446,57 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			})
 		}
 
-		// Method 3: Try to fetch next page to see if it exists (fallback)
+		// Method 3: Check if current page is marked as "last" page
 		if !hasNextPage {
-			// Construct potential next page URL (using already cleaned URL)
-			nextPageURL := fmt.Sprintf("%s/page-%d", cleanURL, currentPage+1)
-
-			testReq, err := http.NewRequest("HEAD", nextPageURL, nil)
-			if err == nil {
-				if s.sessionCookie != "" {
-					testReq.Header.Set("Cookie", s.sessionCookie)
-				}
-				testReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-				testResp, err := s.httpClient.Do(testReq)
-				if err == nil {
-					defer testResp.Body.Close()
-					if testResp.StatusCode == http.StatusOK {
-						hasNextPage = true
-						log.Printf("Confirmed next page exists via HEAD request")
+			// Check if we're on the last page by looking for the current page in pagination
+			isLastPage := false
+			doc.Find(".pageNav-page").Each(func(i int, sel *goquery.Selection) {
+				if sel.HasClass("pageNav-page--current") {
+					// Found current page marker - check if there's no next page link after it
+					pageNumText := strings.TrimSpace(sel.Text())
+					var num int
+					_, err := fmt.Sscanf(pageNumText, "%d", &num)
+					if err == nil && num == currentPage {
+						// We are on this page - if Next button is disabled, this is the last page
+						if doc.Find(".pageNav-jump--next.is-disabled").Length() > 0 {
+							isLastPage = true
+							log.Printf("Current page %d is marked as last page", currentPage)
+						}
 					}
 				}
+			})
+
+			if isLastPage {
+				log.Printf("No more pages to scrape (last page: %d)", currentPage)
+				break
 			}
 		}
 
 		if !hasNextPage {
-			log.Printf("No more pages to scrape (last page: %d)", currentPage)
+			// CRITICAL FIX: Don't trust HEAD requests - simpcity returns 200 for non-existent pages
+			// If pagination UI doesn't show a next page, we should stop here
+			log.Printf("No pagination indicator found - stopping at page %d", currentPage)
 			break
 		}
 
 		currentPage++
-		log.Printf("Moving to page %d", currentPage)
+		nextPageMsg := fmt.Sprintf("Moving to page %d", currentPage)
+		if estimatedTotalPages > 1 {
+			nextPageMsg = fmt.Sprintf("Moving to page %d/%d", currentPage, estimatedTotalPages)
+		}
+		log.Printf(nextPageMsg)
 
 		// Add delay to avoid rate limiting (increased from 1s to 2.5s)
 		time.Sleep(2500 * time.Millisecond)
 	}
 
-	log.Printf("Total posts scraped: %d across %d pages", len(allPosts), currentPage)
+	// Final summary
+	summaryMsg := fmt.Sprintf("✅ Scraping complete: %d posts, %d download links across %d pages", len(allPosts), len(allDownloadLinks), currentPage)
+	log.Printf(summaryMsg)
+	if aid > 0 {
+		s.activityService.UpdateProgressLog(int64(aid), 0, summaryMsg)
+	}
+
 	return allPosts, allDownloadLinks, nil
 }
 
