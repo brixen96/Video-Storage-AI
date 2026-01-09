@@ -294,6 +294,20 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	postNumber := 1
 	currentPage := 1
 	estimatedTotalPages := 0 // Will be updated after first page scrape
+	var existingPostIDs map[string]bool // Track existing posts for incremental scraping
+
+	// Check for existing posts in this thread for incremental scraping
+	existingPostIDs, err := s.getExistingPostIDs(threadID)
+	if err != nil {
+		log.Printf("⚠️ Failed to load existing posts: %v (continuing anyway)", err)
+		existingPostIDs = make(map[string]bool)
+	} else if len(existingPostIDs) > 0 {
+		log.Printf("📊 Found %d existing posts in database - will skip duplicates", len(existingPostIDs))
+		if aid > 0 {
+			s.activityService.UpdateProgressLog(int64(aid), 0,
+				fmt.Sprintf("📊 Incremental mode: %d posts already in database", len(existingPostIDs)))
+		}
+	}
 
 	// Check for existing checkpoint to resume from
 	if aid > 0 {
@@ -420,22 +434,39 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
 
-		// Extract posts from current page
+		// Extract posts from current page with duplicate detection
 		postsOnPage := 0
+		newPostsOnPage := 0
+		skippedPostsOnPage := 0
 		doc.Find(".message--post").Each(func(i int, sel *goquery.Selection) {
 			post := s.extractPost(sel, threadID, postNumber)
 			if post != nil {
+				postsOnPage++
+
+				// Check if this post already exists (incremental scraping)
+				if existingPostIDs[post.ExternalID] {
+					skippedPostsOnPage++
+					postNumber++
+					return // Skip this post, already in database
+				}
+
 				// Extract download links from post content and store temporarily with post index
 				links := s.extractDownloadLinks(post.Content, threadID, int64(len(allPosts))) // Use index as temporary marker
 
 				allPosts = append(allPosts, post)
 				allDownloadLinks = append(allDownloadLinks, links...)
-				postsOnPage++
+				newPostsOnPage++
 				postNumber++
 			}
 		})
 
-		log.Printf("Found %d posts on page %d", postsOnPage, currentPage)
+		// Enhanced logging with duplicate detection info
+		logMsg := fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage)
+		if skippedPostsOnPage > 0 {
+			logMsg = fmt.Sprintf("Found %d posts on page %d (%d new, %d already in database)",
+				postsOnPage, currentPage, newPostsOnPage, skippedPostsOnPage)
+		}
+		log.Printf(logMsg)
 
 		// Detect total pages from pagination (only on first page)
 		if currentPage == 1 && estimatedTotalPages == 0 {
@@ -562,8 +593,12 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 		time.Sleep(2500 * time.Millisecond)
 	}
 
-	// Final summary
+	// Final summary with duplicate detection statistics
 	summaryMsg := fmt.Sprintf("✅ Scraping complete: %d posts, %d download links across %d pages", len(allPosts), len(allDownloadLinks), currentPage)
+	if len(existingPostIDs) > 0 {
+		summaryMsg = fmt.Sprintf("✅ Scraping complete: %d new posts, %d download links across %d pages (%d posts already in database)",
+			len(allPosts), len(allDownloadLinks), currentPage, len(existingPostIDs))
+	}
 	log.Printf(summaryMsg)
 	if aid > 0 {
 		s.activityService.UpdateProgressLog(int64(aid), 0, summaryMsg)
@@ -2476,4 +2511,34 @@ func (s *ScraperService) clearCheckpoint(activityID int64) error {
 
 	log.Printf("🗑️ Checkpoint cleared for activity %d", activityID)
 	return nil
+}
+
+// getExistingPostIDs retrieves all existing post external IDs for a thread
+func (s *ScraperService) getExistingPostIDs(threadID int64) (map[string]bool, error) {
+	existingPosts := make(map[string]bool)
+
+	rows, err := s.db.Query(`
+		SELECT external_id
+		FROM scraped_posts
+		WHERE thread_id = ? AND source = 'simpcity'
+	`, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query existing posts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var externalID string
+		if err := rows.Scan(&externalID); err != nil {
+			log.Printf("⚠️ Failed to scan post ID: %v", err)
+			continue
+		}
+		existingPosts[externalID] = true
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating existing posts: %w", err)
+	}
+
+	return existingPosts, nil
 }
