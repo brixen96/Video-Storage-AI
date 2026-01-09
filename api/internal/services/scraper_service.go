@@ -521,10 +521,11 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
 
-		// Extract posts from current page with duplicate detection
+		// Extract posts from current page with duplicate detection and validation
 		postsOnPage := 0
 		newPostsOnPage := 0
 		skippedPostsOnPage := 0
+		invalidPostsOnPage := 0
 		doc.Find(".message--post").Each(func(i int, sel *goquery.Selection) {
 			post := s.extractPost(sel, threadID, postNumber)
 			if post != nil {
@@ -537,8 +538,18 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 					return // Skip this post, already in database
 				}
 
+				// Validate post content quality
+				if !s.isValidPost(post) {
+					invalidPostsOnPage++
+					postNumber++
+					return // Skip invalid/empty post
+				}
+
 				// Extract download links from post content and store temporarily with post index
 				links := s.extractDownloadLinks(post.Content, threadID, int64(len(allPosts))) // Use index as temporary marker
+
+				// Deduplicate links within this post
+				links = s.deduplicateLinks(links)
 
 				allPosts = append(allPosts, post)
 				allDownloadLinks = append(allDownloadLinks, links...)
@@ -547,11 +558,11 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 			}
 		})
 
-		// Enhanced logging with duplicate detection info
+		// Enhanced logging with validation and duplicate detection stats
 		logMsg := fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage)
-		if skippedPostsOnPage > 0 {
-			logMsg = fmt.Sprintf("Found %d posts on page %d (%d new, %d already in database)",
-				postsOnPage, currentPage, newPostsOnPage, skippedPostsOnPage)
+		if skippedPostsOnPage > 0 || invalidPostsOnPage > 0 {
+			logMsg = fmt.Sprintf("Found %d posts on page %d (%d new, %d duplicates, %d invalid)",
+				postsOnPage, currentPage, newPostsOnPage, skippedPostsOnPage, invalidPostsOnPage)
 		}
 		log.Printf(logMsg)
 
@@ -2634,4 +2645,70 @@ func (s *ScraperService) getExistingPostIDs(threadID int64) (map[string]bool, er
 	}
 
 	return existingPosts, nil
+}
+
+// isValidPost validates post content quality before saving
+func (s *ScraperService) isValidPost(post *models.ScrapedPost) bool {
+	// Check if post has an external ID (required for uniqueness)
+	if post.ExternalID == "" {
+		log.Printf("⚠️ Skipping post without external ID")
+		return false
+	}
+
+	// Check if post has any content (plain text or HTML)
+	hasContent := false
+	if post.PlainText != "" && len(strings.TrimSpace(post.PlainText)) > 0 {
+		hasContent = true
+	}
+	if post.Content != "" && len(strings.TrimSpace(post.Content)) > 10 { // At least 10 chars of HTML
+		hasContent = true
+	}
+
+	// Check if post has attachments (images count as content)
+	if post.MetadataObj != nil && len(post.MetadataObj.Attachments) > 0 {
+		hasContent = true
+	}
+
+	if !hasContent {
+		log.Printf("⚠️ Skipping empty post %s (no content or attachments)", post.ExternalID)
+		return false
+	}
+
+	// Minimum content length check (at least 5 characters of actual text)
+	plainText := strings.TrimSpace(post.PlainText)
+	if len(plainText) > 0 && len(plainText) < 5 && len(post.MetadataObj.Attachments) == 0 {
+		log.Printf("⚠️ Skipping post %s with minimal content (%d chars)", post.ExternalID, len(plainText))
+		return false
+	}
+
+	return true
+}
+
+// deduplicateLinks removes duplicate download links within a post
+func (s *ScraperService) deduplicateLinks(links []*models.ScrapedDownloadLink) []*models.ScrapedDownloadLink {
+	if len(links) == 0 {
+		return links
+	}
+
+	seen := make(map[string]bool)
+	deduplicated := make([]*models.ScrapedDownloadLink, 0, len(links))
+	duplicateCount := 0
+
+	for _, link := range links {
+		// Normalize URL for comparison (remove trailing slashes, convert to lowercase)
+		normalizedURL := strings.ToLower(strings.TrimSuffix(link.URL, "/"))
+
+		if !seen[normalizedURL] {
+			seen[normalizedURL] = true
+			deduplicated = append(deduplicated, link)
+		} else {
+			duplicateCount++
+		}
+	}
+
+	if duplicateCount > 0 {
+		log.Printf("✂️ Deduplicated %d duplicate links (kept %d unique)", duplicateCount, len(deduplicated))
+	}
+
+	return deduplicated
 }
