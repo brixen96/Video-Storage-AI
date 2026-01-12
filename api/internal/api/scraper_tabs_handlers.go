@@ -21,6 +21,11 @@ func ensureScraperTabsService() *services.ScraperTabsService {
 	return scraperTabsService
 }
 
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
+}
+
 // getScraperTabsHandler retrieves all scraper tabs
 func getScraperTabsHandler(c *gin.Context) {
 	svc := ensureScraperTabsService()
@@ -274,6 +279,7 @@ func startScraperJobHandler(c *gin.Context) {
 	svc := ensureScraperTabsService()
 	videoScraperSvc := ensureVideoScraperService()
 	consoleLogSvc := ensureConsoleLogService()
+	activitySvc := ensureActivityService()
 
 	var request struct {
 		TabID int64  `json:"tabId"`
@@ -323,6 +329,25 @@ func startScraperJobHandler(c *gin.Context) {
 		createdJob.StartedAt = &now
 		svc.UpdateScraperJob(createdJob.ID, createdJob)
 
+		// Create activity in the activity monitor
+		activity, err := activitySvc.Create(&models.ActivityLogCreate{
+			TaskType: "scraping",
+			Status:   "running",
+			Message:  fmt.Sprintf("Scraping videos from %s", tab.Name),
+			Progress: 0,
+			Details: map[string]interface{}{
+				"job_id":   createdJob.ID,
+				"tab_id":   request.TabID,
+				"tab_name": tab.Name,
+				"url":      request.URL,
+			},
+		})
+		if err != nil {
+			consoleLogSvc.LogAPI("error", "Failed to create activity", map[string]interface{}{
+				"error": err.Error(),
+			})
+		}
+
 		consoleLogSvc.LogAPI("info", "Scraper job started", map[string]interface{}{
 			"job_id": createdJob.ID,
 			"tab_id": request.TabID,
@@ -363,6 +388,22 @@ func startScraperJobHandler(c *gin.Context) {
 				createdJob.ErrorMessages = progress.Errors
 			}
 			svc.UpdateScraperJob(createdJob.ID, createdJob)
+
+			// Update activity monitor
+			if activity != nil {
+				progressPercent := 0
+				// We don't know total pages upfront, so show indefinite progress
+				activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
+					Message: stringPtr(fmt.Sprintf("Scraped %d pages, found %d videos", progress.PagesCompleted, progress.VideosFound)),
+					Progress: &progressPercent,
+					Details: map[string]interface{}{
+						"pages_completed": progress.PagesCompleted,
+						"videos_found":    progress.VideosFound,
+						"videos_saved":    progress.VideosSaved,
+						"errors_count":    len(progress.Errors),
+					},
+				})
+			}
 		})
 
 		completedAt := time.Now()
@@ -377,6 +418,17 @@ func startScraperJobHandler(c *gin.Context) {
 				"job_id": createdJob.ID,
 				"error":  err.Error(),
 			})
+
+			// Update activity to failed
+			if activity != nil {
+				failedStatus := "failed"
+				errorMsg := err.Error()
+				activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
+					Status:    &failedStatus,
+					Message:   stringPtr(fmt.Sprintf("Scraping failed: %s", errorMsg)),
+					Completed: true,
+				})
+			}
 		} else {
 			createdJob.Status = "completed"
 			createdJob.TotalPages = result.PagesCrawled
@@ -394,6 +446,24 @@ func startScraperJobHandler(c *gin.Context) {
 				"pages_crawled": result.PagesCrawled,
 				"videos_found":  result.TotalScraped,
 			})
+
+			// Update activity to completed
+			if activity != nil {
+				completedStatus := "completed"
+				progress100 := 100
+				activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
+					Status:    &completedStatus,
+					Message:   stringPtr(fmt.Sprintf("Scraped %d pages, found %d videos", result.PagesCrawled, result.TotalScraped)),
+					Progress:  &progress100,
+					Completed: true,
+					Details: map[string]interface{}{
+						"pages_crawled": result.PagesCrawled,
+						"videos_found":  result.TotalScraped,
+						"videos_saved":  result.TotalScraped,
+						"errors_count":  len(result.Errors),
+					},
+				})
+			}
 		}
 
 		// Update final job status
