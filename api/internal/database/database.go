@@ -634,8 +634,61 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_job_history_created ON job_execution_history(created_at DESC)`,
 	}
 
-	// Migration 32: Notifications System
-	migration32 := []string{
+	// Migration 32: Generic Video Scraper Tables
+	migration32VideoScraper := []string{
+		`CREATE TABLE IF NOT EXISTS scraped_videos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source TEXT NOT NULL,
+			site_type TEXT NOT NULL,
+			external_id TEXT,
+			title TEXT NOT NULL,
+			url TEXT NOT NULL,
+			description TEXT,
+			duration INTEGER DEFAULT 0,
+			file_size INTEGER DEFAULT 0,
+			thumbnail_url TEXT,
+			thumbnail_path TEXT,
+			video_path TEXT,
+			author TEXT,
+			uploader TEXT,
+			view_count INTEGER DEFAULT 0,
+			like_count INTEGER DEFAULT 0,
+			category TEXT,
+			tags TEXT DEFAULT '[]',
+			metadata TEXT DEFAULT '{}',
+			status TEXT DEFAULT 'pending',
+			error_message TEXT,
+			discovered_at DATETIME NOT NULL,
+			scraped_at DATETIME,
+			downloaded_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(url, source)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_source ON scraped_videos(source)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_site_type ON scraped_videos(site_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_status ON scraped_videos(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_discovered ON scraped_videos(discovered_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_title ON scraped_videos(title)`,
+	}
+
+	for _, migration := range migration32VideoScraper {
+		if _, err := DB.Exec(migration); err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("migration 32 (video scraper) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 32b: Add rating column to scraped_videos
+	migration32bRating := `ALTER TABLE scraped_videos ADD COLUMN rating INTEGER DEFAULT 0`
+	if _, err := DB.Exec(migration32bRating); err != nil {
+		if !isColumnExistsError(err) {
+			return fmt.Errorf("migration 32b (add rating to scraped_videos) failed: %w", err)
+		}
+	}
+
+	// Migration 33: Notifications System
+	migration33 := []string{
 		`CREATE TABLE IF NOT EXISTS notifications (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			type TEXT NOT NULL,
@@ -671,19 +724,98 @@ func runMigrations() error {
 		)`,
 	}
 
-	for _, migration := range migration32 {
+	for _, migration := range migration33 {
 		if _, err := DB.Exec(migration); err != nil {
 			if !isColumnExistsError(err) {
-				return fmt.Errorf("migration 32 failed: %w", err)
+				return fmt.Errorf("migration 33 (notifications) failed: %w", err)
 			}
 		}
 	}
 
-	for _, migration := range migrations {
-		if _, err := DB.Exec(migration); err != nil {
-			// Ignore error if column already exists
+	// Migration 34: Scraper Tabs Table
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS scraper_tabs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		tab_type TEXT NOT NULL DEFAULT 'video',
+		base_url TEXT NOT NULL,
+		site_type TEXT NOT NULL,
+		icon TEXT DEFAULT 'video',
+		color TEXT DEFAULT '#007bff',
+		scrape_options TEXT DEFAULT '{}',
+		is_active BOOLEAN DEFAULT 1,
+		position INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		if !isColumnExistsError(err) {
+			return fmt.Errorf("migration 34 (scraper tabs table) failed: %w", err)
+		}
+	}
+
+	// Create indexes for scraper_tabs
+	scraperTabsIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_active ON scraper_tabs(is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_position ON scraper_tabs(position)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_type ON scraper_tabs(tab_type)`,
+	}
+	for _, idx := range scraperTabsIndexes {
+		if _, err := DB.Exec(idx); err != nil {
 			if !isColumnExistsError(err) {
-				return fmt.Errorf("migration failed: %w", err)
+				return fmt.Errorf("migration 34 (scraper tabs indexes) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 35: Scraper Tab Jobs Table (renamed to avoid conflict with old scraper_jobs)
+	migration35ScraperTabJobs := `CREATE TABLE IF NOT EXISTS scraper_tab_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tab_id INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		url TEXT NOT NULL,
+		total_pages INTEGER DEFAULT 0,
+		pages_completed INTEGER DEFAULT 0,
+		videos_found INTEGER DEFAULT 0,
+		videos_saved INTEGER DEFAULT 0,
+		errors_count INTEGER DEFAULT 0,
+		error_messages TEXT DEFAULT '[]',
+		started_at DATETIME,
+		completed_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (tab_id) REFERENCES scraper_tabs(id) ON DELETE CASCADE
+	)`
+
+	if _, err := DB.Exec(migration35ScraperTabJobs); err != nil {
+		errMsg := err.Error()
+		// Ignore "already exists" errors
+		if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate") {
+			return fmt.Errorf("migration 35 (scraper tab jobs table) failed: %w", err)
+		}
+	}
+
+	// Create indexes for scraper_tab_jobs
+	scraperTabJobsIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_tab ON scraper_tab_jobs(tab_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_status ON scraper_tab_jobs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_created ON scraper_tab_jobs(created_at DESC)`,
+	}
+	for _, idx := range scraperTabJobsIndexes {
+		if _, err := DB.Exec(idx); err != nil {
+			errMsg := err.Error()
+			// Ignore "already exists" and "no such column" errors (table might not exist yet)
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "no such column") {
+				return fmt.Errorf("migration 35 (scraper jobs indexes) failed: %w", err)
+			}
+		}
+	}
+
+	for i, migration := range migrations {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			// Ignore error if column already exists or if it's a "no such column" error
+			// (which can happen with ALTER TABLE or CREATE INDEX on non-existent columns)
+			if !isColumnExistsError(err) && !strings.Contains(errMsg, "no such column") {
+				return fmt.Errorf("migration %d failed: %w", i+1, err)
 			}
 		}
 	}

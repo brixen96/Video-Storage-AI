@@ -82,6 +82,10 @@
 								<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
 								{{ formatViewCount(video.view_count) }}
 							</span>
+							<span v-if="isScrapedVideo && video.rating > 0" class="badge bg-success">
+								<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
+								{{ video.rating }}%
+							</span>
 							<span v-if="isScrapedVideo && video.like_count > 0" class="badge bg-danger">
 								<font-awesome-icon :icon="['fas', 'heart']" class="me-1" />
 								{{ formatViewCount(video.like_count) }}

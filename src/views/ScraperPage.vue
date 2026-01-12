@@ -873,6 +873,10 @@
 													<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
 													{{ formatNumber(video.view_count) }}
 												</span>
+												<span v-if="video.rating > 0" class="text-success small">
+													<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
+													{{ video.rating }}%
+												</span>
 												<span v-if="video.like_count > 0" class="text-muted small">
 													<font-awesome-icon :icon="['fas', 'heart']" class="me-1" />
 													{{ formatNumber(video.like_count) }}
