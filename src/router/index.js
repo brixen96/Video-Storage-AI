@@ -27,6 +27,11 @@ const routes = [
 		component: () => import(/* webpackChunkName: "video-player" */ '@/views/VideoPlayerPage.vue'),
 	},
 	{
+		path: '/watch/scraped/:id',
+		name: 'ScrapedVideoPlayer',
+		component: () => import(/* webpackChunkName: "video-player" */ '@/views/VideoPlayerPage.vue'),
+	},
+	{
 		path: '/libraries',
 		name: 'Libraries',
 		component: () => import(/* webpackChunkName: "libraries" */ '@/views/LibrariesPage.vue'),

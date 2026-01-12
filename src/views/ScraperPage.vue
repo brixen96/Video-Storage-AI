@@ -9,32 +9,75 @@
 							<font-awesome-icon :icon="['fas', 'spider']" class="me-3" />
 							Web Scraper
 						</h1>
-						<p class="text-muted mb-0">Scrape content from simpcity.is and other sources</p>
-					</div>
-					<div class="d-flex gap-2">
-						<button class="btn btn-outline-light" @click="showAuthModal = true">
-							<font-awesome-icon :icon="['fas', 'key']" class="me-2" />
-							{{ sessionCookieSet ? 'Auth: Active' : 'Set Auth' }}
-						</button>
-						<button class="btn btn-success" @click="showForumScrapeModal = true">
-							<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
-							Scrape Entire Forum
-						</button>
-						<button class="btn btn-warning" @click="autoLinkPerformers">
-							<font-awesome-icon :icon="['fas', 'link']" class="me-2" />
-							Auto-Link Performers
-						</button>
-						<button class="btn btn-info" @click="checkLinkStatuses">
-							<font-awesome-icon :icon="['fas', 'check-circle']" class="me-2" />
-							Check Link Status
-						</button>
-						<button class="btn btn-primary" @click="showScrapeModal = true">
-							<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-							Single Thread
-						</button>
+						<p class="text-muted mb-0">Scrape content from multiple sources</p>
 					</div>
 				</div>
 			</div>
+
+			<!-- Tabs for different scrapers -->
+			<div class="scraper-tabs mb-4">
+				<!-- Simpcity Tab (Always present) -->
+				<button
+					class="scraper-tab"
+					:class="{ active: activeTab === 'simpcity' }"
+					@click="activeTab = 'simpcity'"
+				>
+					<font-awesome-icon :icon="['fas', 'comments']" class="me-2" />
+					Simpcity Forum
+				</button>
+
+				<!-- Dynamic Custom Tabs -->
+				<button
+					v-for="tab in scraperTabs"
+					:key="tab.id"
+					class="scraper-tab"
+					:class="{ active: activeTab === `tab-${tab.id}` }"
+					:style="{ borderColor: tab.color }"
+					@click="selectTab(tab.id)"
+				>
+					<font-awesome-icon :icon="['fas', tab.icon]" class="me-2" />
+					{{ tab.name }}
+					<button
+						class="btn-close-tab"
+						@click.stop="confirmDeleteTab(tab)"
+						title="Delete tab"
+					>
+						<font-awesome-icon :icon="['fas', 'times']" />
+					</button>
+				</button>
+
+				<!-- Add New Tab Button -->
+				<button class="scraper-tab add-tab" @click="showAddTabModal = true">
+					<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
+					Add Tab
+				</button>
+			</div>
+
+			<!-- Simpcity Tab Content -->
+			<div v-if="activeTab === 'simpcity'" class="tab-content">
+				<!-- Action Buttons -->
+				<div class="d-flex gap-2 mb-4">
+					<button class="btn btn-outline-light" @click="showAuthModal = true">
+						<font-awesome-icon :icon="['fas', 'key']" class="me-2" />
+						{{ sessionCookieSet ? 'Auth: Active' : 'Set Auth' }}
+					</button>
+					<button class="btn btn-success" @click="showForumScrapeModal = true">
+						<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
+						Scrape Entire Forum
+					</button>
+					<button class="btn btn-warning" @click="autoLinkPerformers">
+						<font-awesome-icon :icon="['fas', 'link']" class="me-2" />
+						Auto-Link Performers
+					</button>
+					<button class="btn btn-info" @click="checkLinkStatuses">
+						<font-awesome-icon :icon="['fas', 'check-circle']" class="me-2" />
+						Check Link Status
+					</button>
+					<button class="btn btn-primary" @click="showScrapeModal = true">
+						<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
+						Single Thread
+					</button>
+				</div>
 
 			<!-- Statistics Cards -->
 			<div class="row g-3 mb-4">
@@ -479,6 +522,495 @@
 				</div>
 			</div>
 		</div>
+		<!-- End Simpcity Tab Content (modals are shared between tabs) -->
+
+		<!-- Videos Tab Content -->
+			<div v-if="activeTab === 'videos'" class="tab-content">
+				<div class="card">
+					<div class="card-header">
+						<h5 class="mb-0">
+							<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
+							Video Site Scraper
+						</h5>
+					</div>
+					<div class="card-body">
+						<p class="text-muted mb-4">
+							Configure and scrape videos from supported video hosting sites. Enter a URL or configure site-specific settings below.
+						</p>
+
+						<!-- Video Scraper Form -->
+						<div class="row g-3">
+							<div class="col-md-8">
+								<label class="form-label">Video URL or Page URL</label>
+								<input
+									v-model="videoUrl"
+									type="text"
+									class="form-control"
+									placeholder="https://example.com/video/12345 or https://example.com/category/name"
+								/>
+								<small class="text-muted">Enter a single video URL, category page, or channel/user page</small>
+							</div>
+							<div class="col-md-4">
+								<label class="form-label">Site Type</label>
+								<select v-model="videoSiteType" class="form-select">
+									<option value="generic">Auto-Detect</option>
+									<option value="youtube">YouTube</option>
+									<option value="vimeo">Vimeo</option>
+									<option value="custom">Custom Site</option>
+								</select>
+							</div>
+						</div>
+
+						<div class="row g-3 mt-3">
+							<div class="col-md-12">
+								<label class="form-label">Scrape Options</label>
+								<div class="form-check">
+									<input v-model="videoScrapeOptions.extractMetadata" class="form-check-input" type="checkbox" id="extractMetadata" />
+									<label class="form-check-label" for="extractMetadata">
+										Extract video metadata
+									</label>
+								</div>
+								<div class="form-check">
+									<input v-model="videoScrapeOptions.scrapeThumbnails" class="form-check-input" type="checkbox" id="scrapeThumbnails" />
+									<label class="form-check-label" for="scrapeThumbnails">
+										Download thumbnails
+									</label>
+								</div>
+								<small class="text-muted d-block mt-2">The scraper will automatically crawl all pages until no more videos are found.</small>
+							</div>
+						</div>
+
+						<div class="mt-4 d-flex gap-2">
+							<button class="btn btn-primary" @click="scrapeVideo" :disabled="!videoUrl || videoScraping">
+								<font-awesome-icon :icon="['fas', videoScraping ? 'spinner' : 'play']" :spin="videoScraping" class="me-2" />
+								{{ videoScraping ? 'Scraping...' : 'Start Video Scrape' }}
+							</button>
+							<button class="btn btn-info" @click="testScraper" :disabled="!videoUrl">
+								<font-awesome-icon :icon="['fas', 'vial']" class="me-2" />
+								Test Scraper
+							</button>
+							<button v-if="scrapedVideos.length > 0" class="btn btn-danger" @click="clearAllVideos">
+								<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+								Clear All Videos
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Scraped Videos List -->
+				<div v-if="scrapedVideos.length > 0" class="card mt-4">
+					<div class="card-header">
+						<h5 class="mb-0">
+							<font-awesome-icon :icon="['fas', 'list']" class="me-2" />
+							Scraped Videos ({{ scrapedVideos.length }})
+						</h5>
+					</div>
+					<div class="card-body">
+						<div class="table-responsive">
+							<table class="table table-hover">
+								<thead>
+									<tr>
+										<th>Title</th>
+										<th>URL</th>
+										<th>Duration</th>
+										<th>Size</th>
+										<th>Status</th>
+										<th>Actions</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="video in scrapedVideos" :key="video.id">
+										<td>{{ video.title }}</td>
+										<td>
+											<a :href="video.url" target="_blank" class="text-truncate d-inline-block" style="max-width: 200px;">
+												{{ video.url }}
+											</a>
+										</td>
+										<td>{{ video.duration || 'N/A' }}</td>
+										<td>{{ video.fileSize || 'N/A' }}</td>
+										<td>
+											<span class="badge" :class="video.status === 'completed' ? 'bg-success' : 'bg-warning'">
+												{{ video.status }}
+											</span>
+										</td>
+										<td>
+											<button class="btn btn-sm btn-outline-primary" @click="viewVideo(video)">
+												<font-awesome-icon :icon="['fas', 'eye']" />
+											</button>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+					</div>
+				</div>
+			</div>
+			<!-- End Videos Tab Content -->
+
+			<!-- Dynamic Custom Tab Content -->
+			<div v-for="tab in scraperTabs" :key="`content-${tab.id}`">
+				<div v-if="activeTab === `tab-${tab.id}`" class="tab-content">
+					<div class="card">
+						<div class="card-header d-flex justify-content-between align-items-center">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', tab.icon]" class="me-2" />
+								{{ tab.name }} Scraper
+							</h5>
+							<button class="btn btn-sm btn-outline-primary" @click="editScraperTab(tab)">
+								<font-awesome-icon :icon="['fas', 'edit']" class="me-2" />
+								Edit Tab
+							</button>
+						</div>
+						<div class="card-body">
+							<!-- Scraper URL Input -->
+							<div class="mb-3">
+								<label class="form-label">URL to Scrape</label>
+								<input
+									v-model="customTabUrls[tab.id]"
+									type="text"
+									class="form-control"
+									:placeholder="`Enter ${tab.name} URL...`"
+								/>
+								<small class="text-muted">Base URL: {{ tab.baseUrl }}</small>
+							</div>
+
+							<!-- Action Buttons -->
+							<div class="d-flex gap-2 mb-4">
+								<button
+									class="btn btn-primary"
+									@click="startCustomTabScrape(tab)"
+									:disabled="!customTabUrls[tab.id] || customTabJobs[tab.id]?.status === 'running'"
+								>
+									<font-awesome-icon :icon="['fas', customTabJobs[tab.id]?.status === 'running' ? 'spinner' : 'play']" :spin="customTabJobs[tab.id]?.status === 'running'" class="me-2" />
+									{{ customTabJobs[tab.id]?.status === 'running' ? 'Scraping...' : 'Start Scrape' }}
+								</button>
+								<button
+									v-if="customTabJobs[tab.id] && (customTabJobs[tab.id].status === 'running' || customTabJobs[tab.id].status === 'pending')"
+									class="btn btn-danger"
+									@click="cancelJob(customTabJobs[tab.id])"
+								>
+									<font-awesome-icon :icon="['fas', 'stop']" class="me-2" />
+									Cancel Job
+								</button>
+								<button
+									v-if="customTabJobs[tab.id]"
+									class="btn btn-info"
+									@click="loadTabJobProgress(tab.id)"
+								>
+									<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
+									Refresh Status
+								</button>
+							</div>
+
+							<!-- Job Progress -->
+							<div v-if="customTabJobs[tab.id]" class="card bg-dark mb-3">
+								<div class="card-body">
+									<h6>Job Status: <span :class="getJobStatusClass(customTabJobs[tab.id].status)">{{ customTabJobs[tab.id].status }}</span></h6>
+									<div class="row g-2 mt-2">
+										<div class="col-md-3">
+											<small class="text-muted">Pages Completed:</small>
+											<div><strong>{{ customTabJobs[tab.id].pagesCompleted }} / {{ customTabJobs[tab.id].totalPages || '?' }}</strong></div>
+										</div>
+										<div class="col-md-3">
+											<small class="text-muted">Videos Found:</small>
+											<div><strong>{{ customTabJobs[tab.id].videosFound }}</strong></div>
+										</div>
+										<div class="col-md-3">
+											<small class="text-muted">Videos Saved:</small>
+											<div><strong>{{ customTabJobs[tab.id].videosSaved }}</strong></div>
+										</div>
+										<div class="col-md-3">
+											<small class="text-muted">Errors:</small>
+											<div><strong>{{ customTabJobs[tab.id].errorsCount }}</strong></div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Scraped Videos List -->
+					<div v-if="customTabVideos[tab.id] && customTabVideos[tab.id].length > 0" class="card mt-3">
+						<div class="card-header">
+							<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+								<h6 class="mb-0">
+									<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
+									Scraped Videos ({{ filteredTabVideos(tab.id).length }} / {{ customTabVideos[tab.id].length }})
+								</h6>
+								<button class="btn btn-sm btn-outline-secondary" @click="toggleVideoFilters(tab.id)">
+									<font-awesome-icon :icon="['fas', showVideoFilters[tab.id] ? 'chevron-up' : 'filter']" class="me-2" />
+									{{ showVideoFilters[tab.id] ? 'Hide Filters' : 'Show Filters' }}
+								</button>
+							</div>
+
+							<!-- Advanced Filters (Collapsible) -->
+							<div v-if="showVideoFilters[tab.id]" class="video-filters">
+								<div class="row g-2">
+									<!-- Search -->
+									<div class="col-md-4">
+										<label class="form-label small">Search</label>
+										<input
+											v-model="videoSearch[tab.id]"
+											type="text"
+											class="form-control form-control-sm"
+											placeholder="Title, uploader, author..."
+										/>
+									</div>
+
+									<!-- Sort -->
+									<div class="col-md-3">
+										<label class="form-label small">Sort By</label>
+										<select v-model="videoSort[tab.id]" class="form-select form-select-sm">
+											<option value="newest">Newest First</option>
+											<option value="oldest">Oldest First</option>
+											<option value="title-asc">Title (A-Z)</option>
+											<option value="title-desc">Title (Z-A)</option>
+											<option value="duration-desc">Longest Duration</option>
+											<option value="duration-asc">Shortest Duration</option>
+											<option value="views-desc">Most Views</option>
+											<option value="views-asc">Least Views</option>
+											<option value="likes-desc">Most Likes</option>
+										</select>
+									</div>
+
+									<!-- Status Filter -->
+									<div class="col-md-2">
+										<label class="form-label small">Status</label>
+										<select v-model="videoStatusFilter[tab.id]" class="form-select form-select-sm">
+											<option value="">All</option>
+											<option value="discovered">Discovered</option>
+											<option value="scraped">Scraped</option>
+											<option value="downloaded">Downloaded</option>
+											<option value="failed">Failed</option>
+										</select>
+									</div>
+
+									<!-- Resolution Filter -->
+									<div class="col-md-2">
+										<label class="form-label small">Resolution</label>
+										<select v-model="videoResolutionFilter[tab.id]" class="form-select form-select-sm">
+											<option value="">All</option>
+											<option value="4K">4K / 2160p</option>
+											<option value="1440p">1440p</option>
+											<option value="1080p">1080p</option>
+											<option value="720p">720p</option>
+											<option value="480p">480p</option>
+											<option value="360p">360p</option>
+											<option value="240p">240p</option>
+										</select>
+									</div>
+
+									<!-- Duration Filter -->
+									<div class="col-md-3">
+										<label class="form-label small">Duration</label>
+										<select v-model="videoDurationFilter[tab.id]" class="form-select form-select-sm">
+											<option value="">All</option>
+											<option value="0-60">Under 1 min</option>
+											<option value="60-300">1-5 min</option>
+											<option value="300-600">5-10 min</option>
+											<option value="600-1800">10-30 min</option>
+											<option value="1800-3600">30-60 min</option>
+											<option value="3600-">Over 1 hour</option>
+										</select>
+									</div>
+
+									<!-- Has Thumbnail -->
+									<div class="col-md-2">
+										<label class="form-label small">Thumbnail</label>
+										<select v-model="videoThumbnailFilter[tab.id]" class="form-select form-select-sm">
+											<option value="">All</option>
+											<option value="yes">Has Thumbnail</option>
+											<option value="no">No Thumbnail</option>
+										</select>
+									</div>
+
+									<!-- Reset Filters -->
+									<div class="col-md-2 d-flex align-items-end">
+										<button class="btn btn-sm btn-outline-warning w-100" @click="resetVideoFilters(tab.id)">
+											<font-awesome-icon :icon="['fas', 'redo']" class="me-1" />
+											Reset
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>
+						<div class="card-body p-0">
+							<div class="video-grid">
+								<div
+									v-for="video in paginatedTabVideos(tab.id)"
+									:key="video.id"
+									class="video-card"
+								>
+									<!-- Thumbnail -->
+									<div class="video-thumbnail">
+										<img
+											v-if="video.thumbnail_url"
+											:src="video.thumbnail_url"
+											:alt="video.title"
+											@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
+										/>
+										<div v-else class="no-thumbnail">
+											<font-awesome-icon :icon="['fas', 'video']" size="3x" />
+										</div>
+										<span v-if="video.duration" class="duration-badge">
+											{{ formatDuration(video.duration) }}
+										</span>
+										<span v-if="getVideoResolution(video)" class="resolution-badge">
+											{{ getVideoResolution(video) }}
+										</span>
+									</div>
+
+									<!-- Video Info -->
+									<div class="video-info">
+										<h6 class="video-title" :title="video.title">{{ video.title }}</h6>
+										<div class="video-meta">
+											<span v-if="video.uploader || video.author" class="text-muted small d-block mb-1">
+												<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
+												{{ video.uploader || video.author }}
+											</span>
+											<div class="d-flex flex-wrap gap-2 mt-1">
+												<span v-if="video.view_count > 0" class="text-muted small">
+													<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
+													{{ formatNumber(video.view_count) }}
+												</span>
+												<span v-if="video.like_count > 0" class="text-muted small">
+													<font-awesome-icon :icon="['fas', 'heart']" class="me-1" />
+													{{ formatNumber(video.like_count) }}
+												</span>
+												<span v-if="video.file_size > 0" class="text-muted small">
+													<font-awesome-icon :icon="['fas', 'hdd']" class="me-1" />
+													{{ formatFileSize(video.file_size) }}
+												</span>
+											</div>
+										</div>
+
+										<!-- Actions -->
+										<div class="video-actions mt-2">
+											<button @click="playScrapedVideo(video)" class="btn btn-sm btn-primary">
+												<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
+												Play
+											</button>
+											<a :href="video.url" target="_blank" class="btn btn-sm btn-outline-primary">
+												<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
+												Open
+											</a>
+											<span class="badge" :class="getVideoStatusBadge(video.status)">
+												{{ video.status }}
+											</span>
+										</div>
+									</div>
+								</div>
+							</div>
+
+							<!-- Pagination -->
+							<div v-if="filteredTabVideos(tab.id).length > videosPerPage" class="pagination-controls p-3 border-top">
+								<div class="d-flex justify-content-center align-items-center flex-column gap-3">
+									<div class="btn-group">
+										<button
+											class="btn btn-sm btn-outline-secondary"
+											:disabled="(videoPage[tab.id] || 1) === 1"
+											@click="changeVideoPage(tab.id, -1)"
+										>
+											<font-awesome-icon :icon="['fas', 'chevron-left']" />
+										</button>
+										<button class="btn btn-sm btn-outline-secondary disabled">
+											Page {{ videoPage[tab.id] || 1 }} / {{ Math.ceil(filteredTabVideos(tab.id).length / videosPerPage) }}
+										</button>
+										<button
+											class="btn btn-sm btn-outline-secondary"
+											:disabled="(videoPage[tab.id] || 1) >= Math.ceil(filteredTabVideos(tab.id).length / videosPerPage)"
+											@click="changeVideoPage(tab.id, 1)"
+										>
+											<font-awesome-icon :icon="['fas', 'chevron-right']" />
+										</button>
+									</div>
+									<span class="text-muted small">
+										Showing {{ ((videoPage[tab.id] || 1) - 1) * videosPerPage + 1 }} -
+										{{ Math.min((videoPage[tab.id] || 1) * videosPerPage, filteredTabVideos(tab.id).length) }}
+										of {{ filteredTabVideos(tab.id).length }} videos
+									</span>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+			<!-- End Dynamic Custom Tab Content -->
+
+			<!-- Add/Edit Tab Modal -->
+			<div v-if="showAddTabModal || showEditTabModal" class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+				<div class="modal-dialog modal-lg">
+					<div class="modal-content bg-dark text-light">
+						<div class="modal-header">
+							<h5 class="modal-title">
+								<font-awesome-icon :icon="['fas', showEditTabModal ? 'edit' : 'plus']" class="me-2" />
+								{{ showEditTabModal ? 'Edit' : 'Add New' }} Scraper Tab
+							</h5>
+							<button type="button" class="btn-close btn-close-white" @click="closeTabModal"></button>
+						</div>
+						<div class="modal-body">
+							<div class="mb-3">
+								<label class="form-label">Tab Name</label>
+								<input v-model="newTab.name" type="text" class="form-control" placeholder="e.g., My Favorite Site" />
+							</div>
+							<div class="mb-3">
+								<label class="form-label">Base URL</label>
+								<input v-model="newTab.baseUrl" type="text" class="form-control" placeholder="https://example.com/videos" />
+								<small class="text-muted">The base URL pattern for this site's video listings</small>
+							</div>
+							<div class="row g-3 mb-3">
+								<div class="col-md-6">
+									<label class="form-label">Site Type</label>
+									<select v-model="newTab.siteType" class="form-select">
+										<option value="generic">Generic</option>
+										<option value="youtube">YouTube</option>
+										<option value="vimeo">Vimeo</option>
+										<option value="custom">Custom</option>
+									</select>
+								</div>
+								<div class="col-md-6">
+									<label class="form-label">Icon</label>
+									<select v-model="newTab.icon" class="form-select">
+										<option value="video">Video</option>
+										<option value="film">Film</option>
+										<option value="play-circle">Play Circle</option>
+										<option value="youtube">YouTube</option>
+										<option value="vimeo">Vimeo</option>
+										<option value="camera">Camera</option>
+										<option value="globe">Globe</option>
+									</select>
+								</div>
+							</div>
+							<div class="mb-3">
+								<label class="form-label">Tab Color</label>
+								<input v-model="newTab.color" type="color" class="form-control" />
+							</div>
+							<div class="mb-3">
+								<label class="form-label">Scrape Options</label>
+								<div class="form-check">
+									<input v-model="newTab.scrapeOptions.extractMetadata" class="form-check-input" type="checkbox" id="newTabExtractMetadata" />
+									<label class="form-check-label" for="newTabExtractMetadata">
+										Extract video metadata
+									</label>
+								</div>
+								<div class="form-check">
+									<input v-model="newTab.scrapeOptions.scrapeThumbnails" class="form-check-input" type="checkbox" id="newTabScrapeThumbnails" />
+									<label class="form-check-label" for="newTabScrapeThumbnails">
+										Download thumbnails
+									</label>
+								</div>
+							</div>
+						</div>
+						<div class="modal-footer">
+							<button type="button" class="btn btn-secondary" @click="closeTabModal">Cancel</button>
+							<button type="button" class="btn btn-primary" @click="saveTabConfig">
+								<font-awesome-icon :icon="['fas', 'save']" class="me-2" />
+								Save Tab
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
 
 		<!-- Delete Selected Confirmation Modal -->
 		<DeleteConfirmationModal
@@ -505,6 +1037,7 @@
 			@confirm="confirmDeleteAll"
 			@cancel="showDeleteAllConfirmModal = false"
 		/>
+		</div>
 	</div>
 </template>
 
@@ -547,6 +1080,51 @@ const sessionCookieSet = ref(false)
 const selectedThread = ref(null)
 const selectedThreadIds = ref(new Set())
 const selectionMode = ref(false)
+
+// Tab state
+const activeTab = ref('simpcity')
+
+// Video scraper state
+const videoUrl = ref('')
+const videoSiteType = ref('generic')
+const videoScraping = ref(false)
+const scrapedVideos = ref([])
+const videoScrapeOptions = ref({
+	downloadVideo: false,
+	extractMetadata: true,
+	scrapeThumbnails: true,
+	maxPages: 0 // 0 = unlimited, scrapes all pages automatically
+})
+
+// Scraper tabs state
+const scraperTabs = ref([])
+const showAddTabModal = ref(false)
+const showEditTabModal = ref(false)
+const editingTab = ref(null)
+const newTab = ref({
+	name: '',
+	baseUrl: '',
+	siteType: 'generic',
+	icon: 'video',
+	color: '#007bff',
+	scrapeOptions: {
+		extractMetadata: true,
+		scrapeThumbnails: true,
+		downloadVideo: false
+	}
+})
+const customTabUrls = ref({}) // { tabId: url }
+const customTabJobs = ref({}) // { tabId: job }
+const customTabVideos = ref({}) // { tabId: [videos] }
+const videoSearch = ref({}) // { tabId: searchQuery }
+const videoSort = ref({}) // { tabId: sortType }
+const videoPage = ref({}) // { tabId: pageNumber }
+const videoStatusFilter = ref({}) // { tabId: status }
+const videoResolutionFilter = ref({}) // { tabId: resolution }
+const videoDurationFilter = ref({}) // { tabId: durationRange }
+const videoThumbnailFilter = ref({}) // { tabId: 'yes'|'no'|'' }
+const showVideoFilters = ref({}) // { tabId: boolean }
+const videosPerPage = 24
 
 // Computed
 const visiblePages = computed(() => {
@@ -1082,11 +1660,617 @@ const handleThumbnailError = (event) => {
 	}
 }
 
+// Video scraper functions
+const scrapeVideo = async () => {
+	if (!videoUrl.value) {
+		toast.error('Please enter a video URL')
+		return
+	}
+
+	videoScraping.value = true
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/video', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				url: videoUrl.value,
+				site_type: videoSiteType.value,
+				options: videoScrapeOptions.value
+			})
+		})
+
+		const data = await response.json()
+
+		if (data.success) {
+			// Check if it's a page scrape (multiple videos) or single video
+			if (data.data.videos && Array.isArray(data.data.videos)) {
+				// Page scrape result
+				const result = data.data
+				toast.success(`Scraped ${result.total_scraped} videos from ${result.pages_crawled} page(s)!`)
+				scrapedVideos.value.push(...result.videos)
+			} else {
+				// Single video result
+				toast.success(`Video scraped successfully!`)
+				scrapedVideos.value.push(data.data)
+			}
+			videoUrl.value = ''
+
+			// Load all scraped videos to refresh the list
+			loadScrapedVideos()
+		} else {
+			toast.error(data.message || 'Failed to scrape video')
+		}
+	} catch (error) {
+		console.error('Error scraping video:', error)
+		toast.error('Failed to scrape video: ' + error.message)
+	} finally {
+		videoScraping.value = false
+	}
+}
+
+const viewVideo = (video) => {
+	// Navigate to video details or open in new tab
+	window.open(video.url, '_blank')
+}
+
+const loadScrapedVideos = async () => {
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/videos')
+		const data = await response.json()
+
+		if (data.success && data.data) {
+			scrapedVideos.value = data.data
+		}
+	} catch (error) {
+		console.error('Error loading scraped videos:', error)
+	}
+}
+
+const testScraper = async () => {
+	if (!videoUrl.value) {
+		toast.error('Please enter a URL')
+		return
+	}
+
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/video/test?url=${encodeURIComponent(videoUrl.value)}`)
+		const data = await response.json()
+
+		if (data.success) {
+			const result = data.data
+			console.log('Test scraper result:', result)
+
+			// Show results in console and toast
+			toast.success(`Test found ${result.total_found} videos. Check console for details.`)
+
+			// Log selectors tried
+			console.log('Selectors tried:', result.selectors_tried)
+			console.log('Videos found:', result.videos_found)
+		} else {
+			toast.error(data.message || 'Test failed')
+		}
+	} catch (error) {
+		console.error('Error testing scraper:', error)
+		toast.error('Failed to test scraper: ' + error.message)
+	}
+}
+
+const clearAllVideos = async () => {
+	if (!confirm(`Are you sure you want to delete all ${scrapedVideos.value.length} scraped videos? This cannot be undone.`)) {
+		return
+	}
+
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/videos', {
+			method: 'DELETE'
+		})
+		const data = await response.json()
+
+		if (data.success) {
+			toast.success(`Deleted ${data.data.deleted} videos`)
+			scrapedVideos.value = []
+		} else {
+			toast.error(data.message || 'Failed to delete videos')
+		}
+	} catch (error) {
+		console.error('Error deleting videos:', error)
+		toast.error('Failed to delete videos: ' + error.message)
+	}
+}
+
+// Scraper Tabs Functions
+const loadScraperTabs = async () => {
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/tabs')
+		const data = await response.json()
+
+		if (data.success && data.data) {
+			scraperTabs.value = data.data
+			// Initialize URLs, jobs, and video controls for each tab
+			data.data.forEach(tab => {
+				if (!customTabUrls.value[tab.id]) {
+					customTabUrls.value[tab.id] = tab.baseUrl
+				}
+				// Initialize video controls
+				if (!videoSort.value[tab.id]) {
+					videoSort.value[tab.id] = 'newest'
+				}
+				if (!videoPage.value[tab.id]) {
+					videoPage.value[tab.id] = 1
+				}
+				if (!videoSearch.value[tab.id]) {
+					videoSearch.value[tab.id] = ''
+				}
+			})
+		}
+	} catch (error) {
+		console.error('Error loading scraper tabs:', error)
+	}
+}
+
+const selectTab = (tabId) => {
+	activeTab.value = `tab-${tabId}`
+	loadTabJobProgress(tabId)
+	loadVideosForTab(tabId)
+}
+
+const toggleVideoFilters = (tabId) => {
+	showVideoFilters.value[tabId] = !showVideoFilters.value[tabId]
+}
+
+const resetVideoFilters = (tabId) => {
+	videoSearch.value[tabId] = ''
+	videoSort.value[tabId] = 'newest'
+	videoStatusFilter.value[tabId] = ''
+	videoResolutionFilter.value[tabId] = ''
+	videoDurationFilter.value[tabId] = ''
+	videoThumbnailFilter.value[tabId] = ''
+	videoPage.value[tabId] = 1
+}
+
+const confirmDeleteTab = async (tab) => {
+	if (!confirm(`Are you sure you want to delete the "${tab.name}" tab? This cannot be undone.`)) {
+		return
+	}
+
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/tabs/${tab.id}`, {
+			method: 'DELETE'
+		})
+		const data = await response.json()
+
+		if (data.success) {
+			toast.success(`Tab "${tab.name}" deleted successfully`)
+
+			// Switch to simpcity tab if we're deleting the active tab
+			if (activeTab.value === `tab-${tab.id}`) {
+				activeTab.value = 'simpcity'
+			}
+
+			// Reload tabs
+			await loadScraperTabs()
+		} else {
+			toast.error(data.message || 'Failed to delete tab')
+		}
+	} catch (error) {
+		console.error('Error deleting tab:', error)
+		toast.error('Failed to delete tab: ' + error.message)
+	}
+}
+
+const editScraperTab = (tab) => {
+	editingTab.value = tab
+	newTab.value = {
+		name: tab.name,
+		baseUrl: tab.baseUrl,
+		siteType: tab.siteType,
+		icon: tab.icon,
+		color: tab.color,
+		scrapeOptions: { ...tab.scrapeOptions }
+	}
+	showEditTabModal.value = true
+}
+
+const closeTabModal = () => {
+	showAddTabModal.value = false
+	showEditTabModal.value = false
+	editingTab.value = null
+	newTab.value = {
+		name: '',
+		baseUrl: '',
+		siteType: 'generic',
+		icon: 'video',
+		color: '#007bff',
+		scrapeOptions: {
+			extractMetadata: true,
+			scrapeThumbnails: true,
+			downloadVideo: false
+		}
+	}
+}
+
+const saveTabConfig = async () => {
+	if (!newTab.value.name || !newTab.value.baseUrl) {
+		toast.error('Please fill in all required fields')
+		return
+	}
+
+	try {
+		const url = showEditTabModal.value
+			? `http://localhost:8080/api/v1/scraper/tabs/${editingTab.value.id}`
+			: 'http://localhost:8080/api/v1/scraper/tabs'
+
+		const method = showEditTabModal.value ? 'PUT' : 'POST'
+
+		const response = await fetch(url, {
+			method,
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(newTab.value)
+		})
+
+		const data = await response.json()
+
+		if (data.success) {
+			toast.success(`Tab ${showEditTabModal.value ? 'updated' : 'created'} successfully`)
+			closeTabModal()
+			await loadScraperTabs()
+		} else {
+			toast.error(data.message || `Failed to ${showEditTabModal.value ? 'update' : 'create'} tab`)
+		}
+	} catch (error) {
+		console.error('Error saving tab:', error)
+		toast.error('Failed to save tab: ' + error.message)
+	}
+}
+
+const startCustomTabScrape = async (tab) => {
+	const url = customTabUrls.value[tab.id]
+
+	if (!url) {
+		toast.error('Please enter a URL to scrape')
+		return
+	}
+
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/jobs/start', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				tabId: tab.id,
+				url: url
+			})
+		})
+
+		const data = await response.json()
+
+		if (data.success) {
+			customTabJobs.value[tab.id] = data.data
+			toast.success('Scraping job started! It will run in the background.')
+
+			// Poll for progress
+			pollJobProgress(tab.id, data.data.id)
+		} else {
+			toast.error(data.message || 'Failed to start scraping job')
+		}
+	} catch (error) {
+		console.error('Error starting scrape:', error)
+		toast.error('Failed to start scraping: ' + error.message)
+	}
+}
+
+const loadTabJobProgress = async (tabId) => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs?tabId=${tabId}`)
+		const data = await response.json()
+
+		if (data.success && data.data && data.data.length > 0) {
+			// Get the most recent job
+			const latestJob = data.data[0]
+
+			// Only show job status if it's actually running or pending
+			// Don't show completed/failed jobs to avoid confusion
+			if (latestJob.status === 'running' || latestJob.status === 'pending') {
+				customTabJobs.value[tabId] = latestJob
+				// Continue polling
+				setTimeout(() => loadTabJobProgress(tabId), 3000)
+			} else {
+				// Clear the job status if it's completed/failed
+				customTabJobs.value[tabId] = null
+			}
+		} else {
+			// No jobs found, clear status
+			customTabJobs.value[tabId] = null
+		}
+	} catch (error) {
+		console.error('Error loading job progress:', error)
+	}
+}
+
+const pollJobProgress = async (tabId, jobId) => {
+	const checkProgress = async () => {
+		try {
+			const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs/${jobId}`)
+			const data = await response.json()
+
+			if (data.success && data.data) {
+				customTabJobs.value[tabId] = data.data
+
+				// Continue polling if still running
+				if (data.data.status === 'running' || data.data.status === 'pending') {
+					setTimeout(checkProgress, 3000)
+				} else if (data.data.status === 'completed') {
+					toast.success(`Scraping completed! Found ${data.data.videosFound} videos.`)
+					loadVideosForTab(tabId)
+				} else if (data.data.status === 'failed') {
+					toast.error('Scraping job failed. Check the error messages for details.')
+				}
+			}
+		} catch (error) {
+			console.error('Error polling job progress:', error)
+		}
+	}
+
+	checkProgress()
+}
+
+const cancelJob = async (job) => {
+	if (!confirm('Are you sure you want to cancel this scraping job?')) {
+		return
+	}
+
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs/${job.id}/cancel`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' }
+		})
+
+		const data = await response.json()
+
+		if (data.success) {
+			toast.success('Job cancelled successfully')
+			// Clear the job from display
+			customTabJobs.value[job.tabId] = null
+		} else {
+			toast.error(data.message || 'Failed to cancel job')
+		}
+	} catch (error) {
+		console.error('Error cancelling job:', error)
+		toast.error('Failed to cancel job: ' + error.message)
+	}
+}
+
+const loadVideosForTab = async (tabId) => {
+	try {
+		const tab = scraperTabs.value.find(t => t.id === tabId)
+		if (!tab) return
+
+		const response = await fetch('http://localhost:8080/api/v1/scraper/videos')
+		const data = await response.json()
+
+		if (data.success && data.data) {
+			// Filter videos by source matching the tab's base URL
+			const tabSource = new URL(tab.baseUrl).host
+			console.log(`Loading videos for tab ${tabId}, baseUrl: ${tab.baseUrl}, expected source: ${tabSource}`)
+			console.log(`Found ${data.data.length} total videos in database`)
+
+			// Filter by source
+			const filtered = data.data.filter(v => {
+				console.log(`Video source: ${v.source}, matches: ${v.source === tabSource}`)
+				return v.source === tabSource
+			})
+
+			customTabVideos.value[tabId] = filtered
+			console.log(`Showing ${filtered.length} videos for this tab`)
+			if (filtered.length > 0) {
+				console.log('Sample video data:', JSON.stringify(filtered[0], null, 2))
+			}
+		}
+	} catch (error) {
+		console.error('Error loading videos for tab:', error)
+	}
+}
+
+// Video filtering, sorting and pagination
+const filteredTabVideos = (tabId) => {
+	let videos = customTabVideos.value[tabId] || []
+	const searchTerm = (videoSearch.value[tabId] || '').toLowerCase()
+	const sortType = videoSort.value[tabId] || 'newest'
+	const statusFilter = videoStatusFilter.value[tabId] || ''
+	const resolutionFilter = videoResolutionFilter.value[tabId] || ''
+	const durationFilter = videoDurationFilter.value[tabId] || ''
+	const thumbnailFilter = videoThumbnailFilter.value[tabId] || ''
+
+	// Filter by search
+	if (searchTerm) {
+		videos = videos.filter(v =>
+			v.title.toLowerCase().includes(searchTerm) ||
+			(v.uploader || '').toLowerCase().includes(searchTerm) ||
+			(v.author || '').toLowerCase().includes(searchTerm)
+		)
+	}
+
+	// Filter by status
+	if (statusFilter) {
+		videos = videos.filter(v => v.status === statusFilter)
+	}
+
+	// Filter by resolution
+	if (resolutionFilter) {
+		videos = videos.filter(v => {
+			const resolution = getVideoResolution(v)
+			if (!resolution) return false
+			// Match 4K to both "4K" and "2160p"
+			if (resolutionFilter === '4K') {
+				return resolution === '4K' || resolution === '2160p'
+			}
+			return resolution === resolutionFilter
+		})
+	}
+
+	// Filter by duration
+	if (durationFilter) {
+		const [min, max] = durationFilter.split('-').map(Number)
+		videos = videos.filter(v => {
+			const duration = v.duration || 0
+			if (max) {
+				return duration >= min && duration < max
+			} else {
+				// "3600-" means 3600 and above
+				return duration >= min
+			}
+		})
+	}
+
+	// Filter by thumbnail
+	if (thumbnailFilter === 'yes') {
+		videos = videos.filter(v => v.thumbnail_url && v.thumbnail_url.trim() !== '')
+	} else if (thumbnailFilter === 'no') {
+		videos = videos.filter(v => !v.thumbnail_url || v.thumbnail_url.trim() === '')
+	}
+
+	// Sort
+	const sorted = [...videos]
+	switch (sortType) {
+		case 'newest':
+			sorted.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+			break
+		case 'oldest':
+			sorted.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+			break
+		case 'title-asc':
+			sorted.sort((a, b) => a.title.localeCompare(b.title))
+			break
+		case 'title-desc':
+			sorted.sort((a, b) => b.title.localeCompare(a.title))
+			break
+		case 'duration-desc':
+			sorted.sort((a, b) => (b.duration || 0) - (a.duration || 0))
+			break
+		case 'duration-asc':
+			sorted.sort((a, b) => (a.duration || 0) - (b.duration || 0))
+			break
+		case 'views-desc':
+			sorted.sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
+			break
+		case 'views-asc':
+			sorted.sort((a, b) => (a.view_count || 0) - (b.view_count || 0))
+			break
+		case 'likes-desc':
+			sorted.sort((a, b) => (b.like_count || 0) - (a.like_count || 0))
+			break
+	}
+
+	return sorted
+}
+
+const paginatedTabVideos = (tabId) => {
+	const filtered = filteredTabVideos(tabId)
+	const page = videoPage.value[tabId] || 1
+	const start = (page - 1) * videosPerPage
+	const end = start + videosPerPage
+	return filtered.slice(start, end)
+}
+
+const changeVideoPage = (tabId, direction) => {
+	const currentPage = videoPage.value[tabId] || 1
+	const newPage = currentPage + direction
+	const maxPage = Math.ceil(filteredTabVideos(tabId).length / videosPerPage)
+
+	if (newPage >= 1 && newPage <= maxPage) {
+		videoPage.value[tabId] = newPage
+	}
+}
+
+const playScrapedVideo = (video) => {
+	// Navigate to video player page with scraped video ID
+	router.push(`/watch/scraped/${video.id}`)
+}
+
+const formatDuration = (seconds) => {
+	if (!seconds) return '0:00'
+	const hours = Math.floor(seconds / 3600)
+	const minutes = Math.floor((seconds % 3600) / 60)
+	const secs = seconds % 60
+
+	if (hours > 0) {
+		return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+	}
+	return `${minutes}:${secs.toString().padStart(2, '0')}`
+}
+
+const formatNumber = (num) => {
+	if (num >= 1000000) {
+		return (num / 1000000).toFixed(1) + 'M'
+	}
+	if (num >= 1000) {
+		return (num / 1000).toFixed(1) + 'K'
+	}
+	return num.toString()
+}
+
+const formatFileSize = (bytes) => {
+	if (!bytes || bytes === 0) return ''
+	const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+	const i = Math.floor(Math.log(bytes) / Math.log(1024))
+	return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i]
+}
+
+const getVideoResolution = (video) => {
+	if (!video.metadata) return null
+
+	try {
+		const metadata = typeof video.metadata === 'string'
+			? JSON.parse(video.metadata)
+			: video.metadata
+
+		// Return the max resolution if available
+		if (metadata.max_resolution) {
+			return metadata.max_resolution
+		}
+
+		// Or the first resolution from the list
+		if (metadata.resolutions && metadata.resolutions.length > 0) {
+			return metadata.resolutions[0]
+		}
+	} catch (e) {
+		console.error('Error parsing video metadata:', e)
+	}
+
+	return null
+}
+
+const getVideoStatusBadge = (status) => {
+	switch (status) {
+		case 'scraped': return 'bg-success'
+		case 'downloaded': return 'bg-primary'
+		case 'pending': return 'bg-warning'
+		case 'failed': return 'bg-danger'
+		default: return 'bg-secondary'
+	}
+}
+
+const getJobStatusClass = (status) => {
+	switch (status) {
+		case 'completed': return 'text-success'
+		case 'running': return 'text-info'
+		case 'pending': return 'text-warning'
+		case 'failed': return 'text-danger'
+		case 'cancelled': return 'text-secondary'
+		default: return ''
+	}
+}
+
 // Lifecycle
 onMounted(() => {
 	checkAuthStatus()
 	loadStats()
 	loadThreads()
+	loadScraperTabs()
+
+	// Load scraped videos if on videos tab
+	if (activeTab.value === 'videos') {
+		loadScrapedVideos()
+	}
 })
 </script>
 

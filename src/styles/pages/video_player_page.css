@@ -20,6 +20,14 @@
 	max-height: 70vh;
 }
 
+.scraped-video-embed {
+	width: 100%;
+	display: block;
+	aspect-ratio: 16 / 9;
+	min-height: 500px;
+	max-height: 70vh;
+}
+
 .video-error-overlay,
 .loading-overlay {
 	position: absolute;
@@ -79,6 +87,10 @@
 	padding: 0.5rem 0.75rem;
 	display: inline-flex;
 	align-items: center;
+}
+
+.video-metadata .bg-purple {
+	background-color: #9b59b6 !important;
 }
 
 /* Action Buttons */
