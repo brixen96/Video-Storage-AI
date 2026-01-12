@@ -60,6 +60,17 @@ type ScrapeOptions struct {
 	MaxPages         int  `json:"maxPages"` // For pagination support (0 = unlimited, scrapes all pages)
 }
 
+// ScrapeProgress represents the current progress of a scraping operation
+type ScrapeProgress struct {
+	PagesCompleted int      `json:"pagesCompleted"`
+	VideosFound    int      `json:"videosFound"`
+	VideosSaved    int      `json:"videosSaved"`
+	Errors         []string `json:"errors"`
+}
+
+// ProgressCallback is called after each page is scraped
+type ProgressCallback func(progress ScrapeProgress)
+
 // ScrapeVideoRequest represents a video scrape request
 type ScrapeVideoRequest struct {
 	URL      string        `json:"url"`
@@ -424,6 +435,111 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 		result.Videos = append(result.Videos, videos...)
 		result.PagesCrawled++
 		result.TotalScraped += len(videos)
+
+		// Small delay to be respectful
+		time.Sleep(1 * time.Second)
+	}
+
+	return result, nil
+}
+
+// ScrapePageWithProgress scrapes a listing page with real-time progress updates
+func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, progressCallback ProgressCallback) (*ScrapeResult, error) {
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+
+	source := parsedURL.Host
+	result := &ScrapeResult{
+		Videos:       []*ScrapedVideo{},
+		TotalScraped: 0,
+		PagesCrawled: 0,
+		Errors:       []string{},
+	}
+
+	maxPages := req.Options.MaxPages
+	if maxPages <= 0 {
+		maxPages = 9999 // 0 means unlimited, set to high number
+	}
+
+	baseURL := req.URL
+	// Remove trailing slash and page number if present
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(baseURL, "/videos") {
+		baseURL = baseURL + "/"
+	}
+
+	// Track seen URLs to detect when we're scraping the same page over and over
+	seenURLs := make(map[string]bool)
+	consecutiveDuplicates := 0
+
+	// Scrape pages
+	for page := 1; page <= maxPages; page++ {
+		var pageURL string
+		if page == 1 {
+			// First page might not have /1/ suffix
+			pageURL = baseURL
+		} else {
+			// Subsequent pages: /videos/2/, /videos/3/, etc.
+			if strings.Contains(baseURL, "/videos") {
+				pageURL = strings.TrimSuffix(baseURL, "/") + "/" + fmt.Sprintf("%d/", page)
+			} else {
+				pageURL = baseURL + "/videos/" + fmt.Sprintf("%d/", page)
+			}
+		}
+
+		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
+		videos, err := s.scrapeListingPage(pageURL, source)
+		if err != nil {
+			fmt.Printf("ERROR scraping page %d: %v\n", page, err)
+			result.Errors = append(result.Errors, fmt.Sprintf("Page %d: %v", page, err))
+			// Don't break - try next page
+			continue
+		}
+
+		fmt.Printf("Found %d videos on page %d\n", len(videos), page)
+
+		if len(videos) == 0 {
+			// No more videos found, stop pagination
+			fmt.Printf("No videos found on page %d, stopping pagination\n", page)
+			break
+		}
+
+		// Check if all videos on this page are duplicates (already seen)
+		allDuplicates := true
+		for _, video := range videos {
+			if !seenURLs[video.URL] {
+				allDuplicates = false
+				seenURLs[video.URL] = true
+			}
+		}
+
+		// If all videos are duplicates, we're likely on the last page repeating
+		if allDuplicates {
+			consecutiveDuplicates++
+			fmt.Printf("⚠️  All %d videos on page %d are duplicates (seen before)\n", len(videos), page)
+			if consecutiveDuplicates >= 2 {
+				fmt.Printf("🛑 Stopping pagination - same videos found on 2 consecutive pages (likely reached the end)\n")
+				break
+			}
+		} else {
+			consecutiveDuplicates = 0
+		}
+
+		result.Videos = append(result.Videos, videos...)
+		result.PagesCrawled++
+		result.TotalScraped += len(videos)
+
+		// Call progress callback after each page
+		if progressCallback != nil {
+			progressCallback(ScrapeProgress{
+				PagesCompleted: result.PagesCrawled,
+				VideosFound:    result.TotalScraped,
+				VideosSaved:    result.TotalScraped,
+				Errors:         result.Errors,
+			})
+		}
 
 		// Small delay to be respectful
 		time.Sleep(1 * time.Second)
