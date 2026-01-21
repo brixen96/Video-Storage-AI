@@ -28,6 +28,12 @@
 					</button>
 				</li>
 				<li class="nav-item" role="presentation">
+					<button :class="['nav-link', { active: activeTab === 'backups' }]" @click="activeTab = 'backups'" type="button">
+						<font-awesome-icon :icon="['fas', 'database']" class="me-2" />
+						Backups
+					</button>
+				</li>
+				<li class="nav-item" role="presentation">
 					<button :class="['nav-link', { active: activeTab === 'about' }]" @click="activeTab = 'about'" type="button">
 						<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
 						About
@@ -237,6 +243,22 @@
 									{{ settings.showMetadata ? 'Show' : 'Hide' }}
 								</label>
 							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Backups -->
+				<div v-if="activeTab === 'backups'" class="settings-section">
+					<div class="setting-item">
+						<div class="setting-info">
+							<h4>Database Backups</h4>
+							<p>Manage database backups, create restore points, and configure automatic backup schedules</p>
+						</div>
+						<div class="setting-control">
+							<router-link to="/backups" class="btn btn-primary">
+								<font-awesome-icon :icon="['fas', 'database']" />
+								Manage Backups
+							</router-link>
 						</div>
 					</div>
 				</div>

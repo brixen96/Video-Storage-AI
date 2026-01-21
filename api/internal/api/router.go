@@ -110,6 +110,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			performers.GET("/:id/scraped-threads", getThreadsByPerformer) // Get scraped threads for performer
 			performers.POST("", createPerformer)                    // Create performer
 			performers.POST("/scan", scanPerformers)                // Scan performer folders
+			performers.POST("/cleanup", cleanupEmptyPerformers)     // Cleanup empty performers
 			performers.POST("/generate-thumbnails", generatePerformerThumbnails) // Generate thumbnails for all performers
 			performers.PUT("/:id", updatePerformer)                 // Update performer
 			performers.DELETE("/:id", deletePerformer)              // Delete performer
@@ -162,12 +163,17 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			activity.GET("/recent", getRecentActivities) // Get recent activities
 			activity.GET("/status", getActivityStatus)   // Get current running tasks
 			activity.GET("/stats", getActivityStats)     // Get statistics by type
+			activity.GET("/paused", getPausedActivities) // Get all paused tasks
 			activity.GET("/:id", getActivity)            // Get single activity
 			activity.POST("", createActivity)            // Create activity log
 			activity.PUT("/:id", updateActivity)         // Update activity
 			activity.DELETE("/:id", deleteActivity)      // Delete activity
 			activity.POST("/clean", cleanOldActivities)  // Clean old activities
 			activity.POST("/clear-all", clearAllActivities) // Clear all activities
+			activity.POST("/:id/pause", pauseActivity)   // Pause a running task
+			activity.POST("/:id/resume", resumeActivity) // Resume a paused task
+			activity.POST("/:id/cancel", cancelActivity) // Cancel a running or paused task
+			activity.POST("/:id/retry", retryActivity)   // Retry a failed or cancelled task
 		}
 
 		// File operations endpoints
@@ -236,7 +242,155 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/forum/scrape-all", scrapeForumAndSaveAll)       // Scrape entire forum with full content
 			scraper.POST("/performers/auto-link", autoLinkThreadsToPerformers) // Auto-link threads to performers
 			scraper.POST("/performers/link", linkThreadToPerformer)        // Manually link thread to performer
+			scraper.POST("/performers/create-from-thread", createPerformerFromThread) // Create performer from thread
 			scraper.POST("/links/check-status", checkLinkStatuses)         // Check all download link statuses
+
+			// Link verification endpoints
+			scraper.POST("/threads/:id/verify-links", verifyThreadLinks)   // Verify all links for a thread
+			scraper.GET("/threads/:id/link-stats", getThreadLinkStats)     // Get link statistics for a thread
+			scraper.POST("/links/verify-all", verifyAllLinks)              // Verify old/unchecked links
+			scraper.GET("/links/verification-stats", getVerificationStats) // Get overall verification stats
+
+			// Provider health analytics endpoints
+			scraper.GET("/providers/health", getProviderHealthStats)       // Get health stats for all providers
+			scraper.GET("/providers/:provider/health", getProviderHealth)  // Get health stats for specific provider
+
+			// Link export endpoints
+			scraper.GET("/threads/:id/export-links", exportThreadLinks)    // Export links from a thread (formats: txt, json, csv)
+			scraper.GET("/links/export-all", exportAllThreadsLinks)        // Export links from all threads
+
+			// Video scraper endpoints
+			scraper.POST("/video", scrapeVideoHandler)                     // Scrape a video from URL
+			scraper.GET("/video/test", testScraperHandler)                 // Test scraper without saving (GET /video/test?url=...)
+			scraper.GET("/videos", getScrapedVideosHandler)                // Get all scraped videos
+			scraper.DELETE("/videos", deleteAllScrapedVideosHandler)       // Delete all scraped videos
+			scraper.DELETE("/videos/site/:siteType", deleteScrapedVideosBySiteTypeHandler) // Delete videos by site type
+			scraper.POST("/videos/bulk-delete", bulkDeleteScrapedVideosHandler) // Bulk delete scraped videos by IDs
+			scraper.GET("/videos/:id", getScrapedVideoHandler)             // Get single scraped video
+			scraper.GET("/videos/duplicates", findDuplicatesHandler)       // Find duplicate scraped videos
+			scraper.DELETE("/videos/duplicates", deleteDuplicatesHandler)  // Delete duplicate scraped videos
+
+			// Scraper tabs endpoints
+			scraper.GET("/tabs", getScraperTabsHandler)                    // Get all scraper tabs
+			scraper.GET("/tabs/:id", getScraperTabHandler)                 // Get single scraper tab
+			scraper.POST("/tabs", createScraperTabHandler)                 // Create scraper tab
+			scraper.PUT("/tabs/:id", updateScraperTabHandler)              // Update scraper tab
+			scraper.DELETE("/tabs/:id", deleteScraperTabHandler)           // Delete scraper tab
+
+			// Scraper jobs endpoints
+			scraper.GET("/jobs", getScraperJobsHandler)                    // Get scraper jobs (all or by tabId query param)
+			scraper.GET("/jobs/:id", getScraperJobHandler)                 // Get single scraper job
+			scraper.POST("/jobs/start", startScraperJobHandler)            // Start a new scraper job
+			scraper.POST("/jobs/:id/cancel", cancelScraperJobHandler)      // Cancel a scraper job
+
+			// PornHub scraper endpoints
+			scraper.POST("/pornhub/scrape", startPornHubScrapeHandler)     // Start PornHub scrape by keyword
+			scraper.GET("/pornhub/keywords", getPornHubKeywordsHandler)    // Get suggested keywords
+			scraper.GET("/pornhub/videos", getPornHubVideosHandler)        // Get scraped PornHub videos
+			scraper.GET("/pornhub/stats", getPornHubStatsHandler)          // Get PornHub scraping stats
+
+			// LuxureTV scraper endpoints
+			scraper.POST("/luxuretv/scrape", startLuxureTVScrapeHandler)       // Start LuxureTV scrape by category
+			scraper.GET("/luxuretv/categories", getLuxureTVCategoriesHandler)  // Get available categories
+			scraper.GET("/luxuretv/videos", getLuxureTVVideosHandler)          // Get scraped LuxureTV videos
+			scraper.GET("/luxuretv/stats", getLuxureTVStatsHandler)            // Get LuxureTV scraping stats
+			scraper.POST("/luxuretv/fetch-embeds", fetchLuxureTVEmbedIDsHandler) // Fetch embed IDs for videos
+
+			// Sexuria scraper endpoints
+			scraper.POST("/sexuria/scrape", startSexuriaScrapeHandler)                   // Start Sexuria scrape by category
+			scraper.GET("/sexuria/categories", getSexuriaCategoriesHandler)              // Get available categories
+			scraper.GET("/sexuria/items", getSexuriaItemsHandler)                        // Get scraped Sexuria items
+			scraper.GET("/sexuria/stats", getSexuriaStatsHandler)                        // Get Sexuria scraping stats
+			scraper.POST("/sexuria/item-details", getSexuriaItemDetailsHandler)          // Get detailed info for an item
+			scraper.GET("/sexuria/search-options", getSexuriaSearchOptionsHandler)       // Get advanced search options
+			scraper.POST("/sexuria/advanced-search", startSexuriaAdvancedSearchHandler)  // Start advanced search scrape
+		}
+
+		// Download Tracking endpoints
+		downloads := v1.Group("/downloads")
+		{
+			downloads.POST("/links/:id/mark-downloaded", markLinkAsDownloaded)    // Mark link as downloaded
+			downloads.POST("/links/:id/mark-failed", markLinkAsFailed)            // Mark link as failed
+			downloads.POST("/links/:id/reset", resetLinkDownloadStatus)           // Reset download status
+			downloads.POST("/links/bulk-mark-downloaded", bulkMarkAsDownloaded)   // Bulk mark as downloaded
+			downloads.GET("/threads/:id/stats", getThreadDownloadStats)           // Get thread download stats
+			downloads.GET("/performers/:id/stats", getPerformerDownloadStats)     // Get performer download stats
+			downloads.GET("/stats", getGlobalDownloadStats)                       // Get global download stats
+			downloads.GET("/threads", getThreadsByDownloadStatus)                 // Filter threads by download status
+			downloads.GET("/recent", getRecentDownloads)                          // Get recent downloads
+		}
+
+		// JDownloader Integration endpoints
+		jdownloader := v1.Group("/jdownloader")
+		{
+			jdownloader.GET("/status", checkJDownloaderStatus)              // Check if JDownloader is available
+			jdownloader.POST("/send-links", sendLinksToJDownloader)         // Send custom links to JDownloader
+			jdownloader.POST("/threads/:id/send", sendThreadToJDownloader)  // Send entire thread to JDownloader
+			jdownloader.GET("/downloads/status", getJDownloaderStatus)      // Get current download status
+			jdownloader.GET("/downloads/list", getJDownloaderDownloads)     // Get all downloads
+			jdownloader.POST("/downloads/start", startJDownloaderDownloads) // Start all downloads
+			jdownloader.POST("/downloads/stop", stopJDownloaderDownloads)   // Stop all downloads
+		}
+
+		// AI Audit endpoints
+		aiAudit := v1.Group("/ai-audit")
+		{
+			aiAudit.GET("", getAIAuditLogs)                              // Get all audit logs with filters
+			aiAudit.GET("/stats", getAIAuditStats)                       // Get AI usage statistics
+			aiAudit.GET("/search", searchAIAuditLogs)                    // Search audit logs
+			aiAudit.GET("/:id", getAIAuditLog)                           // Get single audit log
+			aiAudit.GET("/performer/:id", getAIAuditLogsByPerformer)     // Get logs for performer
+			aiAudit.GET("/thread/:id", getAIAuditLogsByThread)           // Get logs for thread
+			aiAudit.POST("/clean", deleteOldAIAuditLogs)                 // Delete old audit logs
+		}
+
+		// Scheduler endpoints
+		scheduler := v1.Group("/scheduler")
+		{
+			scheduler.GET("/status", getSchedulerStatus)                  // Get scheduler status
+			scheduler.GET("/jobs", getAllJobs)                            // Get all jobs
+			scheduler.GET("/jobs/:id", getJob)                            // Get single job
+			scheduler.POST("/jobs", createJob)                            // Create new job
+			scheduler.PUT("/jobs/:id", updateJob)                         // Update job
+			scheduler.DELETE("/jobs/:id", deleteJob)                      // Delete job
+			scheduler.POST("/jobs/:id/toggle", toggleJob)                 // Toggle job enabled/disabled
+			scheduler.GET("/jobs/:id/history", getJobExecutionHistory)    // Get job execution history
+		}
+
+		// System Health endpoints
+		system := v1.Group("/system")
+		{
+			system.GET("/health", getSystemHealth)             // Get comprehensive system health
+			system.GET("/metrics", getSystemMetrics)           // Get time-series metrics
+			system.POST("/open-incognito", openInIncognito)    // Open URL in incognito browser window
+			system.POST("/open-login-helper", openLoginHelper) // Open login page for cookie capture
+		}
+
+		// Notification endpoints
+		notifications := v1.Group("/notifications")
+		{
+			notifications.GET("", getNotifications)                         // Get all notifications with filters
+			notifications.GET("/stats", getNotificationStats)               // Get notification statistics
+			notifications.GET("/:id", getNotification)                      // Get single notification
+			notifications.POST("", createNotification)                      // Create new notification
+			notifications.POST("/:id/read", markNotificationAsRead)         // Mark notification as read
+			notifications.POST("/read-all", markAllNotificationsAsRead)     // Mark all as read
+			notifications.POST("/:id/archive", archiveNotification)         // Archive notification
+			notifications.DELETE("/:id", deleteNotification)                // Delete notification
+			notifications.POST("/clean", deleteOldNotifications)            // Delete old notifications
+		}
+
+		// Backup endpoints
+		backups := v1.Group("/backups")
+		{
+			backups.POST("", createDatabaseBackup)                   // Create new backup
+			backups.GET("", listDatabaseBackups)                     // List all backups
+			backups.GET("/stats", getBackupStats)                    // Get backup statistics
+			backups.GET("/:filename", getBackup)                     // Get backup info
+			backups.GET("/:filename/download", downloadBackup)       // Download backup file
+			backups.POST("/:filename/restore", restoreBackup)        // Restore from backup
+			backups.DELETE("/:filename", deleteBackup)               // Delete backup
+			backups.POST("/cleanup", cleanupOldBackups)              // Cleanup old backups
 		}
 
 		// Console Logs endpoints

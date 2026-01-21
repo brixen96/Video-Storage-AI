@@ -547,13 +547,354 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_source ON console_logs(source)`,
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_level ON console_logs(level)`,
 		`CREATE INDEX IF NOT EXISTS idx_console_logs_created ON console_logs(created_at DESC)`,
+		// Migration 26: Add pause/resume support to activities
+		`ALTER TABLE activities ADD COLUMN is_paused BOOLEAN DEFAULT 0`,
+		`ALTER TABLE activities ADD COLUMN paused_at DATETIME`,
+		`ALTER TABLE activities ADD COLUMN checkpoint TEXT DEFAULT '{}'`, // JSON checkpoint data
+		`ALTER TABLE activity_logs ADD COLUMN is_paused BOOLEAN DEFAULT 0`,
+		`ALTER TABLE activity_logs ADD COLUMN paused_at DATETIME`,
+		`ALTER TABLE activity_logs ADD COLUMN checkpoint TEXT DEFAULT '{}'`,
+		// Migration 27: Performance indexes for pause/resume and AI search
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_is_paused ON activity_logs(is_paused) WHERE is_paused = 1`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_logs_status_paused ON activity_logs(status, is_paused)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_posts_plain_text ON scraped_posts(plain_text)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_threads_title ON scraped_threads(title)`,
+		// Migration 28: Additional performance indexes for foreign keys and common queries
+		`CREATE INDEX IF NOT EXISTS idx_video_performers_performer ON video_performers(performer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_studios_studio ON video_studios(studio_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_performer_scraped_threads_thread ON performer_scraped_threads(thread_id)`,
+		// Migration 29: Download tracking fields
+		`ALTER TABLE scraped_download_links ADD COLUMN download_status TEXT DEFAULT 'pending'`, // pending, downloaded, failed, in_progress
+		`ALTER TABLE scraped_download_links ADD COLUMN downloaded_at DATETIME`,
+		`ALTER TABLE scraped_download_links ADD COLUMN download_path TEXT`,
+		`ALTER TABLE scraped_download_links ADD COLUMN download_notes TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_links_download_status ON scraped_download_links(download_status)`,
+		// Migration 30: AI Audit Logging System
+		`CREATE TABLE IF NOT EXISTS ai_audit_logs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			interaction_type TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			user_query TEXT,
+			ai_prompt TEXT,
+			ai_response TEXT,
+			context_data TEXT DEFAULT '{}',
+			performer_id INTEGER,
+			thread_id INTEGER,
+			video_id INTEGER,
+			tokens_used INTEGER DEFAULT 0,
+			cost_usd REAL DEFAULT 0.0,
+			response_time_ms INTEGER DEFAULT 0,
+			success BOOLEAN DEFAULT 1,
+			error_message TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (performer_id) REFERENCES performers(id) ON DELETE SET NULL,
+			FOREIGN KEY (thread_id) REFERENCES scraped_threads(id) ON DELETE SET NULL,
+			FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_interaction_type ON ai_audit_logs(interaction_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_operation ON ai_audit_logs(operation)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_created ON ai_audit_logs(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_performer ON ai_audit_logs(performer_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_audit_thread ON ai_audit_logs(thread_id)`,
+		// Migration 31: Scheduled Jobs System
+		`CREATE TABLE IF NOT EXISTS scheduled_jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_type TEXT NOT NULL,
+			schedule_type TEXT NOT NULL,
+			schedule_config TEXT DEFAULT '{}',
+			target_type TEXT,
+			target_id INTEGER,
+			enabled BOOLEAN DEFAULT 1,
+			last_run_at DATETIME,
+			next_run_at DATETIME,
+			run_count INTEGER DEFAULT 0,
+			success_count INTEGER DEFAULT 0,
+			failure_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_enabled ON scheduled_jobs(enabled)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run ON scheduled_jobs(next_run_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_type ON scheduled_jobs(job_type)`,
+		`CREATE TABLE IF NOT EXISTS job_execution_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			job_id INTEGER NOT NULL,
+			status TEXT NOT NULL,
+			started_at DATETIME NOT NULL,
+			completed_at DATETIME,
+			duration_ms INTEGER DEFAULT 0,
+			result_data TEXT DEFAULT '{}',
+			error_message TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (job_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_execution_history(job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_execution_history(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_job_history_created ON job_execution_history(created_at DESC)`,
 	}
 
-	for _, migration := range migrations {
+	// Migration 32: Generic Video Scraper Tables
+	migration32VideoScraper := []string{
+		`CREATE TABLE IF NOT EXISTS scraped_videos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source TEXT NOT NULL,
+			site_type TEXT NOT NULL,
+			external_id TEXT,
+			title TEXT NOT NULL,
+			url TEXT NOT NULL,
+			description TEXT,
+			duration INTEGER DEFAULT 0,
+			file_size INTEGER DEFAULT 0,
+			thumbnail_url TEXT,
+			thumbnail_path TEXT,
+			video_path TEXT,
+			author TEXT,
+			uploader TEXT,
+			view_count INTEGER DEFAULT 0,
+			like_count INTEGER DEFAULT 0,
+			category TEXT,
+			tags TEXT DEFAULT '[]',
+			metadata TEXT DEFAULT '{}',
+			status TEXT DEFAULT 'pending',
+			error_message TEXT,
+			discovered_at DATETIME NOT NULL,
+			scraped_at DATETIME,
+			downloaded_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(url, source)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_source ON scraped_videos(source)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_site_type ON scraped_videos(site_type)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_status ON scraped_videos(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_discovered ON scraped_videos(discovered_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraped_videos_title ON scraped_videos(title)`,
+	}
+
+	for _, migration := range migration32VideoScraper {
 		if _, err := DB.Exec(migration); err != nil {
-			// Ignore error if column already exists
 			if !isColumnExistsError(err) {
-				return fmt.Errorf("migration failed: %w", err)
+				return fmt.Errorf("migration 32 (video scraper) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 32b: Add rating column to scraped_videos
+	migration32bRating := `ALTER TABLE scraped_videos ADD COLUMN rating INTEGER DEFAULT 0`
+	if _, err := DB.Exec(migration32bRating); err != nil {
+		if !isColumnExistsError(err) {
+			return fmt.Errorf("migration 32b (add rating to scraped_videos) failed: %w", err)
+		}
+	}
+
+	// Migration 33: Notifications System
+	migration33 := []string{
+		`CREATE TABLE IF NOT EXISTS notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			type TEXT NOT NULL,
+			priority TEXT NOT NULL DEFAULT 'normal',
+			title TEXT NOT NULL,
+			message TEXT NOT NULL,
+			category TEXT,
+			action_url TEXT,
+			action_label TEXT,
+			metadata TEXT DEFAULT '{}',
+			is_read BOOLEAN DEFAULT 0,
+			is_archived BOOLEAN DEFAULT 0,
+			related_entity_type TEXT,
+			related_entity_id INTEGER,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			read_at DATETIME,
+			expires_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_archived ON notifications(is_archived)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_priority ON notifications(priority)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(related_entity_type, related_entity_id)`,
+		`CREATE TABLE IF NOT EXISTS notification_preferences (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			notification_type TEXT UNIQUE NOT NULL,
+			enabled BOOLEAN DEFAULT 1,
+			priority_filter TEXT DEFAULT 'all',
+			delivery_methods TEXT DEFAULT '["in_app"]',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+
+	for _, migration := range migration33 {
+		if _, err := DB.Exec(migration); err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("migration 33 (notifications) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 34: Scraper Tabs Table
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS scraper_tabs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		tab_type TEXT NOT NULL DEFAULT 'video',
+		base_url TEXT NOT NULL,
+		site_type TEXT NOT NULL,
+		icon TEXT DEFAULT 'video',
+		color TEXT DEFAULT '#007bff',
+		scrape_options TEXT DEFAULT '{}',
+		is_active BOOLEAN DEFAULT 1,
+		position INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		if !isColumnExistsError(err) {
+			return fmt.Errorf("migration 34 (scraper tabs table) failed: %w", err)
+		}
+	}
+
+	// Create indexes for scraper_tabs
+	scraperTabsIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_active ON scraper_tabs(is_active)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_position ON scraper_tabs(position)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tabs_type ON scraper_tabs(tab_type)`,
+	}
+	for _, idx := range scraperTabsIndexes {
+		if _, err := DB.Exec(idx); err != nil {
+			if !isColumnExistsError(err) {
+				return fmt.Errorf("migration 34 (scraper tabs indexes) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 35: Scraper Tab Jobs Table (renamed to avoid conflict with old scraper_jobs)
+	migration35ScraperTabJobs := `CREATE TABLE IF NOT EXISTS scraper_tab_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tab_id INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		url TEXT NOT NULL,
+		total_pages INTEGER DEFAULT 0,
+		pages_completed INTEGER DEFAULT 0,
+		videos_found INTEGER DEFAULT 0,
+		videos_saved INTEGER DEFAULT 0,
+		errors_count INTEGER DEFAULT 0,
+		error_messages TEXT DEFAULT '[]',
+		started_at DATETIME,
+		completed_at DATETIME,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (tab_id) REFERENCES scraper_tabs(id) ON DELETE CASCADE
+	)`
+
+	if _, err := DB.Exec(migration35ScraperTabJobs); err != nil {
+		errMsg := err.Error()
+		// Ignore "already exists" errors
+		if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate") {
+			return fmt.Errorf("migration 35 (scraper tab jobs table) failed: %w", err)
+		}
+	}
+
+	// Create indexes for scraper_tab_jobs
+	scraperTabJobsIndexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_tab ON scraper_tab_jobs(tab_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_status ON scraper_tab_jobs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_scraper_tab_jobs_created ON scraper_tab_jobs(created_at DESC)`,
+	}
+	for _, idx := range scraperTabJobsIndexes {
+		if _, err := DB.Exec(idx); err != nil {
+			errMsg := err.Error()
+			// Ignore "already exists" and "no such column" errors (table might not exist yet)
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "no such column") {
+				return fmt.Errorf("migration 35 (scraper jobs indexes) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 36: Add job_type column to scraper_tab_jobs for source-specific jobs (like PornHub)
+	// and make tab_id nullable
+	migration36JobType := `ALTER TABLE scraper_tab_jobs ADD COLUMN job_type TEXT DEFAULT 'tab'`
+	if _, err := DB.Exec(migration36JobType); err != nil {
+		if !isColumnExistsError(err) {
+			// Ignore if column exists
+		}
+	}
+
+	// Migration 37: Recreate scraper_tab_jobs with nullable tab_id (SQLite workaround)
+	// Check if migration is needed by checking if we can insert with NULL tab_id
+	var needsMigration bool
+	testQuery := `INSERT INTO scraper_tab_jobs (tab_id, status, url, job_type) VALUES (NULL, 'test', 'test', 'test')`
+	if _, err := DB.Exec(testQuery); err != nil {
+		needsMigration = true
+	} else {
+		// Clean up test row
+		DB.Exec(`DELETE FROM scraper_tab_jobs WHERE status = 'test' AND url = 'test'`)
+	}
+
+	if needsMigration {
+		// Recreate the table with nullable tab_id
+		migrationSteps := []string{
+			`CREATE TABLE IF NOT EXISTS scraper_tab_jobs_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				tab_id INTEGER,
+				job_type TEXT DEFAULT 'tab',
+				status TEXT NOT NULL DEFAULT 'pending',
+				url TEXT NOT NULL,
+				total_pages INTEGER DEFAULT 0,
+				pages_completed INTEGER DEFAULT 0,
+				videos_found INTEGER DEFAULT 0,
+				videos_saved INTEGER DEFAULT 0,
+				errors_count INTEGER DEFAULT 0,
+				error_messages TEXT DEFAULT '[]',
+				started_at DATETIME,
+				completed_at DATETIME,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (tab_id) REFERENCES scraper_tabs(id) ON DELETE CASCADE
+			)`,
+			`INSERT INTO scraper_tab_jobs_new SELECT id, tab_id, COALESCE(job_type, 'tab'), status, url, total_pages, pages_completed, videos_found, videos_saved, errors_count, error_messages, started_at, completed_at, created_at, updated_at FROM scraper_tab_jobs`,
+			`DROP TABLE scraper_tab_jobs`,
+			`ALTER TABLE scraper_tab_jobs_new RENAME TO scraper_tab_jobs`,
+		}
+		for i, step := range migrationSteps {
+			if _, err := DB.Exec(step); err != nil {
+				errMsg := err.Error()
+				// Allow some errors during migration (like table doesn't exist)
+				if !strings.Contains(errMsg, "no such table") && !strings.Contains(errMsg, "already exists") {
+					return fmt.Errorf("migration 37 step %d failed: %w", i+1, err)
+				}
+			}
+		}
+
+		// Recreate indexes after table rename
+		for _, idx := range scraperTabJobsIndexes {
+			DB.Exec(idx)
+		}
+	}
+
+	// Migration 38: Add content_type column to scraper_tabs for filtering (Regular/Zoo/3D/etc)
+	migration38ContentType := `ALTER TABLE scraper_tabs ADD COLUMN content_type TEXT DEFAULT 'regular'`
+	if _, err := DB.Exec(migration38ContentType); err != nil {
+		// Ignore if column exists
+		if !isColumnExistsError(err) {
+			// Allow to continue
+		}
+	}
+
+	// Migration 39: Add content_type column to scraped_videos
+	migration39ContentType := `ALTER TABLE scraped_videos ADD COLUMN content_type TEXT DEFAULT 'regular'`
+	if _, err := DB.Exec(migration39ContentType); err != nil {
+		// Ignore if column exists
+		if !isColumnExistsError(err) {
+			// Allow to continue
+		}
+	}
+
+	for i, migration := range migrations {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			// Ignore error if column already exists or if it's a "no such column" error
+			// (which can happen with ALTER TABLE or CREATE INDEX on non-existent columns)
+			if !isColumnExistsError(err) && !strings.Contains(errMsg, "no such column") {
+				return fmt.Errorf("migration %d failed: %w", i+1, err)
 			}
 		}
 	}

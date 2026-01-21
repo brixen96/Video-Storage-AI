@@ -6,13 +6,7 @@
 				<div class="row g-3">
 					<!-- Search -->
 					<div class="col-md-4">
-						<div class="search-box">
-							<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
-							<input v-model="searchQuery" type="text" class="form-control" placeholder="Search performers..." />
-							<button v-if="searchQuery" class="btn-clear-search" @click="searchQuery = ''">
-								<font-awesome-icon :icon="['fas', 'times-circle']" />
-							</button>
-						</div>
+						<SearchBox v-model="searchQuery" placeholder="Search performers..." />
 					</div>
 
 					<!-- Sort -->
@@ -73,10 +67,17 @@
 					</div>
 
 					<!-- Advanced Filter Toggle -->
-					<div class="col-md-2">
+					<div class="col-md-1">
 						<button class="btn btn-outline-secondary w-100" @click="showFilters = !showFilters">
 							<font-awesome-icon :icon="['fas', 'filter']" class="me-2" />
 							{{ showFilters ? 'Hide' : 'Filters' }}
+						</button>
+					</div>
+
+					<!-- Cleanup Button -->
+					<div class="col-md-1">
+						<button class="btn btn-outline-danger w-100" @click="cleanupEmptyPerformers" :disabled="isCleaningUp" title="Delete empty performers">
+							<font-awesome-icon :icon="['fas', isCleaningUp ? 'spinner' : 'trash-alt']" :spin="isCleaningUp" />
 						</button>
 					</div>
 				</div>
@@ -194,7 +195,7 @@
 							:alt="performer.name"
 							loading="lazy"
 						/>
-						<!-- Video Preview (always loaded, visibility toggled) -->
+						<!-- Video Preview (loads only on hover) -->
 						<video
 							v-if="performer.preview_path"
 							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
@@ -205,7 +206,7 @@
 							loop
 							muted
 							playsinline
-							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
+							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
@@ -285,7 +286,7 @@
 							loop
 							muted
 							playsinline
-							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
+							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
@@ -321,40 +322,18 @@
 		</div>
 
 		<!-- Context Menu -->
-		<div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click="closeContextMenu">
-			<div class="context-menu-section">
-				<div class="context-menu-label">Set Category:</div>
-				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, 'regular')">
-					<font-awesome-icon :icon="['fas', 'user']" class="me-2" />
-					Regular
-				</button>
-				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, 'zoo')">
-					<font-awesome-icon :icon="['fas', 'dog']" class="me-2" />
-					Zoo
-				</button>
-				<button class="context-menu-item" @click="updateCategory(contextMenu.performer, '3d')">
-					<font-awesome-icon :icon="['fas', 'cube']" class="me-2" />
-					3D
-				</button>
-			</div>
-			<div class="context-menu-divider"></div>
-			<button class="context-menu-item" @click="goToPerformerDetails(contextMenu.performer)">
-				<font-awesome-icon :icon="['fas', 'arrow-right']" class="me-2" />
-				Go to Performer Details Page
-			</button>
-			<button class="context-menu-item" @click="fetchMetadata(contextMenu.performer)">
-				<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
-				Fetch Metadata
-			</button>
-			<button class="context-menu-item" @click="resetPerformer(contextMenu.performer)">
-				<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
-				Reset Performer
-			</button>
-			<button class="context-menu-item danger" @click="confirmDelete(contextMenu.performer)">
-				<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-				Delete Performer
-			</button>
-		</div>
+		<PerformerContextMenu
+			:visible="contextMenu.visible"
+			:x="contextMenu.x"
+			:y="contextMenu.y"
+			:performer="contextMenu.performer"
+			@set-category="updateCategory(contextMenu.performer, $event)"
+			@go-to-details="goToPerformerDetails(contextMenu.performer)"
+			@fetch-metadata="fetchMetadata(contextMenu.performer)"
+			@reset-performer="resetPerformer(contextMenu.performer)"
+			@confirm-delete="confirmDelete(contextMenu.performer)"
+			@close="closeContextMenu"
+		/>
 
 		<!-- Details Panel (Side Drawer) -->
 		<div v-if="detailsPanel.visible" class="details-panel" @click.self="closeDetails">
@@ -625,33 +604,15 @@
 		</div>
 
 		<!-- Delete Confirmation Modal -->
-		<div v-if="deleteModal.visible" class="modal-overlay" @click="deleteModal.visible = false">
-			<div class="modal-dialog" @click.stop>
-				<div class="modal-content">
-					<div class="modal-header">
-						<h5 class="modal-title">Confirm Delete</h5>
-						<button class="btn-close-modal" @click="deleteModal.visible = false">
-							<font-awesome-icon :icon="['fas', 'times']" />
-						</button>
-					</div>
-					<div class="modal-body">
-						<p>
-							Are you sure you want to delete
-							<strong>{{ deleteModal.performer?.name }}</strong
-							>?
-						</p>
-						<p class="text-muted">This action cannot be undone.</p>
-					</div>
-					<div class="modal-footer">
-						<button class="btn btn-secondary" @click="deleteModal.visible = false">Cancel</button>
-						<button class="btn btn-danger" @click="deletePerformer">
-							<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-							Delete
-						</button>
-					</div>
-				</div>
-			</div>
-		</div>
+		<!-- Delete Confirmation Modal -->
+		<DeleteConfirmationModal
+			:visible="deleteModal.visible"
+			title="Confirm Delete"
+			message="Are you sure you want to delete"
+			:itemName="deleteModal.performer?.name"
+			@confirm="deletePerformer"
+			@cancel="deleteModal.visible = false"
+		/>
 
 		<!-- Carousel Context Menu -->
 		<div v-if="carouselContextMenu.visible" class="context-menu" :style="{ top: carouselContextMenu.y + 'px', left: carouselContextMenu.x + 'px' }" @click.stop>
@@ -667,9 +628,17 @@
 import { performersAPI } from '@/services/api'
 import { tagsAPI } from '@/services/api'
 import settingsService from '@/services/settingsService'
+import { DeleteConfirmationModal, SearchBox } from '@/components/shared'
+import { PerformerContextMenu } from '@/components/performers'
+import { useFormatters } from '@/composables/useFormatters'
 
 export default {
 	name: 'PerformersPage',
+	components: {
+		DeleteConfirmationModal,
+		PerformerContextMenu,
+		SearchBox,
+	},
 	data() {
 		// Load preview cache from localStorage
 		let cachedPreviews = {}
@@ -735,6 +704,7 @@ export default {
 			performers: [],
 			loading: false,
 			error: null,
+			isCleaningUp: false,
 			searchQuery: '',
 			sortBy: 'name',
 			viewMode: settings.defaultViewMode || 'grid',
@@ -938,11 +908,16 @@ export default {
 			// Set hover state to true to show video
 			this.hoveredPerformer[performer.id] = true
 
-			// Play the video if it exists
+			// Load and play the video on hover (since preload="none")
 			this.$nextTick(() => {
 				const videoRef = this.$refs[`video-${performer.id}`]
 				if (videoRef && videoRef[0]) {
-					videoRef[0].play().catch((err) => {
+					const video = videoRef[0]
+					// Load the video if not already loaded
+					if (video.readyState === 0) {
+						video.load()
+					}
+					video.play().catch((err) => {
 						// Ignore play errors (can happen if video not loaded yet)
 						console.debug('Video play error:', err)
 					})
@@ -1252,6 +1227,33 @@ export default {
 				this.$toast.error('Delete Failed', 'Failed to delete performer')
 			}
 		},
+		async cleanupEmptyPerformers() {
+			if (!confirm('This will delete all performers without preview videos or metadata. Are you sure?')) {
+				return
+			}
+
+			this.isCleaningUp = true
+			try {
+				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', {
+					method: 'POST'
+				})
+				const data = await response.json()
+
+				if (data.success) {
+					const deletedCount = data.data.deleted_count
+					this.$toast.success(`Cleaned up ${deletedCount} empty performers`)
+					// Reload performers list
+					await this.loadPerformers()
+				} else {
+					this.$toast.error('Cleanup Failed', data.message || 'Failed to cleanup performers')
+				}
+			} catch (err) {
+				console.error('Failed to cleanup performers:', err)
+				this.$toast.error('Cleanup Failed', 'Failed to cleanup performers')
+			} finally {
+				this.isCleaningUp = false
+			}
+		},
 		clearFilters() {
 			this.filters = {
 				showZoo: true,
@@ -1344,23 +1346,7 @@ export default {
 			// Navigate to video player page
 			this.$router.push({ name: 'VideoPlayer', params: { id: video.id } })
 		},
-		formatDuration(seconds) {
-			if (!seconds) return '00:00'
-			const hours = Math.floor(seconds / 3600)
-			const minutes = Math.floor((seconds % 3600) / 60)
-			const secs = Math.floor(seconds % 60)
-
-			if (hours > 0) {
-				return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-			}
-			return `${minutes}:${String(secs).padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (!bytes) return '0 B'
-			const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-			const i = Math.floor(Math.log(bytes) / Math.log(1024))
-			return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`
-		},
+		// formatDuration and formatFileSize now provided by useFormatters composable
 		async addTagToPerformer() {
 			if (!this.selectedTagId || !this.detailsPanel.performer) return
 
@@ -1458,6 +1444,12 @@ export default {
 			if (typeof link === 'string') return link
 			return link.title || link.name || link.platform || link.url || 'External Link'
 		},
+	},
+	created() {
+		// Initialize formatters composable
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
 	},
 	mounted() {
 		this.loadPerformers()

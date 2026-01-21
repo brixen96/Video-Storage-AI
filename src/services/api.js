@@ -130,12 +130,15 @@ export const activityAPI = {
 	getRecent: (limit = 20) => api.get('/activity/recent', { params: { limit } }),
 	getStatus: () => api.get('/activity/status'),
 	getStats: () => api.get('/activity/stats'),
+	getPaused: () => api.get('/activity/paused'), // Get all paused tasks
 	getById: (id) => api.get(`/activity/${id}`),
 	create: (data) => api.post('/activity', data),
 	update: (id, data) => api.put(`/activity/${id}`, data),
 	delete: (id) => api.delete(`/activity/${id}`),
 	cleanOld: (days = 30) => api.post('/activity/clean', null, { params: { days } }),
 	clearAll: () => api.post('/activity/clear-all'),
+	pause: (id, checkpoint = {}) => api.post(`/activity/${id}/pause`, { checkpoint }), // Pause a running task
+	resume: (id) => api.post(`/activity/${id}/resume`), // Resume a paused task
 }
 
 export const consoleLogAPI = {

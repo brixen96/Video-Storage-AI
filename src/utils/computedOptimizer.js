@@ -284,7 +284,7 @@ export function profiledComputed(name, fn) {
 	})
 
 	// Expose stats
-	profiled.getStats = () => ({
+	profiled.value.getStats = () => ({
 		name,
 		callCount,
 		totalTime: totalTime.toFixed(2),

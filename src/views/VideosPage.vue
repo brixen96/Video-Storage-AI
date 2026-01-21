@@ -14,6 +14,7 @@
 					<div class="col-md-2">
 						<select v-model="selectedLibrary" class="form-select" @change="loadVideos">
 							<option value="">All Libraries</option>
+							<option value="scraped">🌐 Scraped Videos</option>
 							<option v-for="library in libraries" :key="library.id" :value="library.id">{{ library.name }}</option>
 						</select>
 					</div>
@@ -35,9 +36,9 @@
 								<font-awesome-icon :icon="['fas', 'filter']" />
 								Filters
 							</button>
-							<button v-if="selectedVideos.length > 0" class="btn btn-primary" @click="showBulkActions = true">
+							<button v-if="selectedCount > 0" class="btn btn-primary" @click="showBulkActions = true">
 								<font-awesome-icon :icon="['fas', 'tasks']" />
-								Bulk ({{ selectedVideos.length }})
+								Bulk ({{ selectedCount }})
 							</button>
 							<button class="btn btn-outline-primary" @click="refreshVideos" title="Refresh video list">
 								<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': loading }" />
@@ -260,10 +261,10 @@
 						<VideoCard
 							v-for="video in videos"
 							:key="video.id"
-							v-memo="[video.id, video.title, video.rating, selectedVideos.includes(video.id)]"
+							v-memo="[video.id, video.title, video.rating, isSelected(video.id)]"
 							:video="video"
-							:is-selected="selectedVideos.includes(video.id)"
-							@toggle-select="toggleVideoSelection"
+							:is-selected="isSelected(video.id)"
+							@toggle-select="(video) => toggleSelection(video.id)"
 							@context-menu="showContextMenu"
 							@play="playVideo"
 							@add-tag="openTagModal"
@@ -295,11 +296,11 @@
 								<tr
 									v-for="video in videos"
 									:key="video.id"
-									v-memo="[video.id, video.title, selectedVideos.includes(video.id)]"
-									:class="{ selected: selectedVideos.includes(video.id) }"
+									v-memo="[video.id, video.title, isSelected(video.id)]"
+									:class="{ selected: isSelected(video.id) }"
 								>
 									<td @click.stop>
-										<input type="checkbox" :checked="selectedVideos.includes(video.id)" @change="toggleVideoSelection(video)" />
+										<input type="checkbox" :checked="isSelected(video.id)" @change="toggleSelection(video.id)" />
 									</td>
 									<td>{{ video.title }}</td>
 									<td>{{ formatDuration(video.duration) }}</td>
@@ -319,51 +320,61 @@
 					</div>
 
 					<!-- Pagination -->
-					<div v-if="totalPages > 1" class="vp-pagination-controls mt-4">
-						<nav>
-							<ul class="pagination justify-content-center">
-								<li class="vp-page-item" :class="{ disabled: currentPage === 1 }">
-									<a class="vp-page-link" @click="goToPage(currentPage - 1)">Previous</a>
-								</li>
-								<li v-for="page in visiblePages" :key="page" class="vp-page-item" :class="{ active: page === currentPage }">
-									<a class="vp-page-link" @click="goToPage(page)">{{ page }}</a>
-								</li>
-								<li class="vp-page-item" :class="{ disabled: currentPage === totalPages }">
-									<a class="vp-page-link" @click="goToPage(currentPage + 1)">Next</a>
-								</li>
-							</ul>
-						</nav>
-					</div>
+					<BrowserPaginationControls
+						:currentPage="currentPage"
+						:itemsPerPage="pageSize"
+						:totalItems="totalVideos"
+						@update:currentPage="currentPage = $event; loadVideos()"
+						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos()"
+					/>
 				</div>
 			</div>
 		</div>
 
 		<!-- Context Menu -->
 		<div v-if="contextMenu.show" class="vp-context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
-			<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'play']" />
-				Play
-			</div>
-			<div class="vp-context-menu-item" @click="editMetadata(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'edit']" />
-				Edit Metadata
-			</div>
-			<div class="vp-context-menu-item" @click="fetchMetadata(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'download']" />
-				Fetch Metadata
-			</div>
-			<div class="vp-context-menu-item" @click="openTagModal(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'tag']" />
-				Add Tags
-			</div>
-			<div class="vp-context-menu-item" @click="openInExplorer(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'folder-open']" />
-				Open in Explorer
-			</div>
-			<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
-				<font-awesome-icon :icon="['fas', 'trash']" />
-				Delete
-			</div>
+			<!-- Scraped video options -->
+			<template v-if="contextMenu.video && contextMenu.video.is_scraped">
+				<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'external-link-alt']" />
+					Open in Browser
+				</div>
+				<div class="vp-context-menu-item" @click="copyVideoUrl(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'copy']" />
+					Copy URL
+				</div>
+				<div class="vp-context-menu-item text-muted" style="font-size: 0.8em; pointer-events: none;">
+					<font-awesome-icon :icon="['fas', 'globe']" />
+					Source: {{ contextMenu.video.source }}
+				</div>
+			</template>
+			<!-- Regular video options -->
+			<template v-else>
+				<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'play']" />
+					Play
+				</div>
+				<div class="vp-context-menu-item" @click="editMetadata(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'edit']" />
+					Edit Metadata
+				</div>
+				<div class="vp-context-menu-item" @click="fetchMetadata(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'download']" />
+					Fetch Metadata
+				</div>
+				<div class="vp-context-menu-item" @click="openTagModal(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'tag']" />
+					Add Tags
+				</div>
+				<div class="vp-context-menu-item" @click="openInExplorer(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'folder-open']" />
+					Open in Explorer
+				</div>
+				<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'trash']" />
+					Delete
+				</div>
+			</template>
 		</div>
 
 		<!-- Bulk Actions Modal -->
@@ -371,7 +382,7 @@
 			<div class="modal-dialog modal-dialog-centered">
 				<div class="modal-content text-bg-dark">
 					<div class="modal-header">
-						<h5 class="modal-title">Bulk Actions ({{ selectedVideos.length }} videos)</h5>
+						<h5 class="modal-title">Bulk Actions ({{ selectedCount }} videos)</h5>
 						<button type="button" class="btn-close" @click="showBulkActions = false"></button>
 					</div>
 					<div class="modal-body">
@@ -403,6 +414,16 @@
 
 		<!-- Add Tags Modal -->
 		<AddTagModal :show="showTagModal" :video="videoForModal" @close="onTagModalClose" @saved="onTagModalSaved" />
+
+		<!-- Delete Confirmation Modal -->
+		<DeleteConfirmationModal
+			:visible="deleteModal.show"
+			:title="deleteModal.isBulk ? 'Confirm Bulk Delete' : 'Confirm Delete'"
+			message="Are you sure you want to delete"
+			:itemName="deleteModal.isBulk ? `${selectedCount} videos` : deleteModal.video?.title"
+			@confirm="deleteModal.isBulk ? confirmBulkDelete() : confirmDeleteVideo()"
+			@cancel="deleteModal.show = false"
+		/>
 	</div>
 </template>
 
@@ -411,6 +432,10 @@ import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
 import { videosAPI, librariesAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
+import { BrowserPaginationControls } from '@/components/browser'
+import { DeleteConfirmationModal } from '@/components/shared'
+import { useFormatters } from '@/composables/useFormatters'
+import { useTableSelectionOptionsAPI } from '@/composables/useTableSelection'
 
 // Lazy load heavy modal components
 const VideoPlayerModal = defineAsyncComponent(() => import('@/components/VideoPlayerModal.vue'))
@@ -424,6 +449,8 @@ export default {
 		VideoPlayerModal,
 		EditMetadataModal,
 		AddTagModal,
+		BrowserPaginationControls,
+		DeleteConfirmationModal,
 	},
 	data() {
 		const settings = settingsService.getSettings()
@@ -456,7 +483,7 @@ export default {
 			currentPage: 1,
 			pageSize: 60,
 			totalVideos: 0,
-			selectedVideos: [],
+			...useTableSelectionOptionsAPI().data(),
 			showBulkActions: false,
 			contextMenu: {
 				show: false,
@@ -475,21 +502,20 @@ export default {
 			showTagModal: false,
 			videoForModal: null,
 			previewingPerformer: null,
+			deleteModal: {
+				show: false,
+				video: null,
+				isBulk: false,
+			},
 			performerPreviewTimeouts: {},
 		}
 	},
 	computed: {
+		...useTableSelectionOptionsAPI().computed(function () {
+			return this.videos
+		}),
 		totalPages() {
 			return Math.ceil(this.totalVideos / this.pageSize)
-		},
-		visiblePages() {
-			const pages = []
-			const start = Math.max(1, this.currentPage - 2)
-			const end = Math.min(this.totalPages, this.currentPage + 2)
-			for (let i = start; i <= end; i++) {
-				pages.push(i)
-			}
-			return pages
 		},
 		activeFiltersCount() {
 			let count = 0
@@ -541,6 +567,13 @@ export default {
 			return this.tags.filter(t => t.category === this.filters.contentType)
 		},
 	},
+	created() {
+		// Initialize formatters composable
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDate = formatters.formatDate
+	},
 	mounted() {
 		this.loadVideos()
 		this.loadPerformers()
@@ -565,10 +598,19 @@ export default {
 		},
 	},
 	methods: {
+		...useTableSelectionOptionsAPI().methods(function () {
+			return this.videos
+		}),
 		getAssetURL,
 		async loadVideos() {
 			this.loading = true
 			try {
+				// Check if we're loading scraped videos
+				if (this.selectedLibrary === 'scraped') {
+					await this.loadScrapedVideos()
+					return
+				}
+
 				const params = {
 					page: this.currentPage,
 					limit: this.pageSize,
@@ -603,6 +645,134 @@ export default {
 			} finally {
 				this.loading = false
 			}
+		},
+		async loadScrapedVideos() {
+			try {
+				// Fetch all scraped videos from all sources with tab info for source badges
+				const [tabVideosRes, pornHubVideosRes] = await Promise.all([
+					fetch('http://localhost:8080/api/v1/scraper/videos?includeTabInfo=true').then(r => r.json()),
+					fetch('http://localhost:8080/api/v1/scraper/pornhub/videos').then(r => r.json())
+				])
+
+				let allScrapedVideos = []
+
+				// Add tab videos
+				if (tabVideosRes.success && tabVideosRes.data) {
+					const tabVideos = Array.isArray(tabVideosRes.data) ? tabVideosRes.data : (tabVideosRes.data.videos || [])
+					allScrapedVideos = allScrapedVideos.concat(tabVideos)
+				}
+
+				// Add PornHub videos (mark them with source_tab_name for the badge)
+				if (pornHubVideosRes.success && pornHubVideosRes.data) {
+					const phVideos = Array.isArray(pornHubVideosRes.data) ? pornHubVideosRes.data : (pornHubVideosRes.data.videos || [])
+					// Tag PornHub videos with source tab name
+					phVideos.forEach(v => {
+						if (!v.source_tab_name) {
+							v.source_tab_name = 'PornHub'
+						}
+					})
+					allScrapedVideos = allScrapedVideos.concat(phVideos)
+				}
+
+				// Map scraped videos to match the expected video format
+				let mappedVideos = allScrapedVideos.map(v => this.mapScrapedVideoToVideo(v))
+
+				// Apply client-side search filter
+				if (this.searchQuery) {
+					const query = this.searchQuery.toLowerCase()
+					mappedVideos = mappedVideos.filter(v =>
+						(v.title && v.title.toLowerCase().includes(query)) ||
+						(v.uploader && v.uploader.toLowerCase().includes(query)) ||
+						(v.source && v.source.toLowerCase().includes(query))
+					)
+				}
+
+				// Apply client-side content type filter
+				if (this.filters.contentType) {
+					mappedVideos = mappedVideos.filter(v => v.content_type === this.filters.contentType)
+				}
+
+				// Apply client-side sorting
+				mappedVideos = this.sortScrapedVideos(mappedVideos)
+
+				// Apply client-side pagination
+				this.totalVideos = mappedVideos.length
+				const start = (this.currentPage - 1) * this.pageSize
+				const end = start + this.pageSize
+				this.videos = mappedVideos.slice(start, end)
+			} catch (error) {
+				console.error('Failed to load scraped videos:', error)
+				this.$toast.error('Failed to load scraped videos')
+				this.videos = []
+				this.totalVideos = 0
+			} finally {
+				this.loading = false
+			}
+		},
+		mapScrapedVideoToVideo(scraped) {
+			// Parse metadata if it's a string
+			let metadata = {}
+			if (scraped.metadata) {
+				try {
+					metadata = typeof scraped.metadata === 'string' ? JSON.parse(scraped.metadata) : scraped.metadata
+				} catch (e) {
+					metadata = {}
+				}
+			}
+
+			// Map scraped video fields to match the regular video format
+			return {
+				id: scraped.id,
+				title: scraped.title || 'Untitled',
+				thumbnail_path: scraped.thumbnail_url || scraped.thumbnail_path,
+				preview_path: scraped.video_preview_url || null,
+				thumbnail_frames: metadata.thumbnail_frames || [],
+				duration: scraped.duration || 0,
+				file_size: scraped.file_size || 0,
+				resolution: scraped.resolution || '',
+				play_count: scraped.view_count || 0,
+				rating: scraped.rating || 0,
+				created_at: scraped.discovered_at || scraped.created_at,
+				// Mark as scraped video for special handling
+				is_scraped: true,
+				source_url: scraped.source_url || scraped.url,
+				source: scraped.source || 'Unknown',
+				source_tab_name: scraped.source_tab_name || null,
+				content_type: scraped.content_type || null,
+				uploader: scraped.uploader || scraped.author || '',
+				// Empty relationships for scraped videos
+				performers: [],
+				studios: [],
+				tags: scraped.tags || [],
+				groups: [],
+				// Flags
+				is_favorite: false,
+				is_pinned: false,
+				not_interested: false,
+				in_edit_list: false,
+			}
+		},
+		sortScrapedVideos(videos) {
+			const sorted = [...videos]
+			const order = this.sortOrder === 'asc' ? 1 : -1
+
+			switch (this.sortBy) {
+				case 'title':
+					sorted.sort((a, b) => order * (a.title || '').localeCompare(b.title || ''))
+					break
+				case 'duration':
+					sorted.sort((a, b) => order * ((a.duration || 0) - (b.duration || 0)))
+					break
+				case 'play_count':
+					sorted.sort((a, b) => order * ((a.play_count || 0) - (b.play_count || 0)))
+					break
+				case 'created_at':
+				default:
+					sorted.sort((a, b) => order * (new Date(a.created_at || 0) - new Date(b.created_at || 0)))
+					break
+			}
+
+			return sorted
 		},
 		async refreshVideos() {
 			console.log('Refreshing videos...')
@@ -694,12 +864,6 @@ export default {
 			this.selectedLibrary = ''
 			this.loadVideos()
 		},
-		goToPage(page) {
-			if (page >= 1 && page <= this.totalPages) {
-				this.currentPage = page
-				this.loadVideos()
-			}
-		},
 		async scanVideos() {
 			try {
 				// Use selected library or primary library
@@ -718,21 +882,6 @@ export default {
 				this.$toast.error('Failed to start video scan: ' + (error.response?.data?.error || error.message))
 			}
 		},
-		toggleVideoSelection(video) {
-			const index = this.selectedVideos.indexOf(video.id)
-			if (index > -1) {
-				this.selectedVideos.splice(index, 1)
-			} else {
-				this.selectedVideos.push(video.id)
-			}
-		},
-		toggleSelectAll(event) {
-			if (event.target.checked) {
-				this.selectedVideos = this.videos.map((v) => v.id)
-			} else {
-				this.selectedVideos = []
-			}
-		},
 		showContextMenu({ video, x, y }) {
 			this.contextMenu = {
 				show: true,
@@ -745,8 +894,20 @@ export default {
 			this.contextMenu.show = false
 		},
 		playVideo(video) {
+			// For scraped videos, open in new tab instead of playing locally
+			if (video.is_scraped && video.source_url) {
+				window.open(video.source_url, '_blank')
+				return
+			}
 			this.videoForModal = video
 			this.showVideoPlayer = true
+		},
+		copyVideoUrl(video) {
+			if (video.source_url) {
+				navigator.clipboard.writeText(video.source_url)
+				this.$toast.success('URL copied to clipboard')
+			}
+			this.hideContextMenu()
 		},
 		editMetadata(video) {
 			this.videoForModal = video
@@ -762,21 +923,26 @@ export default {
 				this.$toast.error('Failed to fetch metadata')
 			}
 		},
-		async deleteVideo(video) {
-			if (!confirm(`Are you sure you want to delete "${video.title}"?`)) return
-
+		deleteVideo(video) {
+			this.deleteModal.video = video
+			this.deleteModal.isBulk = false
+			this.deleteModal.show = true
+			this.hideContextMenu()
+		},
+		async confirmDeleteVideo() {
 			try {
-				await videosAPI.delete(video.id)
+				await videosAPI.delete(this.deleteModal.video.id)
 				this.$toast.success('Video deleted successfully')
 				this.loadVideos()
-				if (this.selectedVideo?.id === video.id) {
+				if (this.selectedVideo?.id === this.deleteModal.video.id) {
 					this.selectedVideo = null
 				}
 			} catch (error) {
 				console.error('Failed to delete video:', error)
 				this.$toast.error('Failed to delete video')
 			}
-			this.hideContextMenu()
+			this.deleteModal.show = false
+			this.deleteModal.video = null
 		},
 		openTagModal(video) {
 			this.videoForModal = video
@@ -789,47 +955,39 @@ export default {
 			this.$router.push(`/studios/${studio.id}`)
 		},
 		bulkAddTags() {
-			console.log('Bulk add tags to:', this.selectedVideos)
+			console.log('Bulk add tags to:', this.selectedItems)
 			// Implement bulk tag operation
 		},
 		async bulkFetchMetadata() {
 			try {
-				await videosAPI.bulk('fetch_metadata', this.selectedVideos)
+				await videosAPI.bulk('fetch_metadata', this.selectedItems)
 				this.$toast.success('Bulk metadata fetch started')
 				this.showBulkActions = false
-				this.selectedVideos = []
+				this.clearSelection()
 			} catch (error) {
 				console.error('Bulk fetch failed:', error)
 				this.$toast.error('Bulk fetch failed')
 			}
 		},
-		async bulkDelete() {
-			if (!confirm(`Are you sure you want to delete ${this.selectedVideos.length} videos?`)) return
-
+		bulkDelete() {
+			this.deleteModal.isBulk = true
+			this.deleteModal.show = true
+		},
+		async confirmBulkDelete() {
 			try {
-				await videosAPI.bulk('delete', this.selectedVideos)
+				await videosAPI.bulk('delete', this.selectedItems)
 				this.$toast.success('Videos deleted successfully')
 				this.showBulkActions = false
-				this.selectedVideos = []
+				this.clearSelection()
 				this.loadVideos()
 			} catch (error) {
 				console.error('Bulk delete failed:', error)
 				this.$toast.error('Bulk delete failed')
 			}
+			this.deleteModal.show = false
+			this.deleteModal.isBulk = false
 		},
-		formatDuration(seconds) {
-			if (!seconds) return 'N/A'
-			const mins = Math.floor(seconds / 60)
-			const secs = Math.floor(seconds % 60)
-			return `${mins}:${secs.toString().padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (!bytes) return 'N/A'
-			if (bytes < 1024) return bytes + ' B'
-			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-			return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
-		},
+		// formatDuration and formatFileSize now provided by useFormatters composable
 		formatBitrate(bitrate) {
 			if (!bitrate) return 'N/A'
 			return (bitrate / 1000000).toFixed(1) + ' Mbps'

@@ -15,11 +15,7 @@
 			</nav>
 
 			<!-- Loading State -->
-			<div v-if="loading" class="text-center py-5">
-				<div class="spinner-border text-primary" role="status">
-					<span class="visually-hidden">Loading...</span>
-				</div>
-			</div>
+			<LoadingState v-if="loading" />
 
 			<!-- Content -->
 			<div v-else-if="performer" class="performer-content">
@@ -118,22 +114,10 @@
 
 				<!-- Stats Grid -->
 				<div class="stats-grid">
-					<div class="stat-box">
-						<div class="stat-value">{{ performer.video_count || 0 }}</div>
-						<div class="stat-label">Total Videos</div>
-					</div>
-					<div class="stat-box">
-						<div class="stat-value">{{ previewVideos.length }}</div>
-						<div class="stat-label">Preview Videos</div>
-					</div>
-					<div class="stat-box">
-						<div class="stat-value">{{ stats.totalDuration ? formatDuration(stats.totalDuration) : '0:00' }}</div>
-						<div class="stat-label">Total Duration</div>
-					</div>
-					<div class="stat-box">
-						<div class="stat-value">{{ stats.avgRating ? stats.avgRating.toFixed(1) : 'N/A' }}</div>
-						<div class="stat-label">Avg Rating</div>
-					</div>
+					<StatCard :value="performer.video_count || 0" label="Total Videos" />
+					<StatCard :value="previewVideos.length" label="Preview Videos" />
+					<StatCard :value="stats.totalDuration ? formatDuration(stats.totalDuration) : '0:00'" label="Total Duration" />
+					<StatCard :value="stats.avgRating ? stats.avgRating.toFixed(1) : 'N/A'" label="Avg Rating" />
 				</div>
 
 				<!-- Preview Videos Section - Full Width & Prominent -->
@@ -328,9 +312,7 @@
 							</h3>
 
 							<!-- Loading State -->
-							<div v-if="loadingVideos" class="text-center py-4">
-								<div class="spinner-border text-primary" role="status"></div>
-							</div>
+							<LoadingState v-if="loadingVideos" :padding="4" />
 
 							<!-- Grid View -->
 							<div v-else-if="videoViewMode === 'grid'" class="videos-grid">
@@ -381,10 +363,7 @@
 							</div>
 
 							<!-- Empty State -->
-							<div v-if="!loadingVideos && performerVideos.length === 0" class="text-center text-muted py-5">
-								<font-awesome-icon :icon="['fas', 'video-slash']" size="3x" class="mb-3" />
-								<p>No videos found for this performer</p>
-							</div>
+							<EmptyState v-if="!loadingVideos && performerVideos.length === 0" :icon="['fas', 'video-slash']" message="No videos found for this performer" />
 						</div>
 
 						<div class="detail-card">
@@ -482,11 +461,14 @@
 import { ref, onMounted, computed, getCurrentInstance, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { performersAPI, tagsAPI, getAssetURL } from '@/services/api'
+import { useFormatters } from '@/composables/useFormatters'
+import { LoadingState, EmptyState, StatCard } from '@/components/shared'
 
 const route = useRoute()
 const router = useRouter()
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
+const { formatDuration, formatDate } = useFormatters()
 
 // State
 const performer = ref(null)
@@ -805,25 +787,7 @@ const getThumbnailURL = (video) => {
 	return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
 }
 
-// Format duration (seconds to HH:MM:SS or MM:SS)
-const formatDuration = (seconds) => {
-	if (!seconds) return '0:00'
-	const hours = Math.floor(seconds / 3600)
-	const mins = Math.floor((seconds % 3600) / 60)
-	const secs = Math.floor(seconds % 60)
-
-	if (hours > 0) {
-		return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-	}
-	return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-// Format date
-const formatDate = (dateString) => {
-	if (!dateString) return ''
-	const date = new Date(dateString)
-	return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-}
+// formatDuration and formatDate now provided by useFormatters composable
 
 // Handle thumbnail error
 const handleThumbnailError = (event) => {

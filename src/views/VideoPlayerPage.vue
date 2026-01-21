@@ -6,8 +6,22 @@
 				<div class="col-lg-9">
 					<!-- Video Player -->
 					<div class="player-container">
+						<!-- Scraped Video Embed -->
+						<iframe
+							v-if="video && isScrapedVideo"
+							:src="embedUrl"
+							frameborder="0"
+							border="0"
+							scrolling="no"
+							width="100%"
+							height="100%"
+							allowfullscreen
+							class="scraped-video-embed"
+						></iframe>
+
+						<!-- Local Video Player -->
 						<video
-							v-if="video"
+							v-else-if="video"
 							ref="videoElement"
 							class="main-video-player"
 							controls
@@ -20,7 +34,7 @@
 							<source :src="videoUrl" :type="videoMimeType" />
 							Your browser does not support the video tag.
 						</video>
-						<div v-if="videoError" class="video-error-overlay">
+						<div v-if="videoError && !isScrapedVideo" class="video-error-overlay">
 							<div class="error-content">
 								<font-awesome-icon :icon="['fas', 'exclamation-triangle']" size="3x" class="error-icon" />
 								<h4>Unable to Play Video</h4>
@@ -42,7 +56,7 @@
 						<div class="video-metadata">
 							<span v-if="video.resolution" class="badge bg-primary">
 								<font-awesome-icon :icon="['fas', 'video']" class="me-1" />
-								{{ video.resolution }}
+								{{ getVideoResolution(video) }}
 							</span>
 							<span v-if="video.fps" class="badge bg-success">
 								<font-awesome-icon :icon="['fas', 'film']" class="me-1" />
@@ -64,10 +78,22 @@
 								<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
 								{{ formatDuration(video.duration) }}
 							</span>
+							<span v-if="isScrapedVideo && video.view_count > 0" class="badge bg-purple">
+								<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
+								{{ formatViewCount(video.view_count) }}
+							</span>
+							<span v-if="isScrapedVideo && video.rating > 0" class="badge bg-success">
+								<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
+								{{ video.rating }}%
+							</span>
+							<span v-if="isScrapedVideo && video.like_count > 0" class="badge bg-danger">
+								<font-awesome-icon :icon="['fas', 'heart']" class="me-1" />
+								{{ formatViewCount(video.like_count) }}
+							</span>
 						</div>
 
-						<!-- Action Buttons -->
-						<div class="action-buttons mt-3">
+						<!-- Action Buttons (Only for local videos) -->
+						<div v-if="!isScrapedVideo" class="action-buttons mt-3">
 							<button v-if="video.is_favorite" class="btn btn-danger" @click="toggleFavorite">
 								<font-awesome-icon :icon="['fas', 'heart']" />
 								Favorited
@@ -90,9 +116,17 @@
 							</button>
 						</div>
 
+						<!-- Scraped Video Actions -->
+						<div v-if="isScrapedVideo" class="action-buttons mt-3">
+							<a :href="video.url" target="_blank" class="btn btn-outline-primary">
+								<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
+								Open Source
+							</a>
+						</div>
+
 						<!-- Description / Details -->
 						<div class="video-details mt-4">
-							<div class="detail-section">
+							<div v-if="!isScrapedVideo" class="detail-section">
 								<h3>Video Details</h3>
 								<div class="details-grid">
 									<div class="detail-item">
@@ -114,6 +148,28 @@
 									<div v-if="video.updated_at" class="detail-item">
 										<strong>Last Modified:</strong>
 										<span>{{ formatDate(video.updated_at) }}</span>
+									</div>
+								</div>
+							</div>
+
+							<div v-if="isScrapedVideo" class="detail-section">
+								<h3>Video Details</h3>
+								<div class="details-grid">
+									<div v-if="video.uploader || video.author" class="detail-item">
+										<strong>Uploader:</strong>
+										<span>{{ video.uploader || video.author }}</span>
+									</div>
+									<div class="detail-item">
+										<strong>Source:</strong>
+										<span>{{ video.source }}</span>
+									</div>
+									<div class="detail-item">
+										<strong>Discovered:</strong>
+										<span>{{ formatDate(video.discovered_at) }}</span>
+									</div>
+									<div class="detail-item">
+										<strong>Status:</strong>
+										<span>{{ video.status }}</span>
 									</div>
 								</div>
 							</div>
@@ -240,6 +296,7 @@
 <script>
 import { videosAPI } from '@/services/api'
 import { getAssetURL } from '@/services/api'
+import { useFormatters } from '@/composables/useFormatters'
 
 export default {
 	name: 'VideoPlayerPage',
@@ -256,6 +313,40 @@ export default {
 		}
 	},
 	computed: {
+		isScrapedVideo() {
+			// Check if this is a scraped video (has a source field)
+			return this.video && this.video.source
+		},
+		embedUrl() {
+			if (!this.isScrapedVideo) return ''
+
+			const url = this.video.url
+
+			// Handle PornHub URLs - extract viewkey and use embed format
+			// URL: https://www.pornhub.com/view_video.php?viewkey=6796ae6bec815
+			// Embed: https://www.pornhub.com/embed/6796ae6bec815
+			if (url && url.includes('pornhub.com')) {
+				const viewkeyMatch = url.match(/viewkey=([a-zA-Z0-9]+)/)
+				if (viewkeyMatch && viewkeyMatch[1]) {
+					return `https://www.pornhub.com/embed/${viewkeyMatch[1]}`
+				}
+			}
+
+			// Extract video ID from the URL for other sites
+			// Pattern: https://www.WEBSITE.net/12345/title-slug/
+			const videoId = this.extractVideoIdFromUrl(url)
+			if (!videoId) return url
+
+			// Extract the host from the source URL
+			try {
+				const sourceUrl = new URL(url)
+				const host = sourceUrl.origin
+				return `${host}/embed/${videoId}/`
+			} catch (error) {
+				console.error('Failed to construct embed URL:', error)
+				return url
+			}
+		},
 		videoUrl() {
 			if (!this.video) return ''
 			return `http://localhost:8080/api/v1/videos/${this.video.id}/stream`
@@ -277,21 +368,42 @@ export default {
 			return mimeTypes[ext] || 'video/mp4'
 		},
 	},
+	created() {
+		const formatters = useFormatters()
+		this.formatDuration = formatters.formatDuration
+		this.formatFileSize = formatters.formatFileSize
+		this.formatDate = formatters.formatDate
+	},
 	async mounted() {
 		const videoId = this.$route.params.id
-		await this.loadVideo(videoId)
+		// Detect video type from route name
+		const videoType = this.$route.name === 'ScrapedVideoPlayer' ? 'scraped' : 'local'
+		await this.loadVideo(videoId, videoType)
 		await this.loadRelatedVideos()
 	},
 	methods: {
-		async loadVideo(id) {
+		async loadVideo(id, type = 'local') {
 			this.loading = true
 			try {
-				const response = await videosAPI.getById(id)
-				// Response is already unwrapped by axios interceptor
-				this.video = response
+				let response
+				if (type === 'scraped') {
+					// Load scraped video from scraper API
+					response = await fetch(`http://localhost:8080/api/v1/scraper/videos/${id}`)
+					const data = await response.json()
+					if (data.success) {
+						this.video = data.data
+					} else {
+						throw new Error(data.message || 'Failed to load scraped video')
+					}
+				} else {
+					// Load local video
+					response = await videosAPI.getById(id)
+					// Response is already unwrapped by axios interceptor
+					this.video = response
+				}
 
-				// Only increment play count if we have a valid video with an ID
-				if (this.video && this.video.id) {
+				// Only increment play count if we have a valid video with an ID and it's a local video
+				if (this.video && this.video.id && type === 'local') {
 					await this.incrementPlayCount()
 				}
 			} catch (error) {
@@ -476,23 +588,7 @@ export default {
 			if (!path) return ''
 			return path.split(/[\\/]/).pop()
 		},
-		formatDuration(seconds) {
-			if (!seconds) return '0:00'
-			const hours = Math.floor(seconds / 3600)
-			const mins = Math.floor((seconds % 3600) / 60)
-			const secs = Math.floor(seconds % 60)
-			if (hours > 0) {
-				return `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-			}
-			return `${mins}:${String(secs).padStart(2, '0')}`
-		},
-		formatFileSize(bytes) {
-			if (!bytes) return ''
-			if (bytes < 1024) return bytes + ' B'
-			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-			if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-			return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-		},
+		// formatDuration, formatFileSize, and formatDate now provided by useFormatters composable
 		formatBitrate(bitrate) {
 			if (!bitrate) return ''
 			const kbps = bitrate / 1000
@@ -503,10 +599,42 @@ export default {
 			if (!fps) return ''
 			return parseFloat(fps.toFixed(2))
 		},
-		formatDate(dateString) {
-			if (!dateString) return ''
-			const date = new Date(dateString)
-			return date.toLocaleString()
+		extractVideoIdFromUrl(url) {
+			if (!url) return null
+			// Pattern: https://www.WEBSITE.net/12345/title-slug/
+			// Or: https://www.WEBSITE.net/12345/
+			const match = url.match(/\/(\d+)\//)
+			return match ? match[1] : null
+		},
+		getVideoResolution(video) {
+			if (!video) return ''
+
+			// For scraped videos, check metadata
+			if (video.metadata) {
+				try {
+					const metadata = typeof video.metadata === 'string'
+						? JSON.parse(video.metadata)
+						: video.metadata
+					if (metadata.max_resolution) {
+						return metadata.max_resolution
+					}
+				} catch (e) {
+					console.error('Failed to parse video metadata:', e)
+				}
+			}
+
+			// Fallback to video.resolution
+			return video.resolution || ''
+		},
+		formatViewCount(count) {
+			if (!count) return '0'
+			if (count >= 1000000) {
+				return (count / 1000000).toFixed(1) + 'M'
+			}
+			if (count >= 1000) {
+				return (count / 1000).toFixed(1) + 'K'
+			}
+			return count.toString()
 		},
 	},
 	watch: {
@@ -520,7 +648,8 @@ export default {
 				this.relatedVideos = []
 
 				// Load new video first, then load related videos
-				await this.loadVideo(newId)
+				const videoType = this.$route.name === 'ScrapedVideoPlayer' ? 'scraped' : 'local'
+				await this.loadVideo(newId, videoType)
 				await this.loadRelatedVideos()
 			}
 		},

@@ -289,12 +289,23 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Delete Confirmation Modal -->
+		<DeleteConfirmationModal
+			:visible="deleteModal.show"
+			:title="deleteModal.type === 'studio' ? 'Confirm Delete Studio' : 'Confirm Delete Group'"
+			message="Are you sure you want to delete"
+			:itemName="deleteModal.item?.name"
+			@confirm="deleteModal.type === 'studio' ? confirmDeleteStudio() : confirmDeleteGroup()"
+			@cancel="deleteModal.show = false"
+		/>
 	</div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { studiosAPI, groupsAPI, getAssetURL } from '@/services/api'
+import { DeleteConfirmationModal } from '@/components/shared'
 
 // State
 const studios = ref([])
@@ -307,6 +318,11 @@ const filterCountry = ref('')
 const selectedStudio = ref(null)
 const showStudioModal = ref(false)
 const showGroupModal = ref(false)
+const deleteModal = ref({
+	show: false,
+	item: null,
+	type: null, // 'studio' or 'group'
+})
 const editingStudio = ref(null)
 const editingGroup = ref(null)
 const studioForm = ref({
@@ -531,32 +547,46 @@ const saveGroup = async () => {
 	}
 }
 
-const deleteStudio = async (studio) => {
-	if (!confirm(`Are you sure you want to delete "${studio.name}"?`)) return
+const deleteStudio = (studio) => {
+	deleteModal.value.item = studio
+	deleteModal.value.type = 'studio'
+	deleteModal.value.show = true
+	hideContextMenu()
+}
 
+const confirmDeleteStudio = async () => {
 	try {
-		await studiosAPI.delete(studio.id)
+		await studiosAPI.delete(deleteModal.value.item.id)
 		console.log('Studio deleted successfully')
 		loadStudios()
-		if (selectedStudio.value?.id === studio.id) {
+		if (selectedStudio.value?.id === deleteModal.value.item.id) {
 			selectedStudio.value = null
 		}
 	} catch (error) {
 		console.error('Failed to delete studio:', error)
 	}
-	hideContextMenu()
+	deleteModal.value.show = false
+	deleteModal.value.item = null
+	deleteModal.value.type = null
 }
 
-const deleteGroup = async (group) => {
-	if (!confirm(`Are you sure you want to delete "${group.name}"?`)) return
+const deleteGroup = (group) => {
+	deleteModal.value.item = group
+	deleteModal.value.type = 'group'
+	deleteModal.value.show = true
+}
 
+const confirmDeleteGroup = async () => {
 	try {
-		await groupsAPI.delete(group.id)
+		await groupsAPI.delete(deleteModal.value.item.id)
 		console.log('Group deleted successfully')
 		loadGroups()
 	} catch (error) {
 		console.error('Failed to delete group:', error)
 	}
+	deleteModal.value.show = false
+	deleteModal.value.item = null
+	deleteModal.value.type = null
 }
 
 const closeStudioModal = () => {

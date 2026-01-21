@@ -244,6 +244,29 @@ func (s *PerformerService) Delete(id int64) error {
 	return nil
 }
 
+// CleanupEmptyPerformers deletes all performers without preview path or metadata
+func (s *PerformerService) CleanupEmptyPerformers() (int64, error) {
+	// Delete performers that have no preview_path AND empty metadata (just '{}')
+	query := `
+		DELETE FROM performers
+		WHERE (preview_path IS NULL OR preview_path = '')
+		AND (metadata IS NULL OR metadata = '{}' OR metadata = '')
+	`
+
+	result, err := s.db.Exec(query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup empty performers: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	log.Printf("Cleaned up %d empty performers", rowsAffected)
+	return rowsAffected, nil
+}
+
 // Search searches performers by name
 func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error) {
 	query := `

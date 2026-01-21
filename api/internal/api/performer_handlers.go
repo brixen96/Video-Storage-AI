@@ -731,3 +731,47 @@ func getPerformerVideos(c *gin.Context) {
 		"Performer videos retrieved successfully",
 	))
 }
+
+// cleanupEmptyPerformers deletes all performers without preview or metadata
+func cleanupEmptyPerformers(c *gin.Context) {
+	svc := ensurePerformerService()
+	activitySvc := services.NewActivityService()
+
+	// Create activity log
+	activity, err := activitySvc.StartTask(
+		"cleanup_performers",
+		"Cleaning up empty performers",
+		map[string]interface{}{
+			"source": "manual_trigger",
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to create activity log: %v\n", err)
+	}
+
+	deletedCount, err := svc.CleanupEmptyPerformers()
+	if err != nil {
+		if activity != nil {
+			if err := activitySvc.FailTask(activity.ID, fmt.Sprintf("Cleanup failed: %v", err)); err != nil {
+				log.Printf("Failed to fail task: %v", err)
+			}
+		}
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to cleanup performers",
+			err.Error(),
+		))
+		return
+	}
+
+	// Mark task as completed
+	if activity != nil {
+		if err := activitySvc.CompleteTask(int64(activity.ID), fmt.Sprintf("Successfully cleaned up %d empty performers", deletedCount)); err != nil {
+			log.Printf("Failed to complete task: %v", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		gin.H{"deleted_count": deletedCount},
+		fmt.Sprintf("Successfully cleaned up %d empty performers", deletedCount),
+	))
+}

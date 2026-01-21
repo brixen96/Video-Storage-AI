@@ -25,16 +25,39 @@ const (
 
 // Activity represents a background task or operation (new schema)
 type Activity struct {
-	ID          int        `json:"id" db:"id"`
-	TaskType    string     `json:"task_type" db:"task_type"`
-	Status      string     `json:"status" db:"status"`
-	Message     string     `json:"message" db:"message"`
-	Details     string     `json:"-" db:"details"`
-	Progress    int        `json:"progress" db:"progress"`
-	StartedAt   time.Time  `json:"started_at" db:"started_at"`
-	CompletedAt *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
-	Error       *string    `json:"error,omitempty" db:"error"`
+	ID            int                    `json:"id" db:"id"`
+	TaskType      string                 `json:"task_type" db:"task_type"`
+	Status        string                 `json:"status" db:"status"`
+	Message       string                 `json:"message" db:"message"`
+	Details       string                 `json:"-" db:"details"`
+	DetailsObj    map[string]interface{} `json:"details,omitempty" db:"-"`
+	Progress      int                    `json:"progress" db:"progress"`
+	StartedAt     time.Time              `json:"started_at" db:"started_at"`
+	CompletedAt   *time.Time             `json:"completed_at,omitempty" db:"completed_at"`
+	UpdatedAt     time.Time              `json:"updated_at" db:"updated_at"`
+	Error         *string                `json:"error,omitempty" db:"error"`
+	IsPaused      bool                   `json:"is_paused" db:"is_paused"`
+	PausedAt      *time.Time             `json:"paused_at,omitempty" db:"paused_at"`
+	Checkpoint    string                 `json:"-" db:"checkpoint"`
+	CheckpointObj map[string]interface{} `json:"checkpoint,omitempty" db:"-"`
+}
+
+// UnmarshalDetails converts JSON string from database to DetailsObj
+func (a *Activity) UnmarshalDetails() error {
+	if a.Details == "" || a.Details == "{}" {
+		a.DetailsObj = make(map[string]interface{})
+		return nil
+	}
+	return json.Unmarshal([]byte(a.Details), &a.DetailsObj)
+}
+
+// UnmarshalCheckpoint converts JSON string from database to CheckpointObj
+func (a *Activity) UnmarshalCheckpoint() error {
+	if a.Checkpoint == "" || a.Checkpoint == "{}" {
+		a.CheckpointObj = make(map[string]interface{})
+		return nil
+	}
+	return json.Unmarshal([]byte(a.Checkpoint), &a.CheckpointObj)
 }
 
 // ActivityLog represents a background task or operation (legacy schema)
@@ -47,9 +70,13 @@ type ActivityLog struct {
 	StartedAt   time.Time  `json:"started_at" db:"started_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 	Details     string     `json:"-" db:"details"`
+	IsPaused    bool       `json:"is_paused" db:"is_paused"`
+	PausedAt    *time.Time `json:"paused_at,omitempty" db:"paused_at"`
+	Checkpoint  string     `json:"-" db:"checkpoint"`
 
 	// Parsed details
-	DetailsObj map[string]interface{} `json:"details,omitempty" db:"-"`
+	DetailsObj     map[string]interface{} `json:"details,omitempty" db:"-"`
+	CheckpointObj  map[string]interface{} `json:"checkpoint,omitempty" db:"-"`
 }
 
 // MarshalDetails converts DetailsObj to JSON string for database storage
@@ -73,6 +100,29 @@ func (a *ActivityLog) UnmarshalDetails() error {
 		return nil
 	}
 	return json.Unmarshal([]byte(a.Details), &a.DetailsObj)
+}
+
+// MarshalCheckpoint converts CheckpointObj to JSON string for database storage
+func (a *ActivityLog) MarshalCheckpoint() error {
+	if a.CheckpointObj == nil {
+		a.Checkpoint = "{}"
+		return nil
+	}
+	data, err := json.Marshal(a.CheckpointObj)
+	if err != nil {
+		return err
+	}
+	a.Checkpoint = string(data)
+	return nil
+}
+
+// UnmarshalCheckpoint converts JSON string from database to CheckpointObj
+func (a *ActivityLog) UnmarshalCheckpoint() error {
+	if a.Checkpoint == "" || a.Checkpoint == "{}" {
+		a.CheckpointObj = make(map[string]interface{})
+		return nil
+	}
+	return json.Unmarshal([]byte(a.Checkpoint), &a.CheckpointObj)
 }
 
 // ActivityLogCreate represents the data needed to create a new activity log

@@ -37,20 +37,36 @@ func (s *ConsoleLogService) LogEntry(source, level, message string, details map[
 		detailsJSON = []byte("{}")
 	}
 
+	now := time.Now()
 	query := `
 		INSERT INTO console_logs (source, level, message, details, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`
 
-	_, err = s.db.Exec(query, source, level, message, detailsJSON, time.Now())
+	result, err := s.db.Exec(query, source, level, message, detailsJSON, now)
 	if err != nil {
 		return fmt.Errorf("failed to create console log: %w", err)
 	}
 
+	// Get the inserted ID
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get last insert id: %w", err)
+	}
+
 	// Broadcast to WebSocket if available
 	if wsHub != nil {
-		// TODO: Add WebSocket broadcast for console logs
-		// wsHub.BroadcastConsoleLog(...)
+		// Create console log object for broadcasting
+		consoleLog := &models.ConsoleLog{
+			ID:         id,
+			Source:     source,
+			Level:      level,
+			Message:    message,
+			Details:    string(detailsJSON),
+			DetailsObj: details,
+			CreatedAt:  now,
+		}
+		wsHub.BroadcastConsoleLog(consoleLog)
 	}
 
 	return nil

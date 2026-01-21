@@ -18,20 +18,32 @@ import (
 
 // ScraperService handles web scraping operations
 type ScraperService struct {
-	db                 *sql.DB
-	activityService    *ActivityService
-	aiCompanionService *AICompanionService
-	httpClient         *http.Client
-	sessionCookie      string // Store session cookie for authenticated requests
+	db                  *sql.DB
+	activityService     *ActivityService
+	aiCompanionService  *AICompanionService
+	notificationService *NotificationService
+	httpClient          *http.Client
+	sessionCookie       string // Store session cookie for authenticated requests
+}
+
+// AdaptiveRateLimiter tracks server response times and adjusts delays
+type AdaptiveRateLimiter struct {
+	currentDelay    time.Duration
+	minDelay        time.Duration
+	maxDelay        time.Duration
+	responseHistory []time.Duration
+	historySize     int
 }
 
 // NewScraperService creates a new scraper service
 func NewScraperService(activitySvc *ActivityService, aiCompanionSvc *AICompanionService) *ScraperService {
+	db := database.GetDB()
 	svc := &ScraperService{
-		db:                 database.GetDB(),
-		activityService:    activitySvc,
-		aiCompanionService: aiCompanionSvc,
-		sessionCookie:      "",
+		db:                  db,
+		activityService:     activitySvc,
+		aiCompanionService:  aiCompanionSvc,
+		notificationService: NewNotificationService(db),
+		sessionCookie:       "",
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -89,6 +101,155 @@ func (s *ScraperService) GetSessionCookie() string {
 	return s.sessionCookie
 }
 
+// VerifySessionCookie verifies that the session cookie is valid by checking the user's profile
+func (s *ScraperService) VerifySessionCookie() (bool, string, error) {
+	if s.sessionCookie == "" {
+		return false, "", fmt.Errorf("no session cookie set")
+	}
+
+	// Try to access the account page which requires authentication
+	req, err := http.NewRequest("GET", "https://simpcity.is/account/", nil)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Cookie", s.sessionCookie)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to verify cookie: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// If we get redirected to login, the cookie is invalid
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false, "", nil
+	}
+
+	// Check if we're on the login page (redirect)
+	finalURL := resp.Request.URL.String()
+	if strings.Contains(finalURL, "/login") {
+		return false, "", nil
+	}
+
+	// Parse the page to extract username
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		// Cookie worked but couldn't parse - still consider it valid
+		return true, "", nil
+	}
+
+	// Try to find the username from the page
+	username := ""
+
+	// Look for username in various locations
+	// Check navigation username display
+	doc.Find(".p-navgroup-link--user .p-navgroup-linkText").Each(func(i int, sel *goquery.Selection) {
+		if username == "" {
+			username = strings.TrimSpace(sel.Text())
+		}
+	})
+
+	// Alternative: check account page header
+	if username == "" {
+		doc.Find("h1.p-title-value").Each(func(i int, sel *goquery.Selection) {
+			text := strings.TrimSpace(sel.Text())
+			if strings.HasPrefix(text, "Your account") {
+				// Username might be elsewhere
+			}
+		})
+	}
+
+	// Alternative: look for data-user-id or similar attributes
+	if username == "" {
+		doc.Find("[data-user-id]").Each(func(i int, sel *goquery.Selection) {
+			if name, exists := sel.Attr("data-username"); exists && username == "" {
+				username = name
+			}
+		})
+	}
+
+	return true, username, nil
+}
+
+// NewAdaptiveRateLimiter creates a new adaptive rate limiter
+func NewAdaptiveRateLimiter() *AdaptiveRateLimiter {
+	return &AdaptiveRateLimiter{
+		currentDelay:    2500 * time.Millisecond, // Start at 2.5s (current default)
+		minDelay:        1000 * time.Millisecond, // Minimum 1s delay
+		maxDelay:        6000 * time.Millisecond, // Maximum 6s delay
+		responseHistory: make([]time.Duration, 0, 5),
+		historySize:     5, // Track last 5 response times
+	}
+}
+
+// RecordResponse records a server response time and adjusts delay
+func (rl *AdaptiveRateLimiter) RecordResponse(responseTime time.Duration, statusCode int) {
+	// Add response time to history
+	rl.responseHistory = append(rl.responseHistory, responseTime)
+	if len(rl.responseHistory) > rl.historySize {
+		rl.responseHistory = rl.responseHistory[1:]
+	}
+
+	// Calculate average response time
+	var total time.Duration
+	for _, rt := range rl.responseHistory {
+		total += rt
+	}
+	avgResponseTime := total / time.Duration(len(rl.responseHistory))
+
+	// Adjust delay based on server performance
+	if statusCode == 429 || statusCode >= 500 {
+		// Server is stressed - increase delay significantly
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 1.5)
+		if rl.currentDelay > rl.maxDelay {
+			rl.currentDelay = rl.maxDelay
+		}
+	} else if avgResponseTime > 3*time.Second {
+		// Server is slow - increase delay moderately
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 1.2)
+		if rl.currentDelay > rl.maxDelay {
+			rl.currentDelay = rl.maxDelay
+		}
+	} else if avgResponseTime < 1*time.Second && rl.currentDelay > rl.minDelay {
+		// Server is fast and responsive - decrease delay
+		rl.currentDelay = time.Duration(float64(rl.currentDelay) * 0.9)
+		if rl.currentDelay < rl.minDelay {
+			rl.currentDelay = rl.minDelay
+		}
+	}
+}
+
+// GetDelay returns the current adaptive delay
+func (rl *AdaptiveRateLimiter) GetDelay() time.Duration {
+	return rl.currentDelay
+}
+
+// GetStatus returns a human-readable status message
+func (rl *AdaptiveRateLimiter) GetStatus() string {
+	if rl.currentDelay <= 1500*time.Millisecond {
+		return fmt.Sprintf("🟢 Server responsive (%.1fs delay)", rl.currentDelay.Seconds())
+	} else if rl.currentDelay <= 3000*time.Millisecond {
+		return fmt.Sprintf("🟡 Normal pace (%.1fs delay)", rl.currentDelay.Seconds())
+	} else {
+		return fmt.Sprintf("🟠 Server slow (%.1fs delay)", rl.currentDelay.Seconds())
+	}
+}
+
+// ScrapeCheckpoint stores progress for resuming interrupted scrapes
+type ScrapeCheckpoint struct {
+	CurrentPage         int                           `json:"current_page"`
+	PostNumber          int                           `json:"post_number"`
+	EstimatedTotalPages int                           `json:"estimated_total_pages"`
+	PostsCollected      int                           `json:"posts_collected"`
+	LinksCollected      int                           `json:"links_collected"`
+	LastPageURL         string                        `json:"last_page_url"`
+	CleanURL            string                        `json:"clean_url"`
+	SavedPosts          []*models.ScrapedPost         `json:"-"` // Not serialized
+	SavedLinks          []*models.ScrapedDownloadLink `json:"-"` // Not serialized
+}
+
 // ScrapeThread scrapes a single thread from simpcity.is
 func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, error) {
 	// Clean the URL: remove common suffixes like /unread, /latest
@@ -105,39 +266,76 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 		return nil, fmt.Errorf("failed to extract thread ID: %w", err)
 	}
 
-	// Create request with authentication
-	req, err := http.NewRequest("GET", cleanURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
+	// Retry logic for server errors (500, 502, 503)
+	var resp *http.Response
+	var doc *goquery.Document
+	maxRetries := 3
+	retryDelay := 10 * time.Second
 
-	// Add session cookie if available
-	if s.sessionCookie != "" {
-		req.Header.Set("Cookie", s.sessionCookie)
-	}
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Create request with authentication
+		req, reqErr := http.NewRequest("GET", cleanURL, nil)
+		if reqErr != nil {
+			return nil, fmt.Errorf("failed to create request: %w", reqErr)
+		}
 
-	// Add user agent to mimic browser
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		// Add session cookie if available
+		if s.sessionCookie != "" {
+			req.Header.Set("Cookie", s.sessionCookie)
+		}
 
-	// Fetch the page
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch thread: %w", err)
-	}
-	defer resp.Body.Close()
+		// Add user agent to mimic browser
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("authentication required - please set session cookie")
-	}
+		// Fetch the page
+		resp, err = s.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch thread: %w", err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			resp.Body.Close()
+			return nil, fmt.Errorf("authentication required - please set session cookie")
+		}
 
-	// Parse HTML
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		// Handle server errors with retry
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			resp.Body.Close()
+			if attempt < maxRetries {
+				waitTime := retryDelay * time.Duration(attempt+1)
+				log.Printf("Server error (%d). Waiting %v before retry %d/%d", resp.StatusCode, waitTime, attempt+1, maxRetries)
+				time.Sleep(waitTime)
+				continue
+			}
+			return nil, fmt.Errorf("server error after %d retries: %d", maxRetries, resp.StatusCode)
+		}
+
+		// Handle rate limiting
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			if attempt < maxRetries {
+				waitTime := retryDelay * time.Duration(attempt+1)
+				log.Printf("Rate limited (429). Waiting %v before retry %d/%d", waitTime, attempt+1, maxRetries)
+				time.Sleep(waitTime)
+				continue
+			}
+			return nil, fmt.Errorf("rate limited after %d retries", maxRetries)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		}
+
+		// Success - parse HTML
+		doc, err = goquery.NewDocumentFromReader(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		}
+
+		// Break out of retry loop on success
+		break
 	}
 
 	// Extract thread information
@@ -222,7 +420,12 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 }
 
 // ScrapePosts scrapes all posts from a thread, handling pagination
-func (s *ScraperService) ScrapePosts(threadURL string, threadID int64) ([]*models.ScrapedPost, []*models.ScrapedDownloadLink, error) {
+func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityID ...int) ([]*models.ScrapedPost, []*models.ScrapedDownloadLink, error) {
+	// Extract activity ID if provided (optional parameter)
+	var aid int
+	if len(activityID) > 0 {
+		aid = activityID[0]
+	}
 	// Clean the URL first: remove trailing slash and common suffixes like /unread, /latest
 	cleanURL := strings.TrimSuffix(threadURL, "/")
 	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
@@ -235,8 +438,52 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64) ([]*model
 	var allDownloadLinks []*models.ScrapedDownloadLink
 	postNumber := 1
 	currentPage := 1
+	estimatedTotalPages := 0 // Will be updated after first page scrape
+	var existingPostIDs map[string]bool // Track existing posts for incremental scraping
+
+	// Initialize adaptive rate limiter
+	rateLimiter := NewAdaptiveRateLimiter()
+	log.Printf("⚡ Adaptive rate limiting enabled: %.1fs initial delay", rateLimiter.GetDelay().Seconds())
+
+	// Check for existing posts in this thread for incremental scraping
+	existingPostIDs, err := s.getExistingPostIDs(threadID)
+	if err != nil {
+		log.Printf("⚠️ Failed to load existing posts: %v (continuing anyway)", err)
+		existingPostIDs = make(map[string]bool)
+	} else if len(existingPostIDs) > 0 {
+		log.Printf("📊 Found %d existing posts in database - will skip duplicates", len(existingPostIDs))
+		if aid > 0 {
+			s.activityService.UpdateProgressLog(int64(aid), 0,
+				fmt.Sprintf("📊 Incremental mode: %d posts already in database", len(existingPostIDs)))
+		}
+	}
+
+	// Check for existing checkpoint to resume from
+	if aid > 0 {
+		checkpoint, err := s.loadCheckpoint(int64(aid))
+		if err == nil && checkpoint != nil {
+			currentPage = checkpoint.CurrentPage
+			postNumber = checkpoint.PostNumber
+			estimatedTotalPages = checkpoint.EstimatedTotalPages
+			allPosts = checkpoint.SavedPosts
+			allDownloadLinks = checkpoint.SavedLinks
+			log.Printf("🔄 Resuming scrape from page %d (had %d posts, %d links)", currentPage, len(allPosts), len(allDownloadLinks))
+			s.activityService.UpdateProgressLog(int64(aid), 0,
+				fmt.Sprintf("🔄 Resuming from page %d/%d (recovered %d posts, %d links)",
+					currentPage, estimatedTotalPages, len(allPosts), len(allDownloadLinks)))
+		}
+	}
 
 	for {
+		// Check if task has been paused
+		if aid > 0 {
+			currentActivity, err := s.activityService.GetByID(int64(aid))
+			if err == nil && currentActivity.IsPaused {
+				log.Printf("⏸️ Task paused during post scraping at page %d", currentPage)
+				return allPosts, allDownloadLinks, fmt.Errorf("task paused by user at page %d", currentPage)
+			}
+		}
+
 		// Construct URL for current page
 		pageURL := cleanURL
 		if currentPage > 1 {
@@ -244,59 +491,184 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64) ([]*model
 		}
 
 		log.Printf("Scraping page %d: %s", currentPage, pageURL)
-
-		// Create request with authentication
-		req, err := http.NewRequest("GET", pageURL, nil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		if aid > 0 {
+			s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("Scraping page %d", currentPage))
 		}
 
-		// Add session cookie if available
-		if s.sessionCookie != "" {
-			req.Header.Set("Cookie", s.sessionCookie)
-		}
+		// Enhanced retry logic with exponential backoff
+		var resp *http.Response
+		var doc *goquery.Document
+		var err error
+		maxRetries := 5 // Increased from 3 to 5
+		baseRetryDelay := 3 * time.Second
 
-		// Add user agent
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			// Create request with authentication
+			req, reqErr := http.NewRequest("GET", pageURL, nil)
+			if reqErr != nil {
+				return nil, nil, fmt.Errorf("failed to create request: %w", reqErr)
+			}
 
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to fetch thread: %w", err)
-		}
+			// Add session cookie if available
+			if s.sessionCookie != "" {
+				req.Header.Set("Cookie", s.sessionCookie)
+			}
 
-		if resp.StatusCode == http.StatusNotFound {
-			// No more pages
-			resp.Body.Close()
+			// Add user agent
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+			// Track response time for adaptive rate limiting
+			requestStart := time.Now()
+			resp, err = s.httpClient.Do(req)
+			responseTime := time.Since(requestStart)
+			if err != nil {
+				// Network error - retry with backoff
+				if attempt < maxRetries {
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt)) // Exponential: 3s, 6s, 12s, 24s, 48s
+					log.Printf("⚠️ Network error on page %d: %v. Retrying in %v (%d/%d)", currentPage, err, waitTime, attempt+1, maxRetries)
+					if aid > 0 {
+						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Network error. Retrying in %v (%d/%d)", waitTime, attempt+1, maxRetries))
+					}
+					time.Sleep(waitTime)
+					continue
+				}
+				return nil, nil, fmt.Errorf("network error after %d retries: %w", maxRetries, err)
+			}
+
+			if resp.StatusCode == http.StatusNotFound {
+				// No more pages
+				resp.Body.Close()
+				break
+			}
+
+			// Handle rate limiting with exponential backoff
+			if resp.StatusCode == http.StatusTooManyRequests {
+				resp.Body.Close()
+				// Record rate limit for adaptive adjustment
+				rateLimiter.RecordResponse(responseTime, resp.StatusCode)
+				if attempt < maxRetries {
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt)) // Exponential backoff
+					log.Printf("⚠️ Rate limited (429) on page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
+					if aid > 0 {
+						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Rate limited. Waiting %v before retry %d/%d", waitTime, attempt+1, maxRetries))
+					}
+					time.Sleep(waitTime)
+					continue
+				}
+				return nil, nil, fmt.Errorf("rate limited after %d retries (429)", maxRetries)
+			}
+
+			// Handle server errors (500, 502, 503) with retry
+			if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+				resp.Body.Close()
+				// Record server error for adaptive adjustment
+				rateLimiter.RecordResponse(responseTime, resp.StatusCode)
+				if attempt < maxRetries {
+					waitTime := baseRetryDelay * time.Duration(1<<uint(attempt))
+					log.Printf("⚠️ Server error %d on page %d. Retrying in %v (%d/%d)", resp.StatusCode, currentPage, waitTime, attempt+1, maxRetries)
+					if aid > 0 {
+						s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("⚠️ Server error %d. Retrying in %v (%d/%d)", resp.StatusCode, waitTime, attempt+1, maxRetries))
+					}
+					time.Sleep(waitTime)
+					continue
+				}
+				return nil, nil, fmt.Errorf("server error %d after %d retries", resp.StatusCode, maxRetries)
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			}
+
+			// Record successful response for adaptive rate limiting
+			rateLimiter.RecordResponse(responseTime, resp.StatusCode)
+
+			// Success - break out of retry loop
 			break
 		}
 
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
-
-		doc, err := goquery.NewDocumentFromReader(resp.Body)
+		doc, err = goquery.NewDocumentFromReader(resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to parse HTML: %w", err)
 		}
 
-		// Extract posts from current page
+		// Extract posts from current page with duplicate detection and validation
 		postsOnPage := 0
+		newPostsOnPage := 0
+		skippedPostsOnPage := 0
+		invalidPostsOnPage := 0
 		doc.Find(".message--post").Each(func(i int, sel *goquery.Selection) {
 			post := s.extractPost(sel, threadID, postNumber)
 			if post != nil {
+				postsOnPage++
+
+				// Check if this post already exists (incremental scraping)
+				if existingPostIDs[post.ExternalID] {
+					skippedPostsOnPage++
+					postNumber++
+					return // Skip this post, already in database
+				}
+
+				// Validate post content quality
+				if !s.isValidPost(post) {
+					invalidPostsOnPage++
+					postNumber++
+					return // Skip invalid/empty post
+				}
+
 				// Extract download links from post content and store temporarily with post index
 				links := s.extractDownloadLinks(post.Content, threadID, int64(len(allPosts))) // Use index as temporary marker
 
+				// Deduplicate links within this post
+				links = s.deduplicateLinks(links)
+
 				allPosts = append(allPosts, post)
 				allDownloadLinks = append(allDownloadLinks, links...)
-				postsOnPage++
+				newPostsOnPage++
 				postNumber++
 			}
 		})
 
-		log.Printf("Found %d posts on page %d", postsOnPage, currentPage)
+		// Enhanced logging with validation and duplicate detection stats
+		logMsg := fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage)
+		if skippedPostsOnPage > 0 || invalidPostsOnPage > 0 {
+			logMsg = fmt.Sprintf("Found %d posts on page %d (%d new, %d duplicates, %d invalid)",
+				postsOnPage, currentPage, newPostsOnPage, skippedPostsOnPage, invalidPostsOnPage)
+		}
+		log.Printf(logMsg)
+
+		// Detect total pages from pagination (only on first page)
+		if currentPage == 1 && estimatedTotalPages == 0 {
+			// Look for the last page number in pagination
+			maxPageNum := 1
+			doc.Find(".pageNav-page").Each(func(i int, sel *goquery.Selection) {
+				pageNumText := strings.TrimSpace(sel.Text())
+				if pageNumText != "" {
+					var num int
+					_, err := fmt.Sscanf(pageNumText, "%d", &num)
+					if err == nil && num > maxPageNum {
+						maxPageNum = num
+					}
+				}
+			})
+			estimatedTotalPages = maxPageNum
+			if estimatedTotalPages > 1 {
+				log.Printf("📄 Detected %d total pages in thread", estimatedTotalPages)
+				if aid > 0 {
+					s.activityService.UpdateProgressLog(int64(aid), 0, fmt.Sprintf("📄 Thread has %d pages to scrape", estimatedTotalPages))
+				}
+			}
+		}
+
+		// Enhanced progress logging with page count
+		progressMsg := fmt.Sprintf("Found %d posts on page %d", postsOnPage, currentPage)
+		if estimatedTotalPages > 1 {
+			progressMsg = fmt.Sprintf("Found %d posts on page %d/%d", postsOnPage, currentPage, estimatedTotalPages)
+		}
+		if aid > 0 {
+			s.activityService.UpdateProgressLog(int64(aid), 0, progressMsg)
+		}
 
 		// Stop if no posts found on this page
 		if postsOnPage == 0 {
@@ -329,42 +701,89 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64) ([]*model
 			})
 		}
 
-		// Method 3: Try to fetch next page to see if it exists (fallback)
+		// Method 3: Check if current page is marked as "last" page
 		if !hasNextPage {
-			// Construct potential next page URL (using already cleaned URL)
-			nextPageURL := fmt.Sprintf("%s/page-%d", cleanURL, currentPage+1)
-
-			testReq, err := http.NewRequest("HEAD", nextPageURL, nil)
-			if err == nil {
-				if s.sessionCookie != "" {
-					testReq.Header.Set("Cookie", s.sessionCookie)
-				}
-				testReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-
-				testResp, err := s.httpClient.Do(testReq)
-				if err == nil {
-					defer testResp.Body.Close()
-					if testResp.StatusCode == http.StatusOK {
-						hasNextPage = true
-						log.Printf("Confirmed next page exists via HEAD request")
+			// Check if we're on the last page by looking for the current page in pagination
+			isLastPage := false
+			doc.Find(".pageNav-page").Each(func(i int, sel *goquery.Selection) {
+				if sel.HasClass("pageNav-page--current") {
+					// Found current page marker - check if there's no next page link after it
+					pageNumText := strings.TrimSpace(sel.Text())
+					var num int
+					_, err := fmt.Sscanf(pageNumText, "%d", &num)
+					if err == nil && num == currentPage {
+						// We are on this page - if Next button is disabled, this is the last page
+						if doc.Find(".pageNav-jump--next.is-disabled").Length() > 0 {
+							isLastPage = true
+							log.Printf("Current page %d is marked as last page", currentPage)
+						}
 					}
 				}
+			})
+
+			if isLastPage {
+				log.Printf("No more pages to scrape (last page: %d)", currentPage)
+				break
 			}
 		}
 
 		if !hasNextPage {
-			log.Printf("No more pages to scrape (last page: %d)", currentPage)
+			// CRITICAL FIX: Don't trust HEAD requests - simpcity returns 200 for non-existent pages
+			// If pagination UI doesn't show a next page, we should stop here
+			log.Printf("No pagination indicator found - stopping at page %d", currentPage)
 			break
 		}
 
-		currentPage++
-		log.Printf("Moving to page %d", currentPage)
+		// Save checkpoint after successful page scrape
+		if aid > 0 {
+			checkpoint := &ScrapeCheckpoint{
+				CurrentPage:         currentPage + 1, // Next page to scrape
+				PostNumber:          postNumber,
+				EstimatedTotalPages: estimatedTotalPages,
+				PostsCollected:      len(allPosts),
+				LinksCollected:      len(allDownloadLinks),
+				LastPageURL:         pageURL,
+				CleanURL:            cleanURL,
+				SavedPosts:          allPosts,
+				SavedLinks:          allDownloadLinks,
+			}
+			if err := s.saveCheckpoint(int64(aid), checkpoint); err != nil {
+				log.Printf("⚠️ Failed to save checkpoint: %v", err)
+			}
+		}
 
-		// Add a small delay to be polite to the server
-		time.Sleep(1 * time.Second)
+		currentPage++
+		nextPageMsg := fmt.Sprintf("Moving to page %d", currentPage)
+		if estimatedTotalPages > 1 {
+			nextPageMsg = fmt.Sprintf("Moving to page %d/%d", currentPage, estimatedTotalPages)
+		}
+		log.Printf(nextPageMsg)
+
+		// Adaptive delay based on server performance
+		adaptiveDelay := rateLimiter.GetDelay()
+		statusMsg := rateLimiter.GetStatus()
+		log.Printf("%s - waiting %.1fs before next page", statusMsg, adaptiveDelay.Seconds())
+		if aid > 0 && currentPage%10 == 0 { // Update status every 10 pages
+			s.activityService.UpdateProgressLog(int64(aid), 0, statusMsg)
+		}
+		time.Sleep(adaptiveDelay)
 	}
 
-	log.Printf("Total posts scraped: %d across %d pages", len(allPosts), currentPage)
+	// Final summary with duplicate detection statistics
+	summaryMsg := fmt.Sprintf("✅ Scraping complete: %d posts, %d download links across %d pages", len(allPosts), len(allDownloadLinks), currentPage)
+	if len(existingPostIDs) > 0 {
+		summaryMsg = fmt.Sprintf("✅ Scraping complete: %d new posts, %d download links across %d pages (%d posts already in database)",
+			len(allPosts), len(allDownloadLinks), currentPage, len(existingPostIDs))
+	}
+	log.Printf(summaryMsg)
+	if aid > 0 {
+		s.activityService.UpdateProgressLog(int64(aid), 0, summaryMsg)
+		// Clear checkpoint on successful completion
+		if err := s.clearCheckpoint(int64(aid)); err != nil {
+			log.Printf("⚠️ Failed to clear checkpoint: %v", err)
+		}
+	}
+
 	return allPosts, allDownloadLinks, nil
 }
 
@@ -469,11 +888,8 @@ func (s *ScraperService) extractDownloadLinks(content string, threadID int64, po
 	}
 
 	// Log if no links found
-	if len(links) == 0 {
-		log.Printf("No download links found in post %d (content length: %d)", postID, len(content))
-	} else {
-		log.Printf("Found %d download links in post %d", len(links), postID)
-	}
+	// Note: Removed individual post logging here as it's too verbose
+	// The page-level summary in ScrapePosts is sufficient
 
 	return links
 }
@@ -552,6 +968,56 @@ func (s *ScraperService) isCommonTerm(term string) bool {
 	return false
 }
 
+// GetThreadByURL checks if a thread exists and returns its current state
+func (s *ScraperService) GetThreadByURL(url string, source string) (*models.ScrapedThread, error) {
+	cleanURL := strings.TrimSuffix(url, "/")
+	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
+	cleanURL = strings.TrimSuffix(cleanURL, "/latest")
+	cleanURL = strings.TrimSuffix(cleanURL, "/")
+
+	var thread models.ScrapedThread
+	err := s.db.QueryRow(`
+		SELECT id, external_id, source, title, url, author, category,
+			   view_count, reply_count, post_count, download_count,
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+		FROM scraped_threads
+		WHERE url = ? AND source = ?
+	`, cleanURL, source).Scan(
+		&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title,
+		&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
+		&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
+		&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
+		&thread.LastUpdatedAt, &thread.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil // Thread doesn't exist yet
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to query thread: %w", err)
+	}
+
+	return &thread, nil
+}
+
+// ShouldRescrapeThread determines if a thread needs to be re-scraped
+// Returns true if thread is new or has new activity
+func (s *ScraperService) ShouldRescrapeThread(threadURL string, currentReplyCount int) (bool, *models.ScrapedThread, error) {
+	existingThread, err := s.GetThreadByURL(threadURL, "simpcity")
+	if err != nil {
+		return false, nil, err
+	}
+
+	// Thread doesn't exist - needs scraping
+	if existingThread == nil {
+		return true, nil, nil
+	}
+
+	// Thread exists - check if there are new posts
+	hasNewPosts := currentReplyCount > existingThread.ReplyCount
+
+	return hasNewPosts, existingThread, nil
+}
+
 // SaveThread saves a scraped thread to the database
 func (s *ScraperService) SaveThread(thread *models.ScrapedThread) error {
 	// Marshal metadata
@@ -585,7 +1051,10 @@ func (s *ScraperService) SaveThread(thread *models.ScrapedThread) error {
 			return fmt.Errorf("failed to insert thread: %w", err)
 		}
 
-		threadID, _ := result.LastInsertId()
+		threadID, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get thread ID: %w", err)
+		}
 		thread.ID = threadID
 	} else if err != nil {
 		return fmt.Errorf("failed to check existing thread: %w", err)
@@ -643,7 +1112,10 @@ func (s *ScraperService) SavePost(post *models.ScrapedPost) error {
 			return fmt.Errorf("failed to insert post: %w", err)
 		}
 
-		postID, _ := result.LastInsertId()
+		postID, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get post ID: %w", err)
+		}
 		post.ID = postID
 	} else if err != nil {
 		return fmt.Errorf("failed to check existing post: %w", err)
@@ -698,7 +1170,10 @@ func (s *ScraperService) SaveDownloadLink(link *models.ScrapedDownloadLink) erro
 			return fmt.Errorf("failed to insert download link: %w", err)
 		}
 
-		linkID, _ := result.LastInsertId()
+		linkID, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("failed to get download link ID: %w", err)
+		}
 		link.ID = linkID
 	} else if err != nil {
 		return fmt.Errorf("failed to check existing link: %w", err)
@@ -712,46 +1187,88 @@ func (s *ScraperService) SaveDownloadLink(link *models.ScrapedDownloadLink) erro
 }
 
 // ScrapeThreadComplete scrapes a thread and all its posts in one operation
-func (s *ScraperService) ScrapeThreadComplete(threadURL string) error {
-	// Create activity log
-	activity, err := s.activityService.Create(&models.ActivityLogCreate{
-		TaskType: "scraper_thread",
-		Status:   "running",
-		Message:  fmt.Sprintf("Scraping thread: %s", threadURL),
-		Details: map[string]interface{}{
-			"url": threadURL,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create activity: %w", err)
+func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID ...int) error {
+	// Track scrape start time for duration calculation
+	scrapeStartTime := time.Now()
+
+	// Use parent activity if provided, otherwise create new activity
+	var activityID int
+	var shouldComplete bool = true
+
+	if len(parentActivityID) > 0 && parentActivityID[0] > 0 {
+		// Use parent activity for logging
+		activityID = parentActivityID[0]
+		shouldComplete = false // Don't complete parent activity
+		s.activityService.UpdateProgressLog(int64(activityID), 0, fmt.Sprintf("Scraping thread: %s", threadURL))
+	} else {
+		// Create standalone activity log
+		activity, err := s.activityService.Create(&models.ActivityLogCreate{
+			TaskType: "scraper_thread",
+			Status:   "running",
+			Message:  fmt.Sprintf("Scraping thread: %s", threadURL),
+			Details: map[string]interface{}{
+				"url": threadURL,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create activity: %w", err)
+		}
+		activityID = activity.ID
 	}
 
 	// Update progress
-	s.activityService.UpdateProgress(activity.ID, 10, "Fetching thread information...")
+	s.activityService.UpdateProgress(activityID, 10, "Fetching thread information...")
 
 	// Scrape thread metadata
 	thread, err := s.ScrapeThread(threadURL)
 	if err != nil {
-		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape thread: %v", err))
+		s.activityService.FailTask(activityID, fmt.Sprintf("Failed to scrape thread: %v", err))
 		return err
+	}
+
+	// Check if thread needs re-scraping (smart caching)
+	shouldRescrape, existingThread, err := s.ShouldRescrapeThread(threadURL, thread.ReplyCount)
+	if err != nil {
+		log.Printf("Warning: Failed to check cache status: %v. Proceeding with scrape.", err)
+	} else if !shouldRescrape && existingThread != nil {
+		// Thread exists and has no new posts - skip scraping
+		s.activityService.UpdateProgressLog(int64(activityID), 0, fmt.Sprintf("✓ Thread already up-to-date (%d posts, last scraped %v ago)",
+			existingThread.PostCount, time.Since(existingThread.LastScrapedAt).Round(time.Minute)))
+		if shouldComplete {
+			s.activityService.CompleteTask(int64(activityID),
+				fmt.Sprintf("Thread already up-to-date. %d posts, %d download links (no changes since last scrape)",
+					existingThread.PostCount, existingThread.DownloadCount))
+		}
+		return nil
+	} else if existingThread != nil {
+		// Thread exists but has new posts - log incremental update
+		newPostCount := thread.ReplyCount - existingThread.ReplyCount
+		s.activityService.UpdateProgressLog(int64(activityID), 0,
+			fmt.Sprintf("📝 Incremental update: %d new posts detected (was %d, now %d)",
+				newPostCount, existingThread.ReplyCount, thread.ReplyCount))
 	}
 
 	// Save thread
 	if err := s.SaveThread(thread); err != nil {
-		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to save thread: %v", err))
+		s.activityService.FailTask(activityID, fmt.Sprintf("Failed to save thread: %v", err))
 		return err
 	}
 
-	s.activityService.UpdateProgress(activity.ID, 30, "Thread saved. Scraping posts...")
+	s.activityService.UpdateProgress(activityID, 30, "Thread saved. Scraping posts...")
 
-	// Scrape posts and download links
-	posts, downloadLinks, err := s.ScrapePosts(threadURL, thread.ID)
+	// Scrape posts and download links (pass activity ID for detailed logging)
+	posts, downloadLinks, err := s.ScrapePosts(threadURL, thread.ID, activityID)
 	if err != nil {
-		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape posts: %v", err))
+		// Check if task was paused
+		if strings.Contains(err.Error(), "paused by user") {
+			s.activityService.UpdateProgressLog(int64(activityID), 0, "⏸️ Task paused during post scraping")
+			return nil // Exit gracefully without marking as failed
+		}
+		s.activityService.FailTask(activityID, fmt.Sprintf("Failed to scrape posts: %v", err))
 		return err
 	}
 
-	s.activityService.UpdateProgress(activity.ID, 50, fmt.Sprintf("Found %d posts. Saving...", len(posts)))
+	s.activityService.UpdateProgress(activityID, 50, fmt.Sprintf("Found %d posts. Saving...", len(posts)))
 
 	// Save posts and their associated links
 	for i, post := range posts {
@@ -773,7 +1290,7 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string) error {
 		}
 
 		progress := 50 + (40 * (i + 1) / len(posts))
-		s.activityService.UpdateProgress(activity.ID, progress, fmt.Sprintf("Saved %d/%d posts", i+1, len(posts)))
+		s.activityService.UpdateProgress(activityID, progress, fmt.Sprintf("Saved %d/%d posts", i+1, len(posts)))
 	}
 
 	// Update thread counts
@@ -781,16 +1298,40 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string) error {
 	thread.DownloadCount = len(downloadLinks)
 	s.SaveThread(thread)
 
-	s.activityService.UpdateProgress(activity.ID, 90, "Notifying AI Companion...")
+	s.activityService.UpdateProgress(activityID, 90, "Notifying AI Companion...")
 
 	// Notify AI Companion
 	s.notifyAICompanion(thread, len(posts), len(downloadLinks))
 
-	// Complete activity
-	s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf(
-		"Successfully scraped thread: %d posts, %d download links found",
-		len(posts), len(downloadLinks),
-	))
+	// Complete activity (only if standalone, not when using parent activity)
+	if shouldComplete {
+		s.activityService.CompleteTask(int64(activityID), fmt.Sprintf(
+			"Successfully scraped thread: %d posts, %d download links found",
+			len(posts), len(downloadLinks),
+		))
+	} else {
+		s.activityService.UpdateProgressLog(int64(activityID), 0, fmt.Sprintf(
+			"✓ Thread scraped: %d posts, %d download links",
+			len(posts), len(downloadLinks),
+		))
+	}
+
+	// Send enhanced notification with comprehensive stats
+	if s.notificationService != nil {
+		scrapeDuration := time.Since(scrapeStartTime)
+		isIncremental := existingThread != nil
+		err := s.notificationService.NotifyScrapeCompletedEnhanced(
+			thread.ID,
+			thread.Title,
+			len(posts),
+			len(downloadLinks),
+			scrapeDuration,
+			isIncremental,
+		)
+		if err != nil {
+			log.Printf("Failed to send scrape notification: %v\n", err)
+		}
+	}
 
 	return nil
 }
@@ -1158,7 +1699,7 @@ type ForumThreadInfo struct {
 }
 
 // ScrapeForumCategory scrapes all threads from a forum category (with pagination)
-func (s *ScraperService) ScrapeForumCategory(forumURL string) ([]ForumThreadInfo, error) {
+func (s *ScraperService) ScrapeForumCategory(forumURL string, activityID ...int) ([]ForumThreadInfo, error) {
 	log.Printf("Starting forum category scrape: %s", forumURL)
 
 	var allThreads []ForumThreadInfo
@@ -1166,6 +1707,15 @@ func (s *ScraperService) ScrapeForumCategory(forumURL string) ([]ForumThreadInfo
 	baseURL := strings.TrimSuffix(forumURL, "/")
 
 	for {
+		// Check if task has been paused (if activity ID provided)
+		if len(activityID) > 0 && activityID[0] > 0 {
+			currentActivity, err := s.activityService.GetByID(int64(activityID[0]))
+			if err == nil && currentActivity.IsPaused {
+				log.Printf("⏸️ Task paused during forum listing at page %d", currentPage)
+				return allThreads, fmt.Errorf("task paused by user at page %d", currentPage)
+			}
+		}
+
 		pageURL := baseURL
 		if currentPage > 1 {
 			pageURL = fmt.Sprintf("%s/page-%d", baseURL, currentPage)
@@ -1173,34 +1723,85 @@ func (s *ScraperService) ScrapeForumCategory(forumURL string) ([]ForumThreadInfo
 
 		log.Printf("Scraping forum page %d: %s", currentPage, pageURL)
 
-		// Create request
-		req, err := http.NewRequest("GET", pageURL, nil)
-		if err != nil {
-			return allThreads, fmt.Errorf("failed to create request: %w", err)
-		}
+		// Retry logic for server errors (500, 502, 503) and rate limiting
+		var resp *http.Response
+		var doc *goquery.Document
+		var err error
+		var req *http.Request
+		maxRetries := 3
+		retryDelay := 10 * time.Second
 
-		// Add session cookie if available
-		if s.sessionCookie != "" {
-			req.Header.Set("Cookie", s.sessionCookie)
-		}
+		for attempt := 0; attempt <= maxRetries; attempt++ {
+			// Create request
+			req, err = http.NewRequest("GET", pageURL, nil)
+			if err != nil {
+				return allThreads, fmt.Errorf("failed to create request: %w", err)
+			}
 
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+			// Add session cookie if available
+			if s.sessionCookie != "" {
+				req.Header.Set("Cookie", s.sessionCookie)
+			}
 
-		// Fetch the page
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return allThreads, fmt.Errorf("failed to fetch forum page: %w", err)
-		}
-		defer resp.Body.Close()
+			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-		if resp.StatusCode != http.StatusOK {
-			return allThreads, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-		}
+			// Fetch the page
+			resp, err = s.httpClient.Do(req)
+			if err != nil {
+				if attempt < maxRetries {
+					waitTime := retryDelay * time.Duration(attempt+1)
+					log.Printf("Request error on forum page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
+					time.Sleep(waitTime)
+					continue
+				}
+				return allThreads, fmt.Errorf("failed to fetch forum page after %d retries: %w", maxRetries, err)
+			}
 
-		// Parse HTML
-		doc, err := goquery.NewDocumentFromReader(resp.Body)
-		if err != nil {
-			return allThreads, fmt.Errorf("failed to parse HTML: %w", err)
+			// Handle server errors with retry
+			if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+				resp.Body.Close()
+				if attempt < maxRetries {
+					waitTime := retryDelay * time.Duration(attempt+1)
+					log.Printf("Server error (%d) on forum page %d. Waiting %v before retry %d/%d", resp.StatusCode, currentPage, waitTime, attempt+1, maxRetries)
+					time.Sleep(waitTime)
+					continue
+				}
+				return allThreads, fmt.Errorf("server error after %d retries on forum page %d: %d", maxRetries, currentPage, resp.StatusCode)
+			}
+
+			// Handle rate limiting with retry
+			if resp.StatusCode == http.StatusTooManyRequests {
+				resp.Body.Close()
+				if attempt < maxRetries {
+					waitTime := retryDelay * time.Duration(attempt+1)
+					log.Printf("Rate limited (429) on forum page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
+					time.Sleep(waitTime)
+					continue
+				}
+				return allThreads, fmt.Errorf("rate limited after %d retries on forum page %d (429)", maxRetries, currentPage)
+			}
+
+			// Check for other non-OK status codes
+			if resp.StatusCode != http.StatusOK {
+				resp.Body.Close()
+				return allThreads, fmt.Errorf("unexpected status code on forum page %d: %d", currentPage, resp.StatusCode)
+			}
+
+			// Parse HTML
+			doc, err = goquery.NewDocumentFromReader(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				if attempt < maxRetries {
+					waitTime := retryDelay * time.Duration(attempt+1)
+					log.Printf("Failed to parse HTML on forum page %d. Waiting %v before retry %d/%d", currentPage, waitTime, attempt+1, maxRetries)
+					time.Sleep(waitTime)
+					continue
+				}
+				return allThreads, fmt.Errorf("failed to parse HTML after %d retries: %w", maxRetries, err)
+			}
+
+			// Success - break out of retry loop
+			break
 		}
 
 		threadsOnPage := 0
@@ -1280,9 +1881,19 @@ func (s *ScraperService) ScrapeForumAndSaveAll(forumURL string) error {
 		s.activityService.UpdateProgress(activity.ID, 5, "Scanning forum pages for threads...")
 	}
 
-	threads, err := s.ScrapeForumCategory(forumURL)
+	var threads []ForumThreadInfo
+	if activity != nil {
+		threads, err = s.ScrapeForumCategory(forumURL, activity.ID)
+	} else {
+		threads, err = s.ScrapeForumCategory(forumURL)
+	}
 	if err != nil {
 		if activity != nil {
+			// Check if it was paused
+			if strings.Contains(err.Error(), "paused by user") {
+				s.activityService.UpdateProgressLog(int64(activity.ID), 0, "⏸️ Task paused during forum listing scan")
+				return nil
+			}
 			s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape forum category: %v", err))
 		}
 		return fmt.Errorf("failed to scrape forum category: %w", err)
@@ -1294,20 +1905,63 @@ func (s *ScraperService) ScrapeForumAndSaveAll(forumURL string) error {
 		s.activityService.UpdateProgress(activity.ID, 10, fmt.Sprintf("Found %d threads. Starting sequential scrape...", totalThreads))
 	}
 
-	// Sequential scraping with rate limiting
+	// Check if resuming from checkpoint
+	startIndex := 0
+	if activity != nil {
+		currentActivity, err := s.activityService.GetByID(int64(activity.ID))
+		if err == nil {
+			// Unmarshal checkpoint data
+			if err := currentActivity.UnmarshalCheckpoint(); err == nil && currentActivity.CheckpointObj["thread_index"] != nil {
+				startIndex = int(currentActivity.CheckpointObj["thread_index"].(float64))
+				log.Printf("📍 Resuming forum scrape from thread %d/%d", startIndex+1, totalThreads)
+				s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+					fmt.Sprintf("📍 Resumed from checkpoint: thread %d/%d", startIndex+1, totalThreads))
+			}
+		}
+	}
+
+	// Sequential scraping with adaptive rate limiting
 	successCount := 0
 	errorCount := 0
+	consecutiveErrors := 0
+	baseDelay := 8 * time.Second
 
-	for i, threadInfo := range threads {
+	for i := startIndex; i < totalThreads; i++ {
+		threadInfo := threads[i]
+
+		// Check if task has been paused
+		if activity != nil {
+			currentActivity, err := s.activityService.GetByID(int64(activity.ID))
+			if err == nil && currentActivity.IsPaused {
+				log.Printf("⏸️ Task paused at thread %d/%d", i+1, totalThreads)
+				s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+					fmt.Sprintf("⏸️ Task paused at thread %d/%d. Progress saved.", i+1, totalThreads))
+				return nil // Exit gracefully
+			}
+		}
+
 		log.Printf("Scraping thread %d/%d: %s", i+1, totalThreads, threadInfo.Title)
 
-		err := s.ScrapeThreadComplete(threadInfo.URL)
+		err := s.ScrapeThreadComplete(threadInfo.URL, activity.ID)
 
 		if err != nil {
 			log.Printf("Error scraping thread %s: %v", threadInfo.URL, err)
 			errorCount++
+			consecutiveErrors++
+
+			// Adaptive backoff: increase delay after consecutive errors
+			if consecutiveErrors >= 3 {
+				extraDelay := time.Duration(consecutiveErrors-2) * 10 * time.Second
+				log.Printf("⚠️ Multiple consecutive errors (%d). Adding %v extra delay to help server recover", consecutiveErrors, extraDelay)
+				if activity != nil {
+					s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+						fmt.Sprintf("⚠️ Server struggling (%d errors). Slowing down scrape by %v", consecutiveErrors, extraDelay))
+				}
+				time.Sleep(extraDelay)
+			}
 		} else {
 			successCount++
+			consecutiveErrors = 0 // Reset on success
 		}
 
 		// Update progress
@@ -1315,11 +1969,22 @@ func (s *ScraperService) ScrapeForumAndSaveAll(forumURL string) error {
 			progress := 10 + (85 * (i + 1) / totalThreads)
 			s.activityService.UpdateProgress(activity.ID, progress,
 				fmt.Sprintf("Scraped %d/%d threads (Success: %d, Errors: %d)", i+1, totalThreads, successCount, errorCount))
+
+			// Save checkpoint every 10 threads
+			if (i+1) % 10 == 0 {
+				s.activityService.SaveCheckpoint(int64(activity.ID), map[string]interface{}{
+					"thread_index":     i + 1,
+					"threads_completed": i + 1,
+					"total_threads":    totalThreads,
+					"success_count":    successCount,
+					"error_count":      errorCount,
+				})
+			}
 		}
 
-		// Delay to avoid rate limiting (3 seconds between threads)
+		// Base delay to avoid rate limiting and server overload
 		if i < totalThreads-1 { // Don't delay after the last thread
-			time.Sleep(3 * time.Second)
+			time.Sleep(baseDelay)
 		}
 	}
 
@@ -1341,6 +2006,109 @@ func (s *ScraperService) ScrapeForumAndSaveAll(forumURL string) error {
 			}
 		}()
 	}
+
+	return nil
+}
+
+// ResumeForumScrape resumes a paused forum scrape from checkpoint
+func (s *ScraperService) ResumeForumScrape(forumURL string, activityID int) error {
+	log.Printf("📍 Resuming forum scrape for activity %d: %s", activityID, forumURL)
+
+	activity := &models.Activity{ID: activityID}
+
+	// Update progress to show resume
+	s.activityService.UpdateProgress(activity.ID, 5, "Resuming... Scanning forum pages for threads...")
+
+	// Get all thread URLs from the forum listing
+	threads, err := s.ScrapeForumCategory(forumURL, activity.ID)
+	if err != nil {
+		if strings.Contains(err.Error(), "paused by user") {
+			s.activityService.UpdateProgressLog(int64(activity.ID), 0, "⏸️ Task paused during forum listing scan")
+			return nil
+		}
+		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scrape forum category: %v", err))
+		return fmt.Errorf("failed to scrape forum category: %w", err)
+	}
+
+	totalThreads := len(threads)
+	log.Printf("Found %d threads to scrape sequentially", totalThreads)
+	s.activityService.UpdateProgress(activity.ID, 10, fmt.Sprintf("Found %d threads. Resuming sequential scrape...", totalThreads))
+
+	// Check if resuming from checkpoint
+	startIndex := 0
+	currentActivity, err := s.activityService.GetByID(int64(activity.ID))
+	if err == nil {
+		if err := currentActivity.UnmarshalCheckpoint(); err == nil && currentActivity.CheckpointObj["thread_index"] != nil {
+			startIndex = int(currentActivity.CheckpointObj["thread_index"].(float64))
+			log.Printf("📍 Resuming forum scrape from thread %d/%d", startIndex+1, totalThreads)
+			s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+				fmt.Sprintf("📍 Resumed from checkpoint: thread %d/%d", startIndex+1, totalThreads))
+		}
+	}
+
+	// Sequential scraping with adaptive rate limiting
+	successCount := 0
+	errorCount := 0
+	consecutiveErrors := 0
+	baseDelay := 8 * time.Second
+
+	for i := startIndex; i < totalThreads; i++ {
+		threadInfo := threads[i]
+
+		// Check if task has been paused
+		currentActivity, err := s.activityService.GetByID(int64(activity.ID))
+		if err == nil && currentActivity.IsPaused {
+			log.Printf("⏸️ Task paused at thread %d/%d", i+1, totalThreads)
+			s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+				fmt.Sprintf("⏸️ Task paused at thread %d/%d. Progress saved.", i+1, totalThreads))
+			return nil
+		}
+
+		log.Printf("Scraping thread %d/%d: %s", i+1, totalThreads, threadInfo.Title)
+		err = s.ScrapeThreadComplete(threadInfo.URL, activity.ID)
+
+		if err != nil {
+			log.Printf("Error scraping thread %s: %v", threadInfo.URL, err)
+			errorCount++
+			consecutiveErrors++
+
+			if consecutiveErrors >= 3 {
+				extraDelay := time.Duration(consecutiveErrors-2) * 10 * time.Second
+				log.Printf("⚠️ Multiple consecutive errors (%d). Adding %v extra delay to help server recover", consecutiveErrors, extraDelay)
+				s.activityService.UpdateProgressLog(int64(activity.ID), 0,
+					fmt.Sprintf("⚠️ Server struggling (%d errors). Slowing down scrape by %v", consecutiveErrors, extraDelay))
+				time.Sleep(extraDelay)
+			}
+		} else {
+			successCount++
+			consecutiveErrors = 0
+		}
+
+		// Update progress
+		progress := 10 + (85 * (i + 1) / totalThreads)
+		s.activityService.UpdateProgress(activity.ID, progress,
+			fmt.Sprintf("Scraped %d/%d threads (Success: %d, Errors: %d)", i+1, totalThreads, successCount, errorCount))
+
+		// Save checkpoint every 10 threads
+		if (i+1)%10 == 0 {
+			s.activityService.SaveCheckpoint(int64(activity.ID), map[string]interface{}{
+				"thread_index":      i + 1,
+				"threads_completed": i + 1,
+				"total_threads":     totalThreads,
+				"success_count":     successCount,
+				"error_count":       errorCount,
+			})
+		}
+
+		// Base delay to avoid rate limiting
+		if i < totalThreads-1 {
+			time.Sleep(baseDelay)
+		}
+	}
+
+	log.Printf("Forum scrape resumed and completed. Success: %d, Errors: %d", successCount, errorCount)
+	s.activityService.CompleteTask(int64(activity.ID),
+		fmt.Sprintf("Forum scrape complete. Success: %d, Errors: %d", successCount, errorCount))
 
 	return nil
 }
@@ -1493,21 +2261,33 @@ func (s *ScraperService) LinkThreadToPerformer(threadID int64, performerID int64
 	return nil
 }
 
-// FindOrCreatePerformer finds an existing performer by name or creates a new one
-func (s *ScraperService) FindOrCreatePerformer(name string) (int64, error) {
-	// First, try to find existing performer (case-insensitive)
+// FindPerformer finds an existing performer by name (case-insensitive)
+func (s *ScraperService) FindPerformer(name string) (int64, error) {
 	var performerID int64
 	err := s.db.QueryRow(`
 		SELECT id FROM performers WHERE LOWER(name) = LOWER(?)
 	`, name).Scan(&performerID)
 
-	if err == nil {
-		// Found existing performer
-		return performerID, nil
+	if err == sql.ErrNoRows {
+		return 0, nil // Return 0 if not found, no error
 	}
 
-	if err != sql.ErrNoRows {
+	if err != nil {
 		return 0, fmt.Errorf("failed to query performer: %w", err)
+	}
+
+	return performerID, nil
+}
+
+// CreatePerformerFromThread creates a new performer from a thread's extracted name
+func (s *ScraperService) CreatePerformerFromThread(name string) (int64, error) {
+	// Check if performer already exists
+	existingID, err := s.FindPerformer(name)
+	if err != nil {
+		return 0, err
+	}
+	if existingID != 0 {
+		return existingID, nil // Return existing performer
 	}
 
 	// Create new performer
@@ -1520,7 +2300,7 @@ func (s *ScraperService) FindOrCreatePerformer(name string) (int64, error) {
 		return 0, fmt.Errorf("failed to create performer: %w", err)
 	}
 
-	performerID, err = result.LastInsertId()
+	performerID, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get performer ID: %w", err)
 	}
@@ -1675,10 +2455,16 @@ func (s *ScraperService) AutoLinkThreadsToPerformers() error {
 		performerNames := s.ExtractPerformerNameFromTitle(thread.Title)
 
 		for _, name := range performerNames {
-			// Find or create performer
-			performerID, err := s.FindOrCreatePerformer(name)
+			// Find existing performer (don't create new ones automatically)
+			performerID, err := s.FindPerformer(name)
 			if err != nil {
-				log.Printf("Error finding/creating performer %s: %v", name, err)
+				log.Printf("Error finding performer %s: %v", name, err)
+				continue
+			}
+
+			// Skip if performer doesn't exist
+			if performerID == 0 {
+				log.Printf("Skipping thread '%s' - performer '%s' not found (create manually if needed)", thread.Title, name)
 				continue
 			}
 
@@ -1794,4 +2580,237 @@ func (s *ScraperService) DeleteAllThreads() error {
 
 	log.Println("Successfully deleted all scraped threads")
 	return nil
+}
+
+// saveCheckpoint saves the current scraping progress to the database
+func (s *ScraperService) saveCheckpoint(activityID int64, checkpoint *ScrapeCheckpoint) error {
+	// Serialize posts and links separately to avoid huge JSON
+	postsJSON, err := json.Marshal(checkpoint.SavedPosts)
+	if err != nil {
+		return fmt.Errorf("failed to serialize posts: %w", err)
+	}
+
+	linksJSON, err := json.Marshal(checkpoint.SavedLinks)
+	if err != nil {
+		return fmt.Errorf("failed to serialize links: %w", err)
+	}
+
+	// Create checkpoint data with serialized posts/links
+	checkpointData := map[string]interface{}{
+		"current_page":          checkpoint.CurrentPage,
+		"post_number":           checkpoint.PostNumber,
+		"estimated_total_pages": checkpoint.EstimatedTotalPages,
+		"posts_collected":       checkpoint.PostsCollected,
+		"links_collected":       checkpoint.LinksCollected,
+		"last_page_url":         checkpoint.LastPageURL,
+		"clean_url":             checkpoint.CleanURL,
+		"saved_posts":           string(postsJSON),
+		"saved_links":           string(linksJSON),
+	}
+
+	checkpointJSON, err := json.Marshal(checkpointData)
+	if err != nil {
+		return fmt.Errorf("failed to serialize checkpoint: %w", err)
+	}
+
+	// Update activity checkpoint
+	_, err = s.db.Exec(`
+		UPDATE activities
+		SET checkpoint = ?
+		WHERE id = ?
+	`, string(checkpointJSON), activityID)
+
+	if err != nil {
+		return fmt.Errorf("failed to save checkpoint: %w", err)
+	}
+
+	log.Printf("💾 Checkpoint saved: page %d, %d posts, %d links",
+		checkpoint.CurrentPage, checkpoint.PostsCollected, checkpoint.LinksCollected)
+	return nil
+}
+
+// loadCheckpoint loads a saved scraping checkpoint from the database
+func (s *ScraperService) loadCheckpoint(activityID int64) (*ScrapeCheckpoint, error) {
+	var checkpointJSON string
+	err := s.db.QueryRow(`
+		SELECT checkpoint
+		FROM activities
+		WHERE id = ?
+	`, activityID).Scan(&checkpointJSON)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil // No checkpoint found
+		}
+		return nil, fmt.Errorf("failed to load checkpoint: %w", err)
+	}
+
+	if checkpointJSON == "" || checkpointJSON == "{}" {
+		return nil, nil // Empty checkpoint
+	}
+
+	// Deserialize checkpoint data
+	var checkpointData map[string]interface{}
+	if err := json.Unmarshal([]byte(checkpointJSON), &checkpointData); err != nil {
+		return nil, fmt.Errorf("failed to deserialize checkpoint: %w", err)
+	}
+
+	checkpoint := &ScrapeCheckpoint{}
+
+	// Extract basic fields
+	if val, ok := checkpointData["current_page"].(float64); ok {
+		checkpoint.CurrentPage = int(val)
+	}
+	if val, ok := checkpointData["post_number"].(float64); ok {
+		checkpoint.PostNumber = int(val)
+	}
+	if val, ok := checkpointData["estimated_total_pages"].(float64); ok {
+		checkpoint.EstimatedTotalPages = int(val)
+	}
+	if val, ok := checkpointData["posts_collected"].(float64); ok {
+		checkpoint.PostsCollected = int(val)
+	}
+	if val, ok := checkpointData["links_collected"].(float64); ok {
+		checkpoint.LinksCollected = int(val)
+	}
+	if val, ok := checkpointData["last_page_url"].(string); ok {
+		checkpoint.LastPageURL = val
+	}
+	if val, ok := checkpointData["clean_url"].(string); ok {
+		checkpoint.CleanURL = val
+	}
+
+	// Deserialize posts
+	if postsStr, ok := checkpointData["saved_posts"].(string); ok && postsStr != "" {
+		var posts []*models.ScrapedPost
+		if err := json.Unmarshal([]byte(postsStr), &posts); err != nil {
+			log.Printf("⚠️ Failed to deserialize saved posts: %v", err)
+		} else {
+			checkpoint.SavedPosts = posts
+		}
+	}
+
+	// Deserialize links
+	if linksStr, ok := checkpointData["saved_links"].(string); ok && linksStr != "" {
+		var links []*models.ScrapedDownloadLink
+		if err := json.Unmarshal([]byte(linksStr), &links); err != nil {
+			log.Printf("⚠️ Failed to deserialize saved links: %v", err)
+		} else {
+			checkpoint.SavedLinks = links
+		}
+	}
+
+	return checkpoint, nil
+}
+
+// clearCheckpoint removes the checkpoint data from the database
+func (s *ScraperService) clearCheckpoint(activityID int64) error {
+	_, err := s.db.Exec(`
+		UPDATE activities
+		SET checkpoint = '{}'
+		WHERE id = ?
+	`, activityID)
+
+	if err != nil {
+		return fmt.Errorf("failed to clear checkpoint: %w", err)
+	}
+
+	log.Printf("🗑️ Checkpoint cleared for activity %d", activityID)
+	return nil
+}
+
+// getExistingPostIDs retrieves all existing post external IDs for a thread
+func (s *ScraperService) getExistingPostIDs(threadID int64) (map[string]bool, error) {
+	existingPosts := make(map[string]bool)
+
+	rows, err := s.db.Query(`
+		SELECT external_id
+		FROM scraped_posts
+		WHERE thread_id = ? AND source = 'simpcity'
+	`, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query existing posts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var externalID string
+		if err := rows.Scan(&externalID); err != nil {
+			log.Printf("⚠️ Failed to scan post ID: %v", err)
+			continue
+		}
+		existingPosts[externalID] = true
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating existing posts: %w", err)
+	}
+
+	return existingPosts, nil
+}
+
+// isValidPost validates post content quality before saving
+func (s *ScraperService) isValidPost(post *models.ScrapedPost) bool {
+	// Check if post has an external ID (required for uniqueness)
+	if post.ExternalID == "" {
+		log.Printf("⚠️ Skipping post without external ID")
+		return false
+	}
+
+	// Check if post has any content (plain text or HTML)
+	hasContent := false
+	if post.PlainText != "" && len(strings.TrimSpace(post.PlainText)) > 0 {
+		hasContent = true
+	}
+	if post.Content != "" && len(strings.TrimSpace(post.Content)) > 10 { // At least 10 chars of HTML
+		hasContent = true
+	}
+
+	// Check if post has attachments (images count as content)
+	if post.MetadataObj != nil && len(post.MetadataObj.Attachments) > 0 {
+		hasContent = true
+	}
+
+	if !hasContent {
+		log.Printf("⚠️ Skipping empty post %s (no content or attachments)", post.ExternalID)
+		return false
+	}
+
+	// Minimum content length check (at least 5 characters of actual text)
+	plainText := strings.TrimSpace(post.PlainText)
+	if len(plainText) > 0 && len(plainText) < 5 && len(post.MetadataObj.Attachments) == 0 {
+		log.Printf("⚠️ Skipping post %s with minimal content (%d chars)", post.ExternalID, len(plainText))
+		return false
+	}
+
+	return true
+}
+
+// deduplicateLinks removes duplicate download links within a post
+func (s *ScraperService) deduplicateLinks(links []*models.ScrapedDownloadLink) []*models.ScrapedDownloadLink {
+	if len(links) == 0 {
+		return links
+	}
+
+	seen := make(map[string]bool)
+	deduplicated := make([]*models.ScrapedDownloadLink, 0, len(links))
+	duplicateCount := 0
+
+	for _, link := range links {
+		// Normalize URL for comparison (remove trailing slashes, convert to lowercase)
+		normalizedURL := strings.ToLower(strings.TrimSuffix(link.URL, "/"))
+
+		if !seen[normalizedURL] {
+			seen[normalizedURL] = true
+			deduplicated = append(deduplicated, link)
+		} else {
+			duplicateCount++
+		}
+	}
+
+	if duplicateCount > 0 {
+		log.Printf("✂️ Deduplicated %d duplicate links (kept %d unique)", duplicateCount, len(deduplicated))
+	}
+
+	return deduplicated
 }

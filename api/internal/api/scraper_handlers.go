@@ -289,9 +289,34 @@ func setSessionCookie(c *gin.Context) {
 		return
 	}
 
+	// Set the cookie first
 	svc.SetSessionCookie(request.Cookie)
 
-	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Session cookie set successfully"))
+	// Verify the cookie by trying to access a protected page
+	verified, username, err := svc.VerifySessionCookie()
+
+	if err != nil {
+		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+			"verified": false,
+			"error":    err.Error(),
+			"message":  "Cookie saved but verification failed. The cookie may be invalid or expired.",
+		}, "Cookie saved but verification failed"))
+		return
+	}
+
+	if !verified {
+		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+			"verified": false,
+			"message":  "Cookie saved but appears to be invalid. Please check you copied all cookies correctly.",
+		}, "Cookie saved but not verified"))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"verified": true,
+		"username": username,
+		"message":  "Cookie verified successfully! You are logged in.",
+	}, "Session cookie set and verified successfully"))
 }
 
 // getSessionCookie returns the current session cookie status
@@ -434,6 +459,53 @@ func linkThreadToPerformer(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Thread linked to performer successfully"))
+}
+
+// createPerformerFromThread creates a new performer from a thread's extracted name
+func createPerformerFromThread(c *gin.Context) {
+	svc := ensureScraperService()
+
+	var request struct {
+		ThreadID int64  `json:"thread_id" binding:"required"`
+		Name     string `json:"name" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request body",
+			err.Error(),
+		))
+		return
+	}
+
+	// Create the performer
+	performerID, err := svc.CreatePerformerFromThread(request.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to create performer",
+			err.Error(),
+		))
+		return
+	}
+
+	// Automatically link the thread to the newly created performer
+	err = svc.LinkThreadToPerformer(request.ThreadID, performerID, 1.0)
+	if err != nil {
+		log.Printf("Created performer %d but failed to link thread %d: %v", performerID, request.ThreadID, err)
+	}
+
+	// Get the performer details to return
+	performerSvc := ensurePerformerService()
+	performer, err := performerSvc.GetByID(performerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Performer created but failed to retrieve details",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusCreated, models.SuccessResponse(performer, "Performer created and linked to thread successfully"))
 }
 
 // checkLinkStatuses checks the status of all download links

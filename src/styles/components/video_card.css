@@ -201,6 +201,24 @@
 	transform: scale(1.05);
 }
 
+/* Source Badge (for scraped videos - in video-badges section) */
+.badge-source {
+	background: linear-gradient(135deg, rgba(102, 126, 234, 0.9), rgba(118, 75, 162, 0.9)) !important;
+	color: white !important;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	max-width: 100px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.badge-source:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+}
+
 /* Video Info */
 .video-info {
 	padding: 1rem;
