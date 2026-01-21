@@ -131,6 +131,19 @@ import {
 	faCheckSquare,
 	faTrashAlt,
 	faUserCircle,
+	faBook,
+	faHeartbeat,
+	faBell,
+	faCalendarTimes,
+	faBrain,
+	faHistory,
+	faSyncAlt,
+	faTachometerAlt,
+	faMicrochip,
+	faMemory,
+	faStop,
+	faCode,
+	faTv,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -273,7 +286,20 @@ library.add(
 	faWrench,
 	faTools,
 	faCheckSquare,
-	faTrashAlt
+	faTrashAlt,
+	faBook,
+	faHeartbeat,
+	faBell,
+	faCalendarTimes,
+	faBrain,
+	faHistory,
+	faSyncAlt,
+	faTachometerAlt,
+	faMicrochip,
+	faMemory,
+	faStop,
+	faCode,
+	faTv
 )
 
 export default FontAwesomeIcon

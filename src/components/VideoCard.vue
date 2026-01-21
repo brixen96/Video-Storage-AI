@@ -30,7 +30,7 @@
 				loading="lazy"
 			/>
 
-			<!-- Status Badges -->
+			<!-- Status Badges (top right) -->
 			<div class="status-badges">
 				<div v-if="video.is_favorite" class="badge-favorite" title="Favorite">
 					<font-awesome-icon :icon="['fas', 'heart']" />
@@ -71,6 +71,11 @@
 					<font-awesome-icon :icon="['fas', 'eye']" />
 					{{ video.play_count }}
 				</span>
+				<!-- Source badge for scraped videos -->
+				<span v-if="video.is_scraped && video.source_tab_name" class="badge badge-source" :title="`Source: ${video.source_tab_name}`">
+					<font-awesome-icon :icon="['fas', 'globe']" />
+					{{ video.source_tab_name }}
+				</span>
 			</div>
 
 			<!-- Performers -->
@@ -81,12 +86,19 @@
 				{{ video.studios[0].name }}
 			</div>
 
-			<!-- Tags -->
-			<div v-if="video.tags && video.tags.length > 0" class="video-tags">
-				<span v-for="tag in video.tags.slice(0, 2)" :key="tag.id" class="tag-chip" :style="{ backgroundColor: tag.color || '#6c757d' }">
-					<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" />
-					{{ tag.name }}
-				</span>
+			<!-- Tags (only show if tags exist and have content) -->
+			<div v-if="video.tags && video.tags.length > 0 && hasValidTags" class="video-tags">
+				<template v-for="(tag, index) in video.tags.slice(0, 2)" :key="index">
+					<!-- Regular video tags (objects with id, name, color) -->
+					<span v-if="typeof tag === 'object' && tag.name" class="tag-chip" :style="{ backgroundColor: tag.color || '#6c757d' }">
+						<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" />
+						{{ tag.name }}
+					</span>
+					<!-- Scraped video tags (simple strings) -->
+					<span v-else-if="typeof tag === 'string' && tag.trim()" class="tag-chip" style="background-color: #6c757d">
+						{{ tag }}
+					</span>
+				</template>
 				<span v-if="video.tags.length > 2" class="tag-more">+{{ video.tags.length - 2 }}</span>
 			</div>
 		</div>
@@ -122,22 +134,52 @@ export default {
 	},
 	computed: {
 		hasPreview() {
-			return this.video.preview_path && this.video.preview_path !== ''
+			// Check for regular video preview path OR scraped video thumbnail frames
+			if (this.video.preview_path && this.video.preview_path !== '') {
+				return true
+			}
+			// For scraped videos, check thumbnail_frames array
+			if (this.video.is_scraped && this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) {
+				return true
+			}
+			return false
 		},
 		currentPreviewFrame() {
 			if (this.previewFrames.length === 0) return null
 			return this.previewFrames[this.previewFrameIndex]
 		},
+		hasValidTags() {
+			// Check if tags array has any valid tags (non-empty strings or objects with name)
+			if (!this.video.tags || this.video.tags.length === 0) return false
+			return this.video.tags.some(tag => {
+				if (typeof tag === 'object' && tag.name) return true
+				if (typeof tag === 'string' && tag.trim()) return true
+				return false
+			})
+		},
 	},
 	methods: {
 		getAssetURL,
 		getThumbnailURL(video) {
+			// For scraped videos, thumbnail_path is already a full URL
+			if (video.is_scraped && video.thumbnail_path) {
+				// Check if it's already an absolute URL
+				if (video.thumbnail_path.startsWith('http://') || video.thumbnail_path.startsWith('https://')) {
+					return video.thumbnail_path
+				}
+			}
 			if (video.thumbnail_path) {
 				return getAssetURL(video.thumbnail_path)
 			}
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
 		},
 		loadPreviewFrames() {
+			// For scraped videos, check if we have thumbnail_frames array
+			if (this.video.is_scraped && this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) {
+				this.previewFrames = this.video.thumbnail_frames
+				return
+			}
+
 			if (!this.video.preview_path) {
 				this.previewFrames = []
 				return
@@ -151,7 +193,6 @@ export default {
 				frames.push(getAssetURL(framePath))
 			}
 			this.previewFrames = frames
-			console.log(`Loaded ${frames.length} preview frames for: ${this.video.title}`, frames[0])
 		},
 		startPreview() {
 			// Delay preview start by 300ms to avoid loading on quick hovers
@@ -216,10 +257,34 @@ export default {
 				.toUpperCase()
 				.slice(0, 2)
 		},
-		handleClick() {
-			// Open video player page in new tab
+		async handleClick() {
+			// For scraped videos, open the source URL in Firefox
+			if (this.video.is_scraped && this.video.source_url) {
+				await this.openInFirefox(this.video.source_url)
+				return
+			}
+			// For regular videos, open video player page in new tab
 			const route = this.$router.resolve(`/watch/${this.video.id}`)
 			window.open(route.href, '_blank')
+		},
+		async openInFirefox(url) {
+			try {
+				// Call backend API to open URL in Firefox
+				const response = await fetch('http://localhost:8080/api/v1/system/open-incognito', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ url })
+				})
+				if (!response.ok) {
+					// Fallback to regular new tab if API fails
+					console.warn('Firefox API failed, opening in regular tab')
+					window.open(url, '_blank')
+				}
+			} catch (error) {
+				// Fallback to regular new tab if API is unavailable
+				console.warn('Firefox API unavailable, opening in regular tab:', error)
+				window.open(url, '_blank')
+			}
 		},
 		toggleSelection() {
 			this.$emit('toggle-select', this.video)

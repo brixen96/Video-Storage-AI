@@ -23,12 +23,12 @@
 					</div>
 					<div class="chat-header-actions">
 						<button class="btn-header-action" @click="toggleSearch" title="Search Messages">
-						<font-awesome-icon :icon="['fas', 'search']" />
-					</button>
-					<button class="btn-header-action" @click="exportChat" title="Export Chat">
-						<font-awesome-icon :icon="['fas', 'download']" />
-					</button>
-					<button class="btn-header-action" @click="minimizeChat" title="Minimize">
+							<font-awesome-icon :icon="['fas', 'search']" />
+						</button>
+						<button class="btn-header-action" @click="exportChat" title="Export Chat">
+							<font-awesome-icon :icon="['fas', 'download']" />
+						</button>
+						<button class="btn-header-action" @click="minimizeChat" title="Minimize">
 							<font-awesome-icon :icon="['fas', 'minus']" />
 						</button>
 						<button class="btn-header-action" @click="closeChat" title="Close">
@@ -37,28 +37,19 @@
 					</div>
 				</div>
 
-		<!-- Search Bar -->
-		<transition name="slide-down">
-			<div v-if="showSearch" class="search-bar">
-				<div class="search-input-group">
-					<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
-					<input
-						ref="searchInput"
-						v-model="searchQuery"
-						type="text"
-						class="search-input"
-						placeholder="Search messages..."
-						@keyup.esc="clearSearch"
-					/>
-					<button v-if="searchQuery" class="btn-clear-search" @click="clearSearch">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</div>
-				<div v-if="searchQuery" class="search-results-info">
-					Found {{ filteredMessageCount }} message(s)
-				</div>
-			</div>
-		</transition>
+				<!-- Search Bar -->
+				<transition name="slide-down">
+					<div v-if="showSearch" class="search-bar">
+						<div class="search-input-group">
+							<font-awesome-icon :icon="['fas', 'search']" class="search-icon" />
+							<input ref="searchInput" v-model="searchQuery" type="text" class="search-input" placeholder="Search messages..." @keyup.esc="clearSearch" />
+							<button v-if="searchQuery" class="btn-clear-search" @click="clearSearch">
+								<font-awesome-icon :icon="['fas', 'times']" />
+							</button>
+						</div>
+						<div v-if="searchQuery" class="search-results-info">Found {{ filteredMessageCount }} message(s)</div>
+					</div>
+				</transition>
 
 				<!-- Chat Messages -->
 				<div class="chat-messages" ref="chatMessages">
@@ -90,11 +81,11 @@
 								<MarkdownMessage v-else :content="message.content" />
 							</div>
 							<div class="message-footer">
-							<div class="message-time">{{ formatMessageTime(message.timestamp) }}</div>
-							<button class="btn-copy-message" @click="copyMessage(message.content)" title="Copy message">
-								<font-awesome-icon :icon="['fas', 'copy']" />
-							</button>
-						</div>
+								<div class="message-time">{{ formatMessageTime(message.timestamp) }}</div>
+								<button class="btn-copy-message" @click="copyMessage(message.content)" title="Copy message">
+									<font-awesome-icon :icon="['fas', 'copy']" />
+								</button>
+							</div>
 						</div>
 					</div>
 					<div v-if="isCompanionThinking" class="chat-message assistant thinking">
@@ -113,68 +104,68 @@
 					</div>
 				</div>
 
-			<!-- Statistics Panel -->
-			<transition name="slide-down">
-				<div v-if="showStats && chatHistory.length > 0" class="stats-panel">
-					<div class="stats-header">
-						<h6>📊 Conversation Stats</h6>
-						<button class="btn-close-stats" @click="showStats = false">
-							<font-awesome-icon :icon="['fas', 'times']" />
-						</button>
+				<!-- Statistics Panel -->
+				<transition name="slide-down">
+					<div v-if="showStats && chatHistory.length > 0" class="stats-panel">
+						<div class="stats-header">
+							<h6>📊 Conversation Stats</h6>
+							<button class="btn-close-stats" @click="showStats = false">
+								<font-awesome-icon :icon="['fas', 'times']" />
+							</button>
+						</div>
+						<div class="stats-grid">
+							<div class="stat-item">
+								<div class="stat-icon">
+									<font-awesome-icon :icon="['fas', 'comments']" />
+								</div>
+								<div class="stat-details">
+									<div class="stat-value">{{ chatStats.totalMessages }}</div>
+									<div class="stat-label">Total Messages</div>
+								</div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-icon user">
+									<font-awesome-icon :icon="['fas', 'user']" />
+								</div>
+								<div class="stat-details">
+									<div class="stat-value">{{ chatStats.userMessages }}</div>
+									<div class="stat-label">Your Questions</div>
+								</div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-icon ai">
+									<font-awesome-icon :icon="['fas', 'robot']" />
+								</div>
+								<div class="stat-details">
+									<div class="stat-value">{{ chatStats.aiMessages }}</div>
+									<div class="stat-label">AI Responses</div>
+								</div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-icon">
+									<font-awesome-icon :icon="['fas', 'clock']" />
+								</div>
+								<div class="stat-details">
+									<div class="stat-value">{{ chatStats.sessionDuration }}</div>
+									<div class="stat-label">Session Time</div>
+								</div>
+							</div>
+							<div class="stat-item">
+								<div class="stat-icon">
+									<font-awesome-icon :icon="['fas', 'text-width']" />
+								</div>
+								<div class="stat-details">
+									<div class="stat-value">{{ chatStats.avgMessageLength }}</div>
+									<div class="stat-label">Avg Length</div>
+								</div>
+							</div>
+						</div>
 					</div>
-					<div class="stats-grid">
-						<div class="stat-item">
-							<div class="stat-icon">
-								<font-awesome-icon :icon="['fas', 'comments']" />
-							</div>
-							<div class="stat-details">
-								<div class="stat-value">{{ chatStats.totalMessages }}</div>
-								<div class="stat-label">Total Messages</div>
-							</div>
-						</div>
-						<div class="stat-item">
-							<div class="stat-icon user">
-								<font-awesome-icon :icon="['fas', 'user']" />
-							</div>
-							<div class="stat-details">
-								<div class="stat-value">{{ chatStats.userMessages }}</div>
-								<div class="stat-label">Your Questions</div>
-							</div>
-						</div>
-						<div class="stat-item">
-							<div class="stat-icon ai">
-								<font-awesome-icon :icon="['fas', 'robot']" />
-							</div>
-							<div class="stat-details">
-								<div class="stat-value">{{ chatStats.aiMessages }}</div>
-								<div class="stat-label">AI Responses</div>
-							</div>
-						</div>
-						<div class="stat-item">
-							<div class="stat-icon">
-								<font-awesome-icon :icon="['fas', 'clock']" />
-							</div>
-							<div class="stat-details">
-								<div class="stat-value">{{ chatStats.sessionDuration }}</div>
-								<div class="stat-label">Session Time</div>
-							</div>
-						</div>
-						<div class="stat-item">
-							<div class="stat-icon">
-								<font-awesome-icon :icon="['fas', 'text-width']" />
-							</div>
-							<div class="stat-details">
-								<div class="stat-value">{{ chatStats.avgMessageLength }}</div>
-								<div class="stat-label">Avg Length</div>
-							</div>
-						</div>
-					</div>
-				</div>
-			</transition>
+				</transition>
 
 				<!-- Quick Actions -->
 				<div class="quick-actions-bar">
-					<button class="btn-quick-action" @click="showStats = !showStats" :class="{ 'active': showStats }" title="Toggle Stats">
+					<button class="btn-quick-action" @click="showStats = !showStats" :class="{ active: showStats }" title="Toggle Stats">
 						<font-awesome-icon :icon="['fas', 'chart-line']" />
 					</button>
 					<button class="btn-quick-action" @click="askQuickQuestion('How many videos do I have?')" title="Library Stats">
@@ -211,7 +202,7 @@
 							@keyup.enter="sendCompanionMessage"
 							:disabled="isCompanionThinking"
 						/>
-						<button class="btn btn-voice-input" @click="toggleVoiceInput" :class="{ 'listening': isListening }" :disabled="isCompanionThinking" title="Voice Input">
+						<button class="btn btn-voice-input" @click="toggleVoiceInput" :class="{ listening: isListening }" :disabled="isCompanionThinking" title="Voice Input">
 							<font-awesome-icon :icon="['fas', isListening ? 'stop' : 'microphone']" />
 							<span v-if="isListening" class="listening-pulse"></span>
 						</button>
@@ -228,7 +219,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, getCurrentInstance } from 'vue'
 import { aiCompanionAPI } from '@/services/api'
-import { toolDefinitions, executeTool } from '@/services/aiTools'
 import MarkdownMessage from './MarkdownMessage.vue'
 
 const { proxy } = getCurrentInstance()
@@ -255,11 +245,9 @@ const showStats = ref(false)
 // Conversation statistics
 const chatStats = computed(() => {
 	const totalMessages = chatHistory.value.length
-	const userMessages = chatHistory.value.filter(m => m.role === 'user').length
-	const aiMessages = chatHistory.value.filter(m => m.role === 'assistant').length
-	const avgMessageLength = totalMessages > 0
-		? Math.round(chatHistory.value.reduce((sum, m) => sum + m.content.length, 0) / totalMessages)
-		: 0
+	const userMessages = chatHistory.value.filter((m) => m.role === 'user').length
+	const aiMessages = chatHistory.value.filter((m) => m.role === 'assistant').length
+	const avgMessageLength = totalMessages > 0 ? Math.round(chatHistory.value.reduce((sum, m) => sum + m.content.length, 0) / totalMessages) : 0
 
 	// Calculate session duration if there are messages
 	let sessionDuration = 'N/A'
@@ -282,7 +270,7 @@ const chatStats = computed(() => {
 		userMessages,
 		aiMessages,
 		avgMessageLength,
-		sessionDuration
+		sessionDuration,
 	}
 })
 
@@ -291,11 +279,13 @@ const displayedMessages = computed(() => {
 	if (!searchQuery.value) return chatHistory.value
 
 	const query = searchQuery.value.toLowerCase()
-	const filtered = chatHistory.value.map((msg, index) => ({
-		...msg,
-		highlighted: msg.content.toLowerCase().includes(query),
-		originalIndex: index
-	})).filter(msg => msg.highlighted)
+	const filtered = chatHistory.value
+		.map((msg, index) => ({
+			...msg,
+			highlighted: msg.content.toLowerCase().includes(query),
+			originalIndex: index,
+		}))
+		.filter((msg) => msg.highlighted)
 
 	// eslint-disable-next-line vue/no-async-in-computed-properties
 	setTimeout(() => {
@@ -424,148 +414,27 @@ const sendCompanionMessage = async () => {
 	scrollToBottom()
 
 	try {
-		// Build system message with capabilities
-		const systemMessage = {
-			role: 'system',
-			content: `You are an autonomous AI assistant for a video library management application called "Video Storage AI". You are the core intelligence of this application.
+		// ALWAYS use backend AI with direct database access
+		// This ensures we query YOUR data, not external knowledge
+		const { aiAPI } = await import('@/services/api')
+		const response = await aiAPI.chat({
+			message: userMessage,
+			history: chatHistory.value.slice(-5).map((msg) => ({
+				role: msg.role,
+				content: msg.content,
+			})),
+		})
 
-YOUR CAPABILITIES:
-You have access to powerful tools that let you query, analyze, and optimize the database in real-time. You can:
-- Get library statistics and information
-- Search for videos, performers, and tags
-- Analyze library issues and health
-- Find specific performers by age, video count, or name
-- Monitor the application for problems
-- SAVE and RECALL memories to learn and remember over time
-- Execute ALL AI tasks: auto-link performers, smart tagging, scene detection, quality analysis, duplicate detection, and more
-- Run advanced analysis: content classification, auto-naming, thumbnail quality assessment
+		// Handle response - backend returns { success: true, message: "..." }
+		const aiResponse = response.data?.message || response.message || 'I processed your request.'
 
-AVAILABLE TOOLS:
-${toolDefinitions.map((t) => `- ${t.function.name}: ${t.function.description}`).join('\n')}
+		chatHistory.value.push({
+			role: 'assistant',
+			content: aiResponse,
+			timestamp: new Date(),
+		})
 
-YOUR ROLE:
-You are NOT just a chatbot - you are an intelligent agent that can:
-1. Think independently and decide which tools to use
-2. Query the database to answer questions accurately
-3. Analyze data to find insights
-4. Monitor library health and report issues
-5. Proactively suggest improvements
-6. LEARN from conversations and remember important information
-
-MEMORY SYSTEM:
-You have long-term memory! Use it wisely:
-- Use save_memory to remember user preferences, important facts, or insights
-- Use recall_memories to retrieve what you've learned before
-- When user tells you something important (favorite performer, preferences, etc.), SAVE IT
-- Before answering questions, consider recalling relevant memories
-- Build knowledge over time - you get smarter with every conversation
-
-IMPORTANT GUIDELINES:
-- ALWAYS use tools to get real-time data instead of guessing
-- When asked a question, think about which tool(s) will give you the answer
-- You can call multiple tools if needed to gather complete information
-- Be proactive - if you notice something unusual, mention it
-- If you find issues, explain them clearly and suggest solutions
-- You are autonomous - make decisions and take actions to help the user
-- REMEMBER important information using save_memory tool
-
-EXAMPLES:
-- User asks "Who is the oldest performer?" → Use get_oldest_performers tool
-- User says "My favorite performer is X" → Use save_memory with key="user_favorite_performer"
-- User asks "What did we discuss yesterday?" → Use recall_memories to search past conversations
-- User asks "How many videos do I have?" → Use get_library_stats tool
-- User asks "Are there any videos without tags?" → Use analyze_library_issues tool
-- User asks "Link performers to videos" → Use auto_link_performers tool
-- User asks "Find duplicate videos" → Use detect_duplicates tool
-- User asks "Suggest tags for my videos" → Use suggest_smart_tags tool
-- User asks "Analyze video quality" → Use analyze_video_quality tool
-- User asks "What are my preferences?" → Use recall_memories with category="preference"
-
-Remember: You are the AI core of "Video Storage AI" - be intelligent, proactive, helpful, and LEARN from every interaction!`,
-		}
-
-		// Build message history for context (last 10 messages)
-		const recentHistory = chatHistory.value.slice(-10).map((msg) => ({
-			role: msg.role,
-			content: msg.content,
-		}))
-
-		// Start conversation with tools available
-		let messages = [systemMessage, ...recentHistory]
-		let continueLoop = true
-		let maxIterations = 5 // Prevent infinite loops
-		let iterations = 0
-
-		while (continueLoop && iterations < maxIterations) {
-			iterations++
-
-			// Send to LM Studio with tool definitions
-			const response = await aiCompanionAPI.chat(messages, {
-				tools: toolDefinitions,
-				tool_choice: 'auto', // Let AI decide when to use tools
-			})
-
-			const responseMessage = response.choices?.[0]?.message
-
-			if (!responseMessage) {
-				throw new Error('No response from LM Studio')
-			}
-
-			// Add assistant's response to messages
-			messages.push(responseMessage)
-
-			// Check if AI wants to call a tool
-			if (responseMessage.tool_calls && responseMessage.tool_calls.length > 0) {
-				// Execute each tool call
-				for (const toolCall of responseMessage.tool_calls) {
-					const toolName = toolCall.function.name
-					const toolArgs = JSON.parse(toolCall.function.arguments)
-
-
-					try {
-						const toolResult = await executeTool(toolName, toolArgs)
-
-						// Add tool result to messages
-						messages.push({
-							role: 'tool',
-							tool_call_id: toolCall.id,
-							name: toolName,
-							content: JSON.stringify(toolResult),
-						})
-					} catch (toolError) {
-						console.error(`Tool execution failed: ${toolName}`, toolError)
-						messages.push({
-							role: 'tool',
-							tool_call_id: toolCall.id,
-							name: toolName,
-							content: JSON.stringify({ error: toolError.message }),
-						})
-					}
-				}
-
-				// Continue loop to let AI process tool results
-				continueLoop = true
-			} else {
-				// AI gave final response, exit loop
-				const finalContent = responseMessage.content || 'Sorry, I could not generate a response.'
-
-				// Add assistant response to chat
-				chatHistory.value.push({
-					role: 'assistant',
-					content: finalContent,
-					timestamp: new Date(),
-				})
-
-				// Save to localStorage
-				saveChatHistory()
-
-				continueLoop = false
-			}
-		}
-
-		if (iterations >= maxIterations) {
-			console.warn('Max iterations reached in tool calling loop')
-		}
+		saveChatHistory()
 
 		// Show notification if chat is minimized
 		if (!isOpen.value) {
@@ -576,42 +445,16 @@ Remember: You are the AI core of "Video Storage AI" - be intelligent, proactive,
 		await nextTick()
 		scrollToBottom()
 	} catch (error) {
-		console.error('LM Studio failed, trying backend AI fallback:', error)
+		console.error('Backend AI failed:', error)
 
-		// Fallback to backend AI
-		try {
-			const { aiAPI } = await import('@/services/api')
-			const response = await aiAPI.chat({
-				message: userMessage,
-				history: chatHistory.value.slice(-5).map((msg) => ({
-					role: msg.role,
-					content: msg.content,
-				})),
-			})
+		// Add error message
+		chatHistory.value.push({
+			role: 'assistant',
+			content: "I'm currently unavailable. Please check that the backend server is running and try again.",
+			timestamp: new Date(),
+		})
 
-
-			// Handle response - backend returns { success: true, message: "..." }
-			const aiResponse = response.data?.message || response.message || 'I processed your request.'
-
-			chatHistory.value.push({
-				role: 'assistant',
-				content: aiResponse,
-				timestamp: new Date(),
-			})
-
-			saveChatHistory()
-		} catch (fallbackError) {
-			console.error('Backend AI also failed:', fallbackError)
-
-			// Add error message
-			chatHistory.value.push({
-				role: 'assistant',
-				content: "I'm currently unavailable. Please try again later or check that the backend server is running.",
-				timestamp: new Date(),
-			})
-
-			toast.error('AI Unavailable', 'Both LM Studio and backend AI are unavailable.')
-		}
+		toast.error('AI Unavailable', 'Could not connect to AI Companion service. Please check the backend server.')
 	} finally {
 		isCompanionThinking.value = false
 	}
@@ -725,8 +568,8 @@ const initSpeechRecognition = () => {
 
 		recognition.value.onresult = (event) => {
 			const transcript = Array.from(event.results)
-				.map(result => result[0])
-				.map(result => result.transcript)
+				.map((result) => result[0])
+				.map((result) => result.transcript)
 				.join('')
 
 			companionInput.value = transcript
@@ -774,7 +617,7 @@ const typeMessage = async (message, speed = 30) => {
 
 	for (let i = 0; i < message.length; i++) {
 		typingText.value += message[i]
-		await new Promise(resolve => setTimeout(resolve, speed))
+		await new Promise((resolve) => setTimeout(resolve, speed))
 	}
 
 	isTyping.value = false

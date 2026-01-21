@@ -81,11 +81,11 @@
 			<div v-else class="active-operations">
 				<div v-for="activity in activeActivities" :key="activity.id" class="operation-card">
 					<div class="operation-icon">
-						<font-awesome-icon :icon="getActivityIcon(activity.type)" :spin="activity.status === 'running'" />
+						<font-awesome-icon :icon="getActivityIcon(activity.task_type)" :spin="activity.status === 'running'" />
 					</div>
 					<div class="operation-info">
-						<div class="operation-title">{{ activity.type }}</div>
-						<div class="operation-description">{{ activity.description }}</div>
+						<div class="operation-title">{{ activity.task_type }}</div>
+						<div class="operation-description">{{ activity.message }}</div>
 						<div class="operation-progress">
 							<div class="progress-bar">
 								<div class="progress-fill" :style="{ width: activity.progress + '%' }"></div>
@@ -109,6 +109,14 @@
 							title="Resume"
 						>
 							<font-awesome-icon :icon="['fas', 'play']" />
+						</button>
+						<button
+							v-if="activity.status === 'running'"
+							@click="cancelActivity(activity.id)"
+							class="btn-icon btn-danger"
+							title="Cancel"
+						>
+							<font-awesome-icon :icon="['fas', 'times']" />
 						</button>
 					</div>
 				</div>
@@ -138,16 +146,26 @@
 					<div :class="['activity-status-dot', `status-${activity.status}`]"></div>
 					<div class="activity-content">
 						<div class="activity-header">
-							<span class="activity-type">{{ activity.type }}</span>
-							<span class="activity-time">{{ formatTimeAgo(activity.created_at) }}</span>
+							<span class="activity-type">{{ activity.task_type }}</span>
+							<span class="activity-time">{{ formatTimeAgo(activity.started_at) }}</span>
 						</div>
-						<div class="activity-description">{{ activity.description }}</div>
-						<div v-if="activity.result" class="activity-result">
-							{{ activity.result }}
+						<div class="activity-description">{{ activity.message }}</div>
+						<div v-if="activity.error" class="activity-result activity-error">
+							{{ activity.error }}
 						</div>
 					</div>
-					<div :class="['activity-icon', `status-${activity.status}`]">
-						<font-awesome-icon :icon="getStatusIcon(activity.status)" />
+					<div class="activity-actions">
+						<button
+							v-if="activity.status === 'failed' || activity.status === 'cancelled'"
+							@click="retryActivity(activity.id)"
+							class="btn-icon btn-retry"
+							title="Retry"
+						>
+							<font-awesome-icon :icon="['fas', 'redo']" />
+						</button>
+						<div :class="['activity-icon', `status-${activity.status}`]">
+							<font-awesome-icon :icon="getStatusIcon(activity.status)" />
+						</div>
 					</div>
 				</div>
 			</div>
@@ -186,10 +204,10 @@ const filteredActivities = computed(() => {
 // Methods
 const loadActiveActivities = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/activities?status=running,paused&limit=50')
+		const response = await fetch('http://localhost:8080/api/v1/activity?status=running,paused&limit=50')
 		const data = await response.json()
 		if (data.success) {
-			activeActivities.value = data.data.activities || []
+			activeActivities.value = data.data || []
 		}
 	} catch (error) {
 		console.error('Error loading active activities:', error)
@@ -198,10 +216,10 @@ const loadActiveActivities = async () => {
 
 const loadRecentActivities = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/activities?limit=50')
+		const response = await fetch('http://localhost:8080/api/v1/activity?limit=50')
 		const data = await response.json()
 		if (data.success) {
-			recentActivities.value = data.data.activities || []
+			recentActivities.value = data.data || []
 		}
 	} catch (error) {
 		console.error('Error loading recent activities:', error)
@@ -267,7 +285,7 @@ const refreshAll = async () => {
 
 const pauseActivity = async (activityId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/activities/${activityId}/pause`, {
+		const response = await fetch(`http://localhost:8080/api/v1/activity/${activityId}/pause`, {
 			method: 'POST'
 		})
 		const data = await response.json()
@@ -281,7 +299,7 @@ const pauseActivity = async (activityId) => {
 
 const resumeActivity = async (activityId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/activities/${activityId}/resume`, {
+		const response = await fetch(`http://localhost:8080/api/v1/activity/${activityId}/resume`, {
 			method: 'POST'
 		})
 		const data = await response.json()
@@ -290,6 +308,39 @@ const resumeActivity = async (activityId) => {
 		}
 	} catch (error) {
 		console.error('Error resuming activity:', error)
+	}
+}
+
+const cancelActivity = async (activityId) => {
+	if (!confirm('Are you sure you want to cancel this task? This cannot be undone.')) {
+		return
+	}
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/activity/${activityId}/cancel`, {
+			method: 'POST'
+		})
+		const data = await response.json()
+		if (data.success) {
+			await loadActiveActivities()
+			await loadRecentActivities()
+		}
+	} catch (error) {
+		console.error('Error cancelling activity:', error)
+	}
+}
+
+const retryActivity = async (activityId) => {
+	try {
+		const response = await fetch(`http://localhost:8080/api/v1/activity/${activityId}/retry`, {
+			method: 'POST'
+		})
+		const data = await response.json()
+		if (data.success) {
+			await loadActiveActivities()
+			await loadRecentActivities()
+		}
+	} catch (error) {
+		console.error('Error retrying activity:', error)
 	}
 }
 
@@ -309,7 +360,8 @@ const getStatusIcon = (status) => {
 		'completed': ['fas', 'check-circle'],
 		'failed': ['fas', 'times-circle'],
 		'running': ['fas', 'spinner'],
-		'paused': ['fas', 'pause-circle']
+		'paused': ['fas', 'pause-circle'],
+		'cancelled': ['fas', 'ban']
 	}
 	return icons[status] || ['fas', 'question-circle']
 }
@@ -639,6 +691,15 @@ onBeforeUnmount(() => {
 	color: #51cf66;
 }
 
+.btn-icon.btn-danger {
+	background: rgba(250, 82, 82, 0.2);
+	color: #fa5252;
+}
+
+.btn-icon.btn-danger:hover {
+	background: rgba(250, 82, 82, 0.3);
+}
+
 /* Activity Feed */
 .activity-feed {
 	display: grid;
@@ -681,6 +742,10 @@ onBeforeUnmount(() => {
 .activity-status-dot.status-running {
 	background: #4dabf7;
 	animation: pulse 2s infinite;
+}
+
+.activity-status-dot.status-cancelled {
+	background: #868e96;
 }
 
 @keyframes pulse {
@@ -746,6 +811,26 @@ onBeforeUnmount(() => {
 .activity-icon.status-running {
 	background: rgba(74, 171, 247, 0.15);
 	color: #4dabf7;
+}
+
+.activity-icon.status-cancelled {
+	background: rgba(134, 142, 150, 0.15);
+	color: #868e96;
+}
+
+.activity-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.btn-retry {
+	background: rgba(255, 193, 7, 0.2);
+	color: #ffc107;
+}
+
+.btn-retry:hover {
+	background: rgba(255, 193, 7, 0.3);
 }
 
 /* Empty State */

@@ -27,6 +27,9 @@
 						</div>
 					</div>
 					<div class="header-actions">
+						<button class="btn-icon btn-success" @click="createPerformer" :disabled="loading || creatingPerformer" title="Create Performer">
+							<font-awesome-icon :icon="['fas', creatingPerformer ? 'spinner' : 'user-plus']" :spin="creatingPerformer" />
+						</button>
 						<button class="btn-icon" @click="rescrapeThread" :disabled="loading" title="Rescrape">
 							<font-awesome-icon :icon="['fas', 'sync']" :spin="loading" />
 						</button>
@@ -271,6 +274,9 @@ const downloadStats = ref(null)
 
 // JDownloader state
 const sendingToJD = ref(false)
+
+// Performer creation state
+const creatingPerformer = ref(false)
 
 // Export state
 const exportFormat = ref('txt')
@@ -638,6 +644,44 @@ const deleteThread = async () => {
 	}
 }
 
+const createPerformer = async () => {
+	if (!thread.value?.title) {
+		toast.error('Thread title not available')
+		return
+	}
+
+	// Prompt user for performer name with thread title as default
+	const performerName = prompt('Enter performer name:', thread.value.title)
+
+	if (!performerName || performerName.trim() === '') {
+		return
+	}
+
+	creatingPerformer.value = true
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/scraper/performers/create-from-thread', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				thread_id: parseInt(route.params.id),
+				name: performerName.trim()
+			})
+		})
+		const data = await response.json()
+
+		if (data.success) {
+			toast.success(`Performer "${performerName}" created and linked to this thread!`)
+		} else {
+			toast.error(data.message || 'Failed to create performer')
+		}
+	} catch (error) {
+		console.error('Error creating performer:', error)
+		toast.error('Failed to create performer: ' + error.message)
+	} finally {
+		creatingPerformer.value = false
+	}
+}
+
 const getPostLinks = (postId) => {
 	return downloadLinks.value.filter((link) => link.post_id === postId)
 }
@@ -865,6 +909,17 @@ watch(
 
 .btn-icon.btn-primary:hover {
 	background: rgba(74, 171, 247, 0.25);
+}
+
+.btn-icon.btn-success {
+	border-color: rgba(81, 207, 102, 0.3);
+	background: rgba(81, 207, 102, 0.15);
+	color: #51cf66;
+}
+
+.btn-icon.btn-success:hover {
+	background: rgba(81, 207, 102, 0.25);
+	border-color: #51cf66;
 }
 
 /* Filters Bar */

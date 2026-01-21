@@ -2038,10 +2038,12 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 	}
 
 	// Search forum posts for specific keywords
+	// Enhanced to handle: "Does thread X have any Y posts?", "Does X contain Y?", etc.
 	if (strings.Contains(messageLower, "post") || strings.Contains(messageLower, "thread")) &&
 		(strings.Contains(messageLower, "contain") || strings.Contains(messageLower, "include") ||
 			strings.Contains(messageLower, "have") || strings.Contains(messageLower, "with") ||
-			strings.Contains(messageLower, "mention") || strings.Contains(messageLower, "about")) {
+			strings.Contains(messageLower, "mention") || strings.Contains(messageLower, "about") ||
+			strings.Contains(messageLower, "does") || strings.Contains(messageLower, "any")) {
 
 		// Extract thread name if specified
 		var threadName string
@@ -2051,17 +2053,32 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 		re := regexp.MustCompile(`["']([^"']+)["']`)
 		matches := re.FindAllStringSubmatch(message, -1)
 
-		if len(matches) >= 1 {
-			// First quoted text is likely the thread name
-			threadName = matches[0][1]
-		}
 		if len(matches) >= 2 {
-			// Second quoted text is likely the search keyword
-			searchKeyword = matches[1][1]
+			// Two quoted texts found
+			// Check which comes first - if "thread" or "scraper" comes before first quote, it's the thread name
+			firstQuoteIndex := strings.Index(message, matches[0][0])
+			threadIndex := strings.Index(strings.ToLower(message[:firstQuoteIndex]), "thread")
+			scraperIndex := strings.Index(strings.ToLower(message[:firstQuoteIndex]), "scraper")
+
+			if threadIndex != -1 || scraperIndex != -1 {
+				// First quoted text is thread name, second is keyword
+				threadName = matches[0][1]
+				searchKeyword = matches[1][1]
+			} else {
+				// First is keyword, second might be thread name
+				searchKeyword = matches[0][1]
+				threadName = matches[1][1]
+			}
 		} else if len(matches) == 1 {
-			// Only one quoted text - assume it's the keyword
-			searchKeyword = matches[0][1]
-			threadName = ""
+			// Only one quoted text - determine if it's thread name or keyword
+			// If "thread" or "scraper" appears before the quote, it's a thread name
+			quoteIndex := strings.Index(message, matches[0][0])
+			preText := strings.ToLower(message[:quoteIndex])
+			if strings.Contains(preText, "thread") || strings.Contains(preText, "scraper") {
+				threadName = matches[0][1]
+			} else {
+				searchKeyword = matches[0][1]
+			}
 		}
 
 		// If no quotes, try to extract keyword from common patterns
@@ -2147,7 +2164,7 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 		return response.String(), nil
 	}
 
-	// Scraper stats
+	// Scraper stats (enhanced with video scrapers)
 	if strings.Contains(messageLower, "scraper") || strings.Contains(messageLower, "scraped") || strings.Contains(messageLower, "forum") {
 		var threadCount, postCount, linkCount, activeLinks int
 		s.db.QueryRow("SELECT COUNT(*) FROM scraped_threads").Scan(&threadCount)
@@ -2155,13 +2172,426 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 		s.db.QueryRow("SELECT COUNT(*) FROM scraped_download_links").Scan(&linkCount)
 		s.db.QueryRow("SELECT COUNT(*) FROM scraped_download_links WHERE status = 'active'").Scan(&activeLinks)
 
-		return fmt.Sprintf("🕷️ Web Scraper Statistics:\n\n"+
-			"📰 Threads Scraped: %d\n"+
-			"💬 Posts Collected: %d\n"+
-			"🔗 Download Links: %d\n"+
-			"✅ Active Links: %d\n\n"+
-			"💡 Tip: Use 'Auto-Link Performers' to match threads with performers!",
-			threadCount, postCount, linkCount, activeLinks), nil
+		// Get video scraper stats
+		var totalScrapedVideos, pornhubCount, luxuretvCount, sexuriaCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos").Scan(&totalScrapedVideos)
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'pornhub'").Scan(&pornhubCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'luxuretv'").Scan(&luxuretvCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'sexuria'").Scan(&sexuriaCount)
+
+		var response strings.Builder
+		response.WriteString("🕷️ Web Scraper Statistics:\n\n")
+		response.WriteString("**Forum Scraper:**\n")
+		response.WriteString(fmt.Sprintf("📰 Threads Scraped: %d\n", threadCount))
+		response.WriteString(fmt.Sprintf("💬 Posts Collected: %d\n", postCount))
+		response.WriteString(fmt.Sprintf("🔗 Download Links: %d\n", linkCount))
+		response.WriteString(fmt.Sprintf("✅ Active Links: %d\n\n", activeLinks))
+
+		if totalScrapedVideos > 0 {
+			response.WriteString("**Video Scrapers:**\n")
+			response.WriteString(fmt.Sprintf("🎬 Total Scraped Videos: %d\n", totalScrapedVideos))
+			if pornhubCount > 0 {
+				response.WriteString(fmt.Sprintf("   • PornHub: %d videos\n", pornhubCount))
+			}
+			if luxuretvCount > 0 {
+				response.WriteString(fmt.Sprintf("   • LuxureTV: %d videos\n", luxuretvCount))
+			}
+			if sexuriaCount > 0 {
+				response.WriteString(fmt.Sprintf("   • Sexuria: %d items\n", sexuriaCount))
+			}
+			response.WriteString("\n")
+		}
+
+		response.WriteString("💡 Tip: Ask me about 'pornhub videos', 'luxuretv stats', or 'sexuria items' for detailed info!")
+		return response.String(), nil
+	}
+
+	// PornHub specific queries
+	if strings.Contains(messageLower, "pornhub") {
+		var count int
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'pornhub'").Scan(&count)
+
+		if count == 0 {
+			return "No PornHub videos have been scraped yet. Use the Scraper page to start scraping PornHub videos.", nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🟠 **PornHub Scraped Videos: %d**\n\n", count))
+
+		// Get top categories
+		categoryRows, err := s.db.Query(`
+			SELECT site_type, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'pornhub'
+			GROUP BY site_type
+			ORDER BY cnt DESC
+			LIMIT 5
+		`)
+		if err == nil {
+			defer categoryRows.Close()
+			response.WriteString("**Top Categories:**\n")
+			for categoryRows.Next() {
+				var siteType string
+				var cnt int
+				if categoryRows.Scan(&siteType, &cnt) == nil {
+					response.WriteString(fmt.Sprintf("• %s: %d videos\n", siteType, cnt))
+				}
+			}
+			response.WriteString("\n")
+		}
+
+		// Get top performers from scraped videos
+		performerRows, err := s.db.Query(`
+			SELECT performers, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'pornhub' AND performers != '' AND performers IS NOT NULL
+			GROUP BY performers
+			ORDER BY cnt DESC
+			LIMIT 5
+		`)
+		if err == nil {
+			defer performerRows.Close()
+			response.WriteString("**Top Performers:**\n")
+			hasPerformers := false
+			for performerRows.Next() {
+				var performers string
+				var cnt int
+				if performerRows.Scan(&performers, &cnt) == nil && performers != "" {
+					hasPerformers = true
+					response.WriteString(fmt.Sprintf("• %s: %d videos\n", performers, cnt))
+				}
+			}
+			if !hasPerformers {
+				response.WriteString("No performer data collected yet.\n")
+			}
+			response.WriteString("\n")
+		}
+
+		// Get average rating and views
+		var avgRating float64
+		var avgViews float64
+		s.db.QueryRow("SELECT AVG(rating), AVG(views) FROM scraped_videos WHERE source = 'pornhub' AND rating > 0").Scan(&avgRating, &avgViews)
+		if avgRating > 0 {
+			response.WriteString(fmt.Sprintf("**Stats:**\n• Avg Rating: %.1f%%\n", avgRating))
+			if avgViews > 0 {
+				response.WriteString(fmt.Sprintf("• Avg Views: %.0f\n", avgViews))
+			}
+		}
+
+		return response.String(), nil
+	}
+
+	// LuxureTV specific queries
+	if strings.Contains(messageLower, "luxuretv") || strings.Contains(messageLower, "luxure") {
+		var count int
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'luxuretv'").Scan(&count)
+
+		if count == 0 {
+			return "No LuxureTV videos have been scraped yet. Use the Scraper page to start scraping LuxureTV videos.", nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🎬 **LuxureTV Scraped Videos: %d**\n\n", count))
+
+		// Get categories breakdown
+		categoryRows, err := s.db.Query(`
+			SELECT site_type, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'luxuretv'
+			GROUP BY site_type
+			ORDER BY cnt DESC
+			LIMIT 10
+		`)
+		if err == nil {
+			defer categoryRows.Close()
+			response.WriteString("**Categories:**\n")
+			for categoryRows.Next() {
+				var siteType string
+				var cnt int
+				if categoryRows.Scan(&siteType, &cnt) == nil {
+					response.WriteString(fmt.Sprintf("• %s: %d videos\n", siteType, cnt))
+				}
+			}
+			response.WriteString("\n")
+		}
+
+		// Get content type breakdown
+		contentRows, err := s.db.Query(`
+			SELECT COALESCE(content_type, 'regular') as ct, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'luxuretv'
+			GROUP BY ct
+			ORDER BY cnt DESC
+		`)
+		if err == nil {
+			defer contentRows.Close()
+			response.WriteString("**Content Types:**\n")
+			for contentRows.Next() {
+				var contentType string
+				var cnt int
+				if contentRows.Scan(&contentType, &cnt) == nil {
+					response.WriteString(fmt.Sprintf("• %s: %d videos\n", contentType, cnt))
+				}
+			}
+		}
+
+		return response.String(), nil
+	}
+
+	// Sexuria specific queries
+	if strings.Contains(messageLower, "sexuria") {
+		var count int
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'sexuria'").Scan(&count)
+
+		if count == 0 {
+			return "No Sexuria items have been scraped yet. Use the Scraper page to start scraping Sexuria galleries.", nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🔞 **Sexuria Scraped Items: %d**\n\n", count))
+
+		// Get top pornstars
+		performerRows, err := s.db.Query(`
+			SELECT performers, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'sexuria' AND performers != '' AND performers IS NOT NULL
+			GROUP BY performers
+			ORDER BY cnt DESC
+			LIMIT 10
+		`)
+		if err == nil {
+			defer performerRows.Close()
+			response.WriteString("**Top Performers:**\n")
+			hasPerformers := false
+			for performerRows.Next() {
+				var performers string
+				var cnt int
+				if performerRows.Scan(&performers, &cnt) == nil && performers != "" {
+					hasPerformers = true
+					response.WriteString(fmt.Sprintf("• %s: %d galleries\n", performers, cnt))
+				}
+			}
+			if !hasPerformers {
+				response.WriteString("Performer data included in item details.\n")
+			}
+			response.WriteString("\n")
+		}
+
+		// Get top tags
+		tagRows, err := s.db.Query(`
+			SELECT tags, COUNT(*) as cnt
+			FROM scraped_videos
+			WHERE source = 'sexuria' AND tags != '' AND tags IS NOT NULL
+			GROUP BY tags
+			ORDER BY cnt DESC
+			LIMIT 10
+		`)
+		if err == nil {
+			defer tagRows.Close()
+			response.WriteString("**Popular Tags:**\n")
+			hasTags := false
+			for tagRows.Next() {
+				var tags string
+				var cnt int
+				if tagRows.Scan(&tags, &cnt) == nil && tags != "" {
+					hasTags = true
+					// Show first few tags if it's a comma-separated list
+					if len(tags) > 50 {
+						tags = tags[:47] + "..."
+					}
+					response.WriteString(fmt.Sprintf("• %s (%d)\n", tags, cnt))
+				}
+			}
+			if !hasTags {
+				response.WriteString("Tag data included in item details.\n")
+			}
+		}
+
+		return response.String(), nil
+	}
+
+	// Search scraped videos
+	if (strings.Contains(messageLower, "search") || strings.Contains(messageLower, "find")) &&
+		(strings.Contains(messageLower, "scraped video") || strings.Contains(messageLower, "scraped content")) {
+
+		// Extract search term from quotes
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+
+		searchTerm := ""
+		if len(matches) > 0 {
+			searchTerm = matches[0][1]
+		}
+
+		if searchTerm == "" {
+			return "Please specify what to search for. Try: 'search scraped videos for \"keyword\"'", nil
+		}
+
+		rows, err := s.db.Query(`
+			SELECT source, title, performers, url
+			FROM scraped_videos
+			WHERE title LIKE ? OR performers LIKE ? OR tags LIKE ?
+			ORDER BY discovered_at DESC
+			LIMIT 10
+		`, "%"+searchTerm+"%", "%"+searchTerm+"%", "%"+searchTerm+"%")
+
+		if err != nil {
+			return "Failed to search scraped videos.", err
+		}
+		defer rows.Close()
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🔍 **Search Results for '%s':**\n\n", searchTerm))
+
+		count := 0
+		for rows.Next() {
+			var source, title, performers, url string
+			if rows.Scan(&source, &title, &performers, &url) == nil {
+				count++
+				response.WriteString(fmt.Sprintf("%d. [%s] %s\n", count, strings.ToUpper(source), title))
+				if performers != "" {
+					response.WriteString(fmt.Sprintf("   Performers: %s\n", performers))
+				}
+			}
+		}
+
+		if count == 0 {
+			return fmt.Sprintf("No scraped videos found matching '%s'.", searchTerm), nil
+		}
+
+		response.WriteString(fmt.Sprintf("\nFound %d results.", count))
+		return response.String(), nil
+	}
+
+	// Videos by performer query
+	if strings.Contains(messageLower, "video") && (strings.Contains(messageLower, "by") || strings.Contains(messageLower, "with") || strings.Contains(messageLower, "featuring")) &&
+		(strings.Contains(messageLower, "performer") || strings.Contains(messageLower, "actor") || strings.Contains(messageLower, "model")) {
+
+		// Extract performer name from quotes or after "by/with/featuring"
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+
+		performerName := ""
+		if len(matches) > 0 {
+			performerName = matches[0][1]
+		} else {
+			words := strings.Fields(message)
+			for i, word := range words {
+				wordLower := strings.ToLower(word)
+				if (wordLower == "by" || wordLower == "with" || wordLower == "featuring") && i+1 < len(words) {
+					performerName = words[i+1]
+					break
+				}
+			}
+		}
+
+		if performerName == "" {
+			return "Please specify a performer name. Try: 'videos by \"Performer Name\"'", nil
+		}
+
+		query := `
+			SELECT v.id, v.title, v.path
+			FROM videos v
+			JOIN video_performers vp ON v.id = vp.video_id
+			JOIN performers p ON vp.performer_id = p.id
+			WHERE p.name LIKE ?
+			ORDER BY v.created_at DESC
+			LIMIT 10
+		`
+
+		rows, err := s.db.Query(query, "%"+performerName+"%")
+		if err != nil {
+			return "Failed to search videos by performer.", err
+		}
+		defer rows.Close()
+
+		var results []string
+		count := 0
+		for rows.Next() {
+			var id int64
+			var title, path string
+			if err := rows.Scan(&id, &title, &path); err != nil {
+				continue
+			}
+			results = append(results, fmt.Sprintf("- %s (ID: %d)", title, id))
+			count++
+		}
+
+		if count == 0 {
+			return fmt.Sprintf("No videos found featuring '%s'. Check the performer name and try again.", performerName), nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🎬 Videos featuring '%s' (%d results):\n\n", performerName, count))
+		for _, result := range results {
+			response.WriteString(result + "\n")
+		}
+		if count >= 10 {
+			response.WriteString("\n(Showing first 10 results)")
+		}
+
+		return response.String(), nil
+	}
+
+	// Videos by tag query
+	if strings.Contains(messageLower, "video") && (strings.Contains(messageLower, "tagged") || strings.Contains(messageLower, "tag")) {
+		// Extract tag name from quotes or after "tagged/tag"
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+
+		tagName := ""
+		if len(matches) > 0 {
+			tagName = matches[0][1]
+		}
+
+		if tagName == "" {
+			return "Please specify a tag name. Try: 'videos tagged \"BBC\"'", nil
+		}
+
+		query := `
+			SELECT v.id, v.title, COUNT(vt.tag_id) as tag_count
+			FROM videos v
+			JOIN video_tags vt ON v.id = vt.video_id
+			JOIN tags t ON vt.tag_id = t.id
+			WHERE t.name LIKE ?
+			GROUP BY v.id
+			ORDER BY v.created_at DESC
+			LIMIT 10
+		`
+
+		rows, err := s.db.Query(query, "%"+tagName+"%")
+		if err != nil {
+			return "Failed to search videos by tag.", err
+		}
+		defer rows.Close()
+
+		var results []string
+		count := 0
+		for rows.Next() {
+			var id int64
+			var title string
+			var tagCount int
+			if err := rows.Scan(&id, &title, &tagCount); err != nil {
+				continue
+			}
+			results = append(results, fmt.Sprintf("- %s (ID: %d)", title, id))
+			count++
+		}
+
+		if count == 0 {
+			return fmt.Sprintf("No videos found with tag '%s'.", tagName), nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("🏷️ Videos tagged '%s' (%d results):\n\n", tagName, count))
+		for _, result := range results {
+			response.WriteString(result + "\n")
+		}
+		if count >= 10 {
+			response.WriteString("\n(Showing first 10 results)")
+		}
+
+		return response.String(), nil
 	}
 
 	// Search for videos
@@ -2352,32 +2782,117 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 		return response.String(), nil
 	}
 
-	// Performer information query
-	if strings.Contains(messageLower, "performer") && strings.Contains(messageLower, "information") {
-		// Extract performer name from message (simple extraction)
-		// This would be better with LLM, but we'll do basic pattern matching
-		words := strings.Fields(message)
-		for i, word := range words {
-			if strings.ToLower(word) == "performer" && i+1 < len(words) {
-				performerName := strings.Trim(words[i+1], `"'`)
+	// Enhanced performer information query with scraped threads
+	if (strings.Contains(messageLower, "performer") || strings.Contains(messageLower, "about")) &&
+		(strings.Contains(messageLower, "information") || strings.Contains(messageLower, "details") ||
+			strings.Contains(messageLower, "tell me about") || strings.Contains(messageLower, "info")) {
 
-				query := `
-					SELECT p.name, COUNT(vp.video_id) as video_count
-					FROM performers p
-					LEFT JOIN video_performers vp ON p.id = vp.performer_id
-					WHERE p.name LIKE ?
-					GROUP BY p.id
-					LIMIT 1
-				`
-				var name string
-				var videoCount int
-				err := s.db.QueryRow(query, "%"+performerName+"%").Scan(&name, &videoCount)
-				if err != nil {
-					return fmt.Sprintf("I couldn't find information about performer '%s'. Try asking about 'top performers' instead.", performerName), nil
+		// Extract performer name from quotes or after keywords
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+
+		performerName := ""
+		if len(matches) > 0 {
+			performerName = matches[0][1]
+		} else {
+			words := strings.Fields(message)
+			for i, word := range words {
+				wordLower := strings.ToLower(word)
+				if (wordLower == "performer" || wordLower == "about") && i+1 < len(words) {
+					performerName = words[i+1]
+					break
 				}
-				return fmt.Sprintf("Performer: %s\nVideos: %d", name, videoCount), nil
 			}
 		}
+
+		if performerName == "" {
+			return "Please specify a performer name. Try: 'tell me about performer \"Name\"'", nil
+		}
+
+		// Get performer details including metadata and scraped threads
+		query := `
+			SELECT p.id, p.name, p.metadata, p.preview_path, p.thumbnail_path,
+				COUNT(DISTINCT vp.video_id) as video_count,
+				COUNT(DISTINCT pst.thread_id) as thread_count
+			FROM performers p
+			LEFT JOIN video_performers vp ON p.id = vp.performer_id
+			LEFT JOIN performer_scraped_threads pst ON p.id = pst.performer_id
+			WHERE p.name LIKE ?
+			GROUP BY p.id
+			LIMIT 1
+		`
+
+		var id int64
+		var name, metadata, previewPath, thumbnailPath string
+		var videoCount, threadCount int
+
+		err := s.db.QueryRow(query, "%"+performerName+"%").Scan(
+			&id, &name, &metadata, &previewPath, &thumbnailPath,
+			&videoCount, &threadCount)
+
+		if err != nil {
+			return fmt.Sprintf("I couldn't find information about performer '%s'. Try checking the exact name on the Performers page.", performerName), nil
+		}
+
+		var response strings.Builder
+		response.WriteString(fmt.Sprintf("👤 **%s**\n\n", name))
+		response.WriteString(fmt.Sprintf("📹 Videos: %d\n", videoCount))
+		response.WriteString(fmt.Sprintf("🕷️ Scraped Threads: %d\n", threadCount))
+
+		// Parse and display metadata if available
+		if metadata != "" && metadata != "{}" {
+			var metaMap map[string]interface{}
+			if err := json.Unmarshal([]byte(metadata), &metaMap); err == nil {
+				if age, ok := metaMap["age"].(float64); ok && age > 0 {
+					response.WriteString(fmt.Sprintf("🎂 Age: %.0f\n", age))
+				}
+				if birthdate, ok := metaMap["birthdate"].(string); ok && birthdate != "" {
+					response.WriteString(fmt.Sprintf("📅 Birthdate: %s\n", birthdate))
+				}
+				if height, ok := metaMap["height"].(string); ok && height != "" {
+					response.WriteString(fmt.Sprintf("📏 Height: %s\n", height))
+				}
+				if breast, ok := metaMap["breast"].(string); ok && breast != "" {
+					response.WriteString(fmt.Sprintf("💎 Breast: %s\n", breast))
+				}
+			}
+		}
+
+		if previewPath != "" {
+			response.WriteString("✅ Has preview video\n")
+		}
+		if thumbnailPath != "" {
+			response.WriteString("✅ Has thumbnail\n")
+		}
+
+		// Get scraped thread titles if any
+		if threadCount > 0 {
+			threadQuery := `
+				SELECT st.title
+				FROM scraped_threads st
+				JOIN performer_scraped_threads pst ON st.id = pst.thread_id
+				WHERE pst.performer_id = ?
+				LIMIT 5
+			`
+			rows, err := s.db.Query(threadQuery, id)
+			if err == nil {
+				defer rows.Close()
+				response.WriteString("\n📋 Recent Scraped Threads:\n")
+				count := 0
+				for rows.Next() {
+					var title string
+					if rows.Scan(&title) == nil {
+						count++
+						response.WriteString(fmt.Sprintf("%d. %s\n", count, title))
+					}
+				}
+				if threadCount > 5 {
+					response.WriteString(fmt.Sprintf("... and %d more\n", threadCount-5))
+				}
+			}
+		}
+
+		return response.String(), nil
 	}
 
 	// Thumbnail status queries

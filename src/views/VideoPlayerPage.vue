@@ -320,19 +320,31 @@ export default {
 		embedUrl() {
 			if (!this.isScrapedVideo) return ''
 
-			// Extract video ID from the URL
+			const url = this.video.url
+
+			// Handle PornHub URLs - extract viewkey and use embed format
+			// URL: https://www.pornhub.com/view_video.php?viewkey=6796ae6bec815
+			// Embed: https://www.pornhub.com/embed/6796ae6bec815
+			if (url && url.includes('pornhub.com')) {
+				const viewkeyMatch = url.match(/viewkey=([a-zA-Z0-9]+)/)
+				if (viewkeyMatch && viewkeyMatch[1]) {
+					return `https://www.pornhub.com/embed/${viewkeyMatch[1]}`
+				}
+			}
+
+			// Extract video ID from the URL for other sites
 			// Pattern: https://www.WEBSITE.net/12345/title-slug/
-			const videoId = this.extractVideoIdFromUrl(this.video.url)
-			if (!videoId) return this.video.url
+			const videoId = this.extractVideoIdFromUrl(url)
+			if (!videoId) return url
 
 			// Extract the host from the source URL
 			try {
-				const sourceUrl = new URL(this.video.url)
+				const sourceUrl = new URL(url)
 				const host = sourceUrl.origin
 				return `${host}/embed/${videoId}/`
 			} catch (error) {
 				console.error('Failed to construct embed URL:', error)
-				return this.video.url
+				return url
 			}
 		},
 		videoUrl() {

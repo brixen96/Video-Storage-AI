@@ -101,6 +101,78 @@ func (s *ScraperService) GetSessionCookie() string {
 	return s.sessionCookie
 }
 
+// VerifySessionCookie verifies that the session cookie is valid by checking the user's profile
+func (s *ScraperService) VerifySessionCookie() (bool, string, error) {
+	if s.sessionCookie == "" {
+		return false, "", fmt.Errorf("no session cookie set")
+	}
+
+	// Try to access the account page which requires authentication
+	req, err := http.NewRequest("GET", "https://simpcity.is/account/", nil)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Cookie", s.sessionCookie)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to verify cookie: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// If we get redirected to login, the cookie is invalid
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return false, "", nil
+	}
+
+	// Check if we're on the login page (redirect)
+	finalURL := resp.Request.URL.String()
+	if strings.Contains(finalURL, "/login") {
+		return false, "", nil
+	}
+
+	// Parse the page to extract username
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		// Cookie worked but couldn't parse - still consider it valid
+		return true, "", nil
+	}
+
+	// Try to find the username from the page
+	username := ""
+
+	// Look for username in various locations
+	// Check navigation username display
+	doc.Find(".p-navgroup-link--user .p-navgroup-linkText").Each(func(i int, sel *goquery.Selection) {
+		if username == "" {
+			username = strings.TrimSpace(sel.Text())
+		}
+	})
+
+	// Alternative: check account page header
+	if username == "" {
+		doc.Find("h1.p-title-value").Each(func(i int, sel *goquery.Selection) {
+			text := strings.TrimSpace(sel.Text())
+			if strings.HasPrefix(text, "Your account") {
+				// Username might be elsewhere
+			}
+		})
+	}
+
+	// Alternative: look for data-user-id or similar attributes
+	if username == "" {
+		doc.Find("[data-user-id]").Each(func(i int, sel *goquery.Selection) {
+			if name, exists := sel.Attr("data-username"); exists && username == "" {
+				username = name
+			}
+		})
+	}
+
+	return true, username, nil
+}
+
 // NewAdaptiveRateLimiter creates a new adaptive rate limiter
 func NewAdaptiveRateLimiter() *AdaptiveRateLimiter {
 	return &AdaptiveRateLimiter{
@@ -2189,21 +2261,33 @@ func (s *ScraperService) LinkThreadToPerformer(threadID int64, performerID int64
 	return nil
 }
 
-// FindOrCreatePerformer finds an existing performer by name or creates a new one
-func (s *ScraperService) FindOrCreatePerformer(name string) (int64, error) {
-	// First, try to find existing performer (case-insensitive)
+// FindPerformer finds an existing performer by name (case-insensitive)
+func (s *ScraperService) FindPerformer(name string) (int64, error) {
 	var performerID int64
 	err := s.db.QueryRow(`
 		SELECT id FROM performers WHERE LOWER(name) = LOWER(?)
 	`, name).Scan(&performerID)
 
-	if err == nil {
-		// Found existing performer
-		return performerID, nil
+	if err == sql.ErrNoRows {
+		return 0, nil // Return 0 if not found, no error
 	}
 
-	if err != sql.ErrNoRows {
+	if err != nil {
 		return 0, fmt.Errorf("failed to query performer: %w", err)
+	}
+
+	return performerID, nil
+}
+
+// CreatePerformerFromThread creates a new performer from a thread's extracted name
+func (s *ScraperService) CreatePerformerFromThread(name string) (int64, error) {
+	// Check if performer already exists
+	existingID, err := s.FindPerformer(name)
+	if err != nil {
+		return 0, err
+	}
+	if existingID != 0 {
+		return existingID, nil // Return existing performer
 	}
 
 	// Create new performer
@@ -2216,7 +2300,7 @@ func (s *ScraperService) FindOrCreatePerformer(name string) (int64, error) {
 		return 0, fmt.Errorf("failed to create performer: %w", err)
 	}
 
-	performerID, err = result.LastInsertId()
+	performerID, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("failed to get performer ID: %w", err)
 	}
@@ -2371,10 +2455,16 @@ func (s *ScraperService) AutoLinkThreadsToPerformers() error {
 		performerNames := s.ExtractPerformerNameFromTitle(thread.Title)
 
 		for _, name := range performerNames {
-			// Find or create performer
-			performerID, err := s.FindOrCreatePerformer(name)
+			// Find existing performer (don't create new ones automatically)
+			performerID, err := s.FindPerformer(name)
 			if err != nil {
-				log.Printf("Error finding/creating performer %s: %v", name, err)
+				log.Printf("Error finding performer %s: %v", name, err)
+				continue
+			}
+
+			// Skip if performer doesn't exist
+			if performerID == 0 {
+				log.Printf("Skipping thread '%s' - performer '%s' not found (create manually if needed)", thread.Title, name)
 				continue
 			}
 

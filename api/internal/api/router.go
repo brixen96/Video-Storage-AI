@@ -110,6 +110,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			performers.GET("/:id/scraped-threads", getThreadsByPerformer) // Get scraped threads for performer
 			performers.POST("", createPerformer)                    // Create performer
 			performers.POST("/scan", scanPerformers)                // Scan performer folders
+			performers.POST("/cleanup", cleanupEmptyPerformers)     // Cleanup empty performers
 			performers.POST("/generate-thumbnails", generatePerformerThumbnails) // Generate thumbnails for all performers
 			performers.PUT("/:id", updatePerformer)                 // Update performer
 			performers.DELETE("/:id", deletePerformer)              // Delete performer
@@ -171,6 +172,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			activity.POST("/clear-all", clearAllActivities) // Clear all activities
 			activity.POST("/:id/pause", pauseActivity)   // Pause a running task
 			activity.POST("/:id/resume", resumeActivity) // Resume a paused task
+			activity.POST("/:id/cancel", cancelActivity) // Cancel a running or paused task
+			activity.POST("/:id/retry", retryActivity)   // Retry a failed or cancelled task
 		}
 
 		// File operations endpoints
@@ -239,6 +242,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/forum/scrape-all", scrapeForumAndSaveAll)       // Scrape entire forum with full content
 			scraper.POST("/performers/auto-link", autoLinkThreadsToPerformers) // Auto-link threads to performers
 			scraper.POST("/performers/link", linkThreadToPerformer)        // Manually link thread to performer
+			scraper.POST("/performers/create-from-thread", createPerformerFromThread) // Create performer from thread
 			scraper.POST("/links/check-status", checkLinkStatuses)         // Check all download link statuses
 
 			// Link verification endpoints
@@ -254,6 +258,52 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			// Link export endpoints
 			scraper.GET("/threads/:id/export-links", exportThreadLinks)    // Export links from a thread (formats: txt, json, csv)
 			scraper.GET("/links/export-all", exportAllThreadsLinks)        // Export links from all threads
+
+			// Video scraper endpoints
+			scraper.POST("/video", scrapeVideoHandler)                     // Scrape a video from URL
+			scraper.GET("/video/test", testScraperHandler)                 // Test scraper without saving (GET /video/test?url=...)
+			scraper.GET("/videos", getScrapedVideosHandler)                // Get all scraped videos
+			scraper.DELETE("/videos", deleteAllScrapedVideosHandler)       // Delete all scraped videos
+			scraper.DELETE("/videos/site/:siteType", deleteScrapedVideosBySiteTypeHandler) // Delete videos by site type
+			scraper.POST("/videos/bulk-delete", bulkDeleteScrapedVideosHandler) // Bulk delete scraped videos by IDs
+			scraper.GET("/videos/:id", getScrapedVideoHandler)             // Get single scraped video
+			scraper.GET("/videos/duplicates", findDuplicatesHandler)       // Find duplicate scraped videos
+			scraper.DELETE("/videos/duplicates", deleteDuplicatesHandler)  // Delete duplicate scraped videos
+
+			// Scraper tabs endpoints
+			scraper.GET("/tabs", getScraperTabsHandler)                    // Get all scraper tabs
+			scraper.GET("/tabs/:id", getScraperTabHandler)                 // Get single scraper tab
+			scraper.POST("/tabs", createScraperTabHandler)                 // Create scraper tab
+			scraper.PUT("/tabs/:id", updateScraperTabHandler)              // Update scraper tab
+			scraper.DELETE("/tabs/:id", deleteScraperTabHandler)           // Delete scraper tab
+
+			// Scraper jobs endpoints
+			scraper.GET("/jobs", getScraperJobsHandler)                    // Get scraper jobs (all or by tabId query param)
+			scraper.GET("/jobs/:id", getScraperJobHandler)                 // Get single scraper job
+			scraper.POST("/jobs/start", startScraperJobHandler)            // Start a new scraper job
+			scraper.POST("/jobs/:id/cancel", cancelScraperJobHandler)      // Cancel a scraper job
+
+			// PornHub scraper endpoints
+			scraper.POST("/pornhub/scrape", startPornHubScrapeHandler)     // Start PornHub scrape by keyword
+			scraper.GET("/pornhub/keywords", getPornHubKeywordsHandler)    // Get suggested keywords
+			scraper.GET("/pornhub/videos", getPornHubVideosHandler)        // Get scraped PornHub videos
+			scraper.GET("/pornhub/stats", getPornHubStatsHandler)          // Get PornHub scraping stats
+
+			// LuxureTV scraper endpoints
+			scraper.POST("/luxuretv/scrape", startLuxureTVScrapeHandler)       // Start LuxureTV scrape by category
+			scraper.GET("/luxuretv/categories", getLuxureTVCategoriesHandler)  // Get available categories
+			scraper.GET("/luxuretv/videos", getLuxureTVVideosHandler)          // Get scraped LuxureTV videos
+			scraper.GET("/luxuretv/stats", getLuxureTVStatsHandler)            // Get LuxureTV scraping stats
+			scraper.POST("/luxuretv/fetch-embeds", fetchLuxureTVEmbedIDsHandler) // Fetch embed IDs for videos
+
+			// Sexuria scraper endpoints
+			scraper.POST("/sexuria/scrape", startSexuriaScrapeHandler)                   // Start Sexuria scrape by category
+			scraper.GET("/sexuria/categories", getSexuriaCategoriesHandler)              // Get available categories
+			scraper.GET("/sexuria/items", getSexuriaItemsHandler)                        // Get scraped Sexuria items
+			scraper.GET("/sexuria/stats", getSexuriaStatsHandler)                        // Get Sexuria scraping stats
+			scraper.POST("/sexuria/item-details", getSexuriaItemDetailsHandler)          // Get detailed info for an item
+			scraper.GET("/sexuria/search-options", getSexuriaSearchOptionsHandler)       // Get advanced search options
+			scraper.POST("/sexuria/advanced-search", startSexuriaAdvancedSearchHandler)  // Start advanced search scrape
 		}
 
 		// Download Tracking endpoints
@@ -310,8 +360,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// System Health endpoints
 		system := v1.Group("/system")
 		{
-			system.GET("/health", getSystemHealth)     // Get comprehensive system health
-			system.GET("/metrics", getSystemMetrics)   // Get time-series metrics
+			system.GET("/health", getSystemHealth)             // Get comprehensive system health
+			system.GET("/metrics", getSystemMetrics)           // Get time-series metrics
+			system.POST("/open-incognito", openInIncognito)    // Open URL in incognito browser window
+			system.POST("/open-login-helper", openLoginHelper) // Open login page for cookie capture
 		}
 
 		// Notification endpoints

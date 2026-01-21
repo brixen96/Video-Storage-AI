@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -66,11 +67,23 @@ func (s *ActivityService) Create(create *models.ActivityLogCreate) (*models.Acti
 		return nil, fmt.Errorf("failed to get last insert ID: %w", err)
 	}
 
+	// Get the created activity
+	activity, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Broadcast the new activity so Active Tasks panel updates immediately
+	if err := s.BroadcastUpdate(activity); err != nil {
+		log.Printf("failed to broadcast activity update: %v", err)
+	}
+
+	// Also broadcast status update for the counts
 	if err := s.BroadcastStatusUpdate(); err != nil {
 		log.Printf("failed to broadcast status update: %v", err)
 	}
 
-	return s.GetByID(id)
+	return activity, nil
 }
 
 // GetByID retrieves an activity log by ID
@@ -142,8 +155,19 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 	args := []interface{}{}
 
 	if status != "" {
-		query += " AND status = ?"
-		args = append(args, status)
+		// Support comma-separated status values (e.g., "running,paused")
+		statuses := strings.Split(status, ",")
+		if len(statuses) == 1 {
+			query += " AND status = ?"
+			args = append(args, status)
+		} else {
+			placeholders := make([]string, len(statuses))
+			for i, s := range statuses {
+				placeholders[i] = "?"
+				args = append(args, strings.TrimSpace(s))
+			}
+			query += " AND status IN (" + strings.Join(placeholders, ",") + ")"
+		}
 	}
 
 	if taskType != "" {
@@ -167,7 +191,7 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 		}
 	}()
 
-	var activities []models.Activity
+	activities := make([]models.Activity, 0) // Initialize as empty slice, not nil
 	for rows.Next() {
 		var activity models.Activity
 		var detailsJSON []byte
@@ -210,11 +234,19 @@ func (s *ActivityService) GetAll(status string, taskType string, limit int) ([]m
 		// Details is stored as JSON string in the database
 		if len(detailsJSON) > 0 {
 			activity.Details = string(detailsJSON)
+			// Unmarshal to DetailsObj for JSON serialization
+			if err := activity.UnmarshalDetails(); err != nil {
+				log.Printf("failed to unmarshal activity details: %v", err)
+			}
 		}
 
 		// Checkpoint is stored as JSON string in the database
 		if len(checkpointJSON) > 0 {
 			activity.Checkpoint = string(checkpointJSON)
+			// Unmarshal to CheckpointObj for JSON serialization
+			if err := activity.UnmarshalCheckpoint(); err != nil {
+				log.Printf("failed to unmarshal activity checkpoint: %v", err)
+			}
 		}
 
 		activities = append(activities, activity)
@@ -1059,26 +1091,22 @@ func (s *ActivityService) BroadcastStatusUpdate() error {
 	return nil
 }
 
-// PauseTask pauses a running task and saves its checkpoint state
+// PauseTask pauses a running task and preserves its checkpoint state
+// Note: checkpoint parameter is ignored - we preserve the existing checkpoint
+// that was saved by SaveCheckpoint during task execution
 func (s *ActivityService) PauseTask(id int64, checkpoint map[string]interface{}) error {
-	// Marshal checkpoint data
-	checkpointJSON := "{}"
-	if checkpoint != nil {
-		data, err := json.Marshal(checkpoint)
-		if err != nil {
-			return fmt.Errorf("failed to marshal checkpoint: %w", err)
-		}
-		checkpointJSON = string(data)
-	}
-
 	now := time.Now()
+
+	// Only update is_paused and paused_at - DO NOT touch checkpoint!
+	// The checkpoint is saved periodically by SaveCheckpoint during task execution
+	// and must be preserved when pausing
 	query := `
 		UPDATE activity_logs
-		SET is_paused = 1, paused_at = ?, checkpoint = ?
+		SET is_paused = 1, paused_at = ?
 		WHERE id = ? AND status = 'running'
 	`
 
-	result, err := s.db.Exec(query, now, checkpointJSON, id)
+	result, err := s.db.Exec(query, now, id)
 	if err != nil {
 		return fmt.Errorf("failed to pause task: %w", err)
 	}
@@ -1095,7 +1123,7 @@ func (s *ActivityService) PauseTask(id int64, checkpoint map[string]interface{})
 	// Get updated activity for broadcast
 	activity, err := s.GetByID(id)
 	if err == nil && activity != nil {
-		log.Printf("✅ Task %d paused successfully", id)
+		log.Printf("✅ Task %d paused successfully (checkpoint preserved: %s)", id, activity.Checkpoint)
 		s.BroadcastUpdate(activity)
 		s.BroadcastStatusUpdate()
 	}
@@ -1111,6 +1139,8 @@ func (s *ActivityService) ResumeTask(id int64) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to get task: %w", err)
 	}
 
+	log.Printf("🔄 ResumeTask %d - IsPaused: %v, Raw checkpoint: %s", id, activity.IsPaused, activity.Checkpoint)
+
 	if !activity.IsPaused {
 		return nil, fmt.Errorf("task is not paused")
 	}
@@ -1122,8 +1152,9 @@ func (s *ActivityService) ResumeTask(id int64) (map[string]interface{}, error) {
 
 	// Store checkpoint data before we clear it
 	checkpointData := activity.CheckpointObj
+	log.Printf("🔄 ResumeTask %d - Parsed checkpoint: %+v", id, checkpointData)
 
-	// Clear paused state
+	// Clear paused state but keep the checkpoint for reference
 	query := `
 		UPDATE activity_logs
 		SET is_paused = 0, paused_at = NULL
@@ -1142,7 +1173,7 @@ func (s *ActivityService) ResumeTask(id int64) (map[string]interface{}, error) {
 		s.BroadcastStatusUpdate()
 	}
 
-	log.Printf("Task %d resumed from checkpoint", id)
+	log.Printf("✅ Task %d resumed with checkpoint: %+v", id, checkpointData)
 	return checkpointData, nil
 }
 
@@ -1164,10 +1195,114 @@ func (s *ActivityService) SaveCheckpoint(id int64, checkpoint map[string]interfa
 		WHERE id = ?
 	`
 
-	_, err := s.db.Exec(query, checkpointJSON, id)
+	result, err := s.db.Exec(query, checkpointJSON, id)
 	if err != nil {
 		return fmt.Errorf("failed to save checkpoint: %w", err)
 	}
 
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("💾 SaveCheckpoint for task %d: %s (rows affected: %d)", id, checkpointJSON, rowsAffected)
+
 	return nil
+}
+
+// CancelTask cancels a running or paused task permanently
+// Unlike pause, cancel marks the task as cancelled and cannot be resumed
+func (s *ActivityService) CancelTask(id int64) error {
+	// Get the task to verify it exists and can be cancelled
+	activity, err := s.GetByID(id)
+	if err != nil {
+		return fmt.Errorf("failed to get task: %w", err)
+	}
+
+	// Can only cancel tasks that are running or paused
+	if activity.Status != "running" {
+		return fmt.Errorf("task cannot be cancelled (status: %s)", activity.Status)
+	}
+
+	// First pause the task to stop execution (this sets is_paused = 1)
+	// The scraper will detect this and stop
+	if !activity.IsPaused {
+		err = s.PauseTask(id, nil)
+		if err != nil {
+			log.Printf("⚠️ Warning: failed to pause task %d before cancel: %v", id, err)
+		}
+	}
+
+	// Then update status to cancelled
+	cancelledStatus := "cancelled"
+	message := "Task cancelled by user"
+	_, err = s.Update(int(id), &models.ActivityLogUpdate{
+		Status:    &cancelledStatus,
+		Message:   &message,
+		Completed: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update task status: %w", err)
+	}
+
+	log.Printf("❌ Task %d cancelled by user", id)
+
+	// Get updated activity for broadcast
+	cancelledActivity, err := s.GetByID(id)
+	if err == nil && cancelledActivity != nil {
+		s.BroadcastUpdate(cancelledActivity)
+		s.BroadcastStatusUpdate()
+	}
+
+	return nil
+}
+
+// RetryTask resets a failed or cancelled task for retry
+// Returns the activity with its details so the handler can restart the appropriate scraper
+func (s *ActivityService) RetryTask(id int64) (*models.Activity, error) {
+	// Get the task
+	activity, err := s.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get task: %w", err)
+	}
+
+	// Can only retry failed or cancelled tasks
+	if activity.Status != "failed" && activity.Status != "cancelled" {
+		return nil, fmt.Errorf("task cannot be retried (status: %s)", activity.Status)
+	}
+
+	// Reset task to running state with 0 progress
+	runningStatus := "running"
+	progress0 := 0
+	retryMessage := "Retrying task..."
+	_, err = s.Update(int(id), &models.ActivityLogUpdate{
+		Status:    &runningStatus,
+		Progress:  &progress0,
+		Message:   &retryMessage,
+		Completed: false,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to reset task status: %w", err)
+	}
+
+	// Clear paused state and checkpoint for fresh start
+	query := `
+		UPDATE activity_logs
+		SET is_paused = 0, paused_at = NULL, checkpoint = '{}'
+		WHERE id = ?
+	`
+	_, err = s.db.Exec(query, id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clear task state: %w", err)
+	}
+
+	log.Printf("🔄 Task %d reset for retry", id)
+
+	// Get updated activity with details for restart
+	updatedActivity, err := s.GetByID(id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get updated task: %w", err)
+	}
+
+	// Broadcast update
+	s.BroadcastUpdate(updatedActivity)
+	s.BroadcastStatusUpdate()
+
+	return updatedActivity, nil
 }

@@ -516,25 +516,25 @@ export default {
 			}
 		})
 
-		// Poll every 10 seconds to clean up stale tasks that may have completed without websocket notification
+		// Poll every 10 seconds to clean up stale running tasks that may have completed without websocket notification
 		this.staleTaskCleanup = setInterval(async () => {
-			if (this.activities.length > 0) {
-				// Refresh the activities list from the server
+			// Only check if we have running tasks in our local list
+			const localRunningTasks = this.activities.filter(a => a.status === 'running')
+			if (localRunningTasks.length > 0) {
 				try {
+					// Fetch actual running tasks from the server
 					const response = await activityAPI.getAll({ status: 'running', limit: 100 })
-					const runningTasks = response.data || []
-					const runningIds = new Set(runningTasks.map(t => t.id))
+					const serverRunningTasks = response.data || []
+					const serverRunningIds = new Set(serverRunningTasks.map(t => t.id))
 
-					// Remove any tasks that are no longer running on the backend
-					const staleCount = this.activities.length
-					this.activities = this.activities.filter(a => runningIds.has(a.id))
+					// Find local "running" tasks that are no longer running on the server
+					const staleTasks = localRunningTasks.filter(a => !serverRunningIds.has(a.id))
 
-					if (this.activities.length < staleCount) {
-						// Some tasks were removed as stale/completed
-						const removed = staleCount - this.activities.length
-						if (removed > 0) {
-							this.$toast.success('Tasks completed', `${removed} task${removed > 1 ? 's' : ''} finished`)
-						}
+					if (staleTasks.length > 0) {
+						// Remove only the stale running tasks (they've completed without websocket notification)
+						const staleIds = new Set(staleTasks.map(t => t.id))
+						this.activities = this.activities.filter(a => !staleIds.has(a.id))
+						this.$toast.success('Tasks completed', `${staleTasks.length} task${staleTasks.length > 1 ? 's' : ''} finished`)
 					}
 				} catch (error) {
 					// Silently fail - not critical

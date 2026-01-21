@@ -17,6 +17,66 @@ type VideoScraperService struct {
 	db *sql.DB
 }
 
+// GlobalBlockedContentTags contains tags/keywords that should be filtered out across all scrapers
+var GlobalBlockedContentTags = []string{
+	"transsexual",
+	"shemale",
+	"gay",
+	"transgender",
+	"solo",
+	"ts",
+	"tranny",
+	"ladyboy",
+	"femboy",
+	"sissy",
+	"trans",
+}
+
+// ContainsBlockedContent checks if text contains any blocked content keywords
+func ContainsBlockedContent(text string) bool {
+	lowerText := strings.ToLower(text)
+	for _, blocked := range GlobalBlockedContentTags {
+		// Check for whole word match or as part of compound words
+		if strings.Contains(lowerText, blocked) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasBlockedTags checks if any of the tags are in the blocked list
+func HasBlockedTags(tags []string) bool {
+	for _, tag := range tags {
+		lowerTag := strings.ToLower(strings.TrimSpace(tag))
+		for _, blocked := range GlobalBlockedContentTags {
+			if lowerTag == blocked || strings.Contains(lowerTag, blocked) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsVideoBlocked checks if a video should be filtered out based on title, tags, category
+func IsVideoBlocked(video *ScrapedVideo) bool {
+	if video == nil {
+		return false
+	}
+	if ContainsBlockedContent(video.Title) {
+		return true
+	}
+	if ContainsBlockedContent(video.Category) {
+		return true
+	}
+	if ContainsBlockedContent(video.Description) {
+		return true
+	}
+	if HasBlockedTags(video.Tags) {
+		return true
+	}
+	return false
+}
+
 // NewVideoScraperService creates a new video scraper service
 func NewVideoScraperService(db *sql.DB) *VideoScraperService {
 	return &VideoScraperService{db: db}
@@ -24,32 +84,34 @@ func NewVideoScraperService(db *sql.DB) *VideoScraperService {
 
 // ScrapedVideo represents a scraped video
 type ScrapedVideo struct {
-	ID            int64     `json:"id"`
-	Source        string    `json:"source"`
-	SiteType      string    `json:"site_type"`
-	ExternalID    string    `json:"external_id,omitempty"`
-	Title         string    `json:"title"`
-	URL           string    `json:"url"`
-	Description   string    `json:"description,omitempty"`
-	Duration      int       `json:"duration"`
-	FileSize      int64     `json:"file_size"`
-	ThumbnailURL  string    `json:"thumbnail_url,omitempty"`
-	ThumbnailPath string    `json:"thumbnail_path,omitempty"`
-	VideoPath     string    `json:"video_path,omitempty"`
-	Author        string    `json:"author,omitempty"`
-	Uploader      string    `json:"uploader,omitempty"`
-	ViewCount     int       `json:"view_count"`
-	LikeCount     int       `json:"like_count"`
-	Rating        int       `json:"rating"`           // Rating percentage (0-100)
-	Category      string    `json:"category,omitempty"`
-	Tags          []string  `json:"tags"`
-	Metadata      string    `json:"metadata"`
-	Status        string    `json:"status"`
-	ErrorMessage  string    `json:"error_message,omitempty"`
-	DiscoveredAt  time.Time `json:"discovered_at"`
+	ID            int64      `json:"id"`
+	Source        string     `json:"source"`
+	SourceTabName string     `json:"source_tab_name,omitempty"` // Name of the scraper tab
+	SiteType      string     `json:"site_type"`
+	ContentType   string     `json:"content_type,omitempty"` // regular, zoo, 3d, etc.
+	ExternalID    string     `json:"external_id,omitempty"`
+	Title         string     `json:"title"`
+	URL           string     `json:"url"`
+	Description   string     `json:"description,omitempty"`
+	Duration      int        `json:"duration"`
+	FileSize      int64      `json:"file_size"`
+	ThumbnailURL  string     `json:"thumbnail_url,omitempty"`
+	ThumbnailPath string     `json:"thumbnail_path,omitempty"`
+	VideoPath     string     `json:"video_path,omitempty"`
+	Author        string     `json:"author,omitempty"`
+	Uploader      string     `json:"uploader,omitempty"`
+	ViewCount     int        `json:"view_count"`
+	LikeCount     int        `json:"like_count"`
+	Rating        int        `json:"rating"` // Rating percentage (0-100)
+	Category      string     `json:"category,omitempty"`
+	Tags          []string   `json:"tags"`
+	Metadata      string     `json:"metadata"`
+	Status        string     `json:"status"`
+	ErrorMessage  string     `json:"error_message,omitempty"`
+	DiscoveredAt  time.Time  `json:"discovered_at"`
 	ScrapedAt     *time.Time `json:"scraped_at,omitempty"`
 	DownloadedAt  *time.Time `json:"downloaded_at,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 // ScrapeOptions contains scraping configuration
@@ -62,7 +124,8 @@ type ScrapeOptions struct {
 
 // ScrapeProgress represents the current progress of a scraping operation
 type ScrapeProgress struct {
-	PagesCompleted int      `json:"pagesCompleted"`
+	PagesCompleted int      `json:"pagesCompleted"` // Count of pages scraped (for display)
+	CurrentPage    int      `json:"currentPage"`    // Actual page number just completed (for checkpoint/resume)
 	VideosFound    int      `json:"videosFound"`
 	VideosSaved    int      `json:"videosSaved"`
 	Errors         []string `json:"errors"`
@@ -73,9 +136,13 @@ type ProgressCallback func(progress ScrapeProgress)
 
 // ScrapeVideoRequest represents a video scrape request
 type ScrapeVideoRequest struct {
-	URL      string        `json:"url"`
-	SiteType string        `json:"site_type"`
-	Options  ScrapeOptions `json:"options"`
+	URL               string        `json:"url"`
+	SiteType          string        `json:"site_type"`
+	Options           ScrapeOptions `json:"options"`
+	StartPage         int           `json:"startPage"`         // Page to start from (for resume)
+	ActivityID        int64         `json:"-"`                 // Activity ID for pause checking (not JSON serialized)
+	InitialVideoCount int           `json:"-"`                 // Initial video count from checkpoint (for resume)
+	InitialSavedCount int           `json:"-"`                 // Initial saved count from checkpoint (for resume)
 }
 
 // ScrapeResult contains the result of a scrape operation
@@ -369,29 +436,52 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 	}
 
 	baseURL := req.URL
-	// Remove trailing slash and page number if present
+	// Remove trailing slash for consistency
 	baseURL = strings.TrimRight(baseURL, "/")
-	if strings.HasSuffix(baseURL, "/videos") {
-		baseURL = baseURL + "/"
+
+	// Detect if the URL already ends with a page number (like /extreme-test/1)
+	// If so, remove it to get the base path
+	hasPageNumber := false
+	parts := strings.Split(baseURL, "/")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		// Check if last part is a number (page number)
+		if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+			// Remove the page number from the base URL
+			baseURL = strings.Join(parts[:len(parts)-1], "/")
+			hasPageNumber = true
+		}
 	}
 
 	// Track seen URLs to detect when we're scraping the same page over and over
 	seenURLs := make(map[string]bool)
 	consecutiveDuplicates := 0
 
+	// Support resume from a specific page
+	startPage := req.StartPage
+	if startPage <= 0 {
+		startPage = 1
+	}
+
 	// Scrape pages
-	for page := 1; page <= maxPages; page++ {
+	for page := startPage; page <= maxPages; page++ {
+		// Check if task has been paused
+		if req.ActivityID > 0 {
+			activitySvc := NewActivityService()
+			currentActivity, err := activitySvc.GetByID(req.ActivityID)
+			if err == nil && currentActivity.IsPaused {
+				fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
+				return result, fmt.Errorf("task paused by user at page %d", page)
+			}
+		}
 		var pageURL string
-		if page == 1 {
-			// First page might not have /1/ suffix
+		if page == 1 && !hasPageNumber {
+			// First page without explicit page number in original URL
+			// Try base URL as-is (might be /videos/ or /category/)
 			pageURL = baseURL
 		} else {
-			// Subsequent pages: /videos/2/, /videos/3/, etc.
-			if strings.Contains(baseURL, "/videos") {
-				pageURL = strings.TrimSuffix(baseURL, "/") + "/" + fmt.Sprintf("%d/", page)
-			} else {
-				pageURL = baseURL + "/videos/" + fmt.Sprintf("%d/", page)
-			}
+			// Construct page URL by appending page number to base URL
+			pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
@@ -451,9 +541,10 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 	}
 
 	source := parsedURL.Host
+	// Initialize result with counts from checkpoint (for resume)
 	result := &ScrapeResult{
 		Videos:       []*ScrapedVideo{},
-		TotalScraped: 0,
+		TotalScraped: req.InitialVideoCount, // Start from checkpoint count
 		PagesCrawled: 0,
 		Errors:       []string{},
 	}
@@ -464,29 +555,52 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 	}
 
 	baseURL := req.URL
-	// Remove trailing slash and page number if present
+	// Remove trailing slash for consistency
 	baseURL = strings.TrimRight(baseURL, "/")
-	if strings.HasSuffix(baseURL, "/videos") {
-		baseURL = baseURL + "/"
+
+	// Detect if the URL already ends with a page number (like /extreme-test/1)
+	// If so, remove it to get the base path
+	hasPageNumber := false
+	parts := strings.Split(baseURL, "/")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		// Check if last part is a number (page number)
+		if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+			// Remove the page number from the base URL
+			baseURL = strings.Join(parts[:len(parts)-1], "/")
+			hasPageNumber = true
+		}
 	}
 
 	// Track seen URLs to detect when we're scraping the same page over and over
 	seenURLs := make(map[string]bool)
 	consecutiveDuplicates := 0
 
+	// Support resume from a specific page
+	startPage := req.StartPage
+	if startPage <= 0 {
+		startPage = 1
+	}
+
 	// Scrape pages
-	for page := 1; page <= maxPages; page++ {
+	for page := startPage; page <= maxPages; page++ {
+		// Check if task has been paused
+		if req.ActivityID > 0 {
+			activitySvc := NewActivityService()
+			currentActivity, err := activitySvc.GetByID(req.ActivityID)
+			if err == nil && currentActivity.IsPaused {
+				fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
+				return result, fmt.Errorf("task paused by user at page %d", page)
+			}
+		}
 		var pageURL string
-		if page == 1 {
-			// First page might not have /1/ suffix
+		if page == 1 && !hasPageNumber {
+			// First page without explicit page number in original URL
+			// Try base URL as-is (might be /videos/ or /category/)
 			pageURL = baseURL
 		} else {
-			// Subsequent pages: /videos/2/, /videos/3/, etc.
-			if strings.Contains(baseURL, "/videos") {
-				pageURL = strings.TrimSuffix(baseURL, "/") + "/" + fmt.Sprintf("%d/", page)
-			} else {
-				pageURL = baseURL + "/videos/" + fmt.Sprintf("%d/", page)
-			}
+			// Construct page URL by appending page number to base URL
+			pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
@@ -535,6 +649,7 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 		if progressCallback != nil {
 			progressCallback(ScrapeProgress{
 				PagesCompleted: result.PagesCrawled,
+				CurrentPage:    page, // Actual page number for checkpoint/resume
 				VideosFound:    result.TotalScraped,
 				VideosSaved:    result.TotalScraped,
 				Errors:         result.Errors,
@@ -703,6 +818,10 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 	// Look for common video listing patterns
 	// Try multiple selectors to find video items
 	selectors := []string{
+		// PornHub-specific selectors
+		"a.js-linkVideoThumb",
+		".phimage a[href*='view_video']",
+		"a[href*='viewkey=']",
 		// Most specific first - for sites with li.video structure
 		"li.video > a.image",
 		"li.video > span.title > a",
@@ -803,25 +922,89 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 
 			// Extract thumbnail - try multiple attributes for lazy-loaded images
 			thumbnail := ""
+			videoPreviewURL := "" // For animated video previews (PornHub uses data-mediabook)
+			thumbnailFrames := []string{} // Store all thumbnail frames for hover preview
 			if img := sel.Find("img"); img.Length() > 0 {
+				// Try PornHub's data-mediumthumb first (higher quality)
+				if mediumThumb, exists := img.Attr("data-mediumthumb"); exists && mediumThumb != "" {
+					thumbnail = mediumThumb
+				}
 				// Try various image source attributes
-				if src, exists := img.Attr("src"); exists && src != "" && !strings.Contains(src, "placeholder") {
-					thumbnail = src
-				} else if dataSrc, exists := img.Attr("data-src"); exists && dataSrc != "" {
-					thumbnail = dataSrc
-				} else if dataOriginal, exists := img.Attr("data-original"); exists && dataOriginal != "" {
-					thumbnail = dataOriginal
-				} else if dataLazySrc, exists := img.Attr("data-lazy-src"); exists && dataLazySrc != "" {
-					thumbnail = dataLazySrc
+				if thumbnail == "" {
+					if src, exists := img.Attr("src"); exists && src != "" && !strings.Contains(src, "placeholder") {
+						thumbnail = src
+					} else if dataSrc, exists := img.Attr("data-src"); exists && dataSrc != "" {
+						thumbnail = dataSrc
+					} else if dataOriginal, exists := img.Attr("data-original"); exists && dataOriginal != "" {
+						thumbnail = dataOriginal
+					} else if dataLazySrc, exists := img.Attr("data-lazy-src"); exists && dataLazySrc != "" {
+						thumbnail = dataLazySrc
+					}
+				}
+
+				// Extract video preview URL (PornHub uses data-mediabook for webm preview)
+				if mediabook, exists := img.Attr("data-mediabook"); exists && mediabook != "" {
+					videoPreviewURL = mediabook
+				}
+
+				// Convert relative thumbnail URL to absolute URL
+				if thumbnail != "" && !strings.HasPrefix(thumbnail, "http://") && !strings.HasPrefix(thumbnail, "https://") {
+					thumbURL, err := url.Parse(thumbnail)
+					if err == nil {
+						pageBase, _ := url.Parse(pageURL)
+						absoluteThumb := pageBase.ResolveReference(thumbURL)
+						thumbnail = absoluteThumb.String()
+					}
+				}
+
+				// Extract thumbnail frames for hover preview
+				// Check for data-thumbs attribute (total number of frames)
+				if thumbsCount, exists := img.Attr("data-thumbs"); exists && thumbnail != "" {
+					var totalFrames int
+					if _, err := fmt.Sscanf(thumbsCount, "%d", &totalFrames); err == nil && totalFrames > 1 {
+						// Generate URLs for all frames
+						// Pattern: /media/videos/tmb/000/010/964/1.jpg -> /media/videos/tmb/000/010/964/2.jpg, etc.
+						baseThumbURL := thumbnail
+						// Replace the frame number in the URL
+						// Common patterns: /1.jpg, /2.jpg or _1.jpg, _2.jpg
+						for i := 1; i <= totalFrames; i++ {
+							frameURL := baseThumbURL
+							// Try replacing /1.jpg, /1., _1.jpg, _1. patterns
+							if strings.Contains(baseThumbURL, "/1.jpg") {
+								frameURL = strings.Replace(baseThumbURL, "/1.jpg", fmt.Sprintf("/%d.jpg", i), 1)
+							} else if strings.Contains(baseThumbURL, "/1.") {
+								frameURL = strings.Replace(baseThumbURL, "/1.", fmt.Sprintf("/%d.", i), 1)
+							} else if strings.Contains(baseThumbURL, "_1.jpg") {
+								frameURL = strings.Replace(baseThumbURL, "_1.jpg", fmt.Sprintf("_%d.jpg", i), 1)
+							} else if strings.Contains(baseThumbURL, "_1.") {
+								frameURL = strings.Replace(baseThumbURL, "_1.", fmt.Sprintf("_%d.", i), 1)
+							}
+							thumbnailFrames = append(thumbnailFrames, frameURL)
+						}
+					}
 				}
 			}
 
 			// Extract title - try multiple sources
 			title := ""
-			// First try image alt text (most reliable for video cards)
-			if img := sel.Find("img"); img.Length() > 0 {
-				if alt, exists := img.Attr("alt"); exists && alt != "" {
-					title = alt
+			// First try data-title attribute (PornHub uses this)
+			if dataTitle, exists := sel.Attr("data-title"); exists && dataTitle != "" {
+				title = dataTitle
+			}
+			// Try image data-title attribute (PornHub also uses this on img)
+			if title == "" {
+				if img := sel.Find("img"); img.Length() > 0 {
+					if dataTitle, exists := img.Attr("data-title"); exists && dataTitle != "" {
+						title = dataTitle
+					}
+				}
+			}
+			// Try image alt text (most reliable for video cards)
+			if title == "" {
+				if img := sel.Find("img"); img.Length() > 0 {
+					if alt, exists := img.Attr("alt"); exists && alt != "" {
+						title = alt
+					}
 				}
 			}
 			// Try aria-label on the link
@@ -836,7 +1019,15 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 					title = titleAttr
 				}
 			}
-			// Try finding a title/heading element within the selection
+			// Try finding a title/heading element within the selection or parent
+			if title == "" {
+				// Look in parent container for title elements (PornHub has .thumbnailTitle in sibling)
+				if parent := sel.Parent().Parent(); parent.Length() > 0 {
+					if titleEl := parent.Find(".thumbnailTitle, .title a, .video-title"); titleEl.Length() > 0 {
+						title = strings.TrimSpace(titleEl.First().Text())
+					}
+				}
+			}
 			if title == "" {
 				if h := sel.Find("h1, h2, h3, h4, h5, h6, .title, .video-title"); h.Length() > 0 {
 					title = h.First().Text()
@@ -864,7 +1055,19 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 			// Also try looking for duration in parent or sibling elements
 			if duration == 0 {
 				if parent := sel.Parent(); parent.Length() > 0 {
-					if durationEl := parent.Find(".duration, .time, span.duration"); durationEl.Length() > 0 {
+					// PornHub uses var.duration, also check standard duration classes
+					if durationEl := parent.Find("var.duration, .duration, .time, span.duration"); durationEl.Length() > 0 {
+						durationText := strings.TrimSpace(durationEl.First().Text())
+						if durationText != "" {
+							duration = parseDuration(durationText)
+						}
+					}
+				}
+			}
+			// Also search in grandparent for PornHub's deeper nested structure
+			if duration == 0 {
+				if grandparent := sel.Parent().Parent(); grandparent.Length() > 0 {
+					if durationEl := grandparent.Find("var.duration, .duration"); durationEl.Length() > 0 {
 						durationText := strings.TrimSpace(durationEl.First().Text())
 						if durationText != "" {
 							duration = parseDuration(durationText)
@@ -930,6 +1133,15 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 					viewCount = parseViewCount(viewsText)
 				}
 			}
+			// Also search in grandparent for PornHub's structure
+			if viewCount == 0 {
+				if grandparent := sel.Parent().Parent(); grandparent.Length() > 0 {
+					if viewsEl := grandparent.Find(".views var, span.views var, .views"); viewsEl.Length() > 0 {
+						viewsText := strings.TrimSpace(viewsEl.First().Text())
+						viewCount = parseViewCount(viewsText)
+					}
+				}
+			}
 
 			// Extract rating from parent element
 			rating := 0
@@ -941,13 +1153,25 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 				}
 			}
 
-			// Build metadata with resolution if found
+			// Build metadata with resolution, thumbnail frames, and video preview if found
 			metadata := "{}"
+			metadataMap := make(map[string]interface{})
+
 			if resolution != "" {
-				metadataMap := map[string]interface{}{
-					"max_resolution": resolution,
-					"resolutions":    []string{resolution},
-				}
+				metadataMap["max_resolution"] = resolution
+				metadataMap["resolutions"] = []string{resolution}
+			}
+
+			if len(thumbnailFrames) > 0 {
+				metadataMap["thumbnail_frames"] = thumbnailFrames
+			}
+
+			// Store video preview URL for animated hover preview (e.g., PornHub's webm previews)
+			if videoPreviewURL != "" {
+				metadataMap["video_preview_url"] = videoPreviewURL
+			}
+
+			if len(metadataMap) > 0 {
 				if metadataJSON, err := json.Marshal(metadataMap); err == nil {
 					metadata = string(metadataJSON)
 				}
@@ -1053,13 +1277,13 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 	// Video doesn't exist, insert new one
 	query := `
 		INSERT INTO scraped_videos (
-			source, site_type, external_id, title, url, description,
+			source, site_type, content_type, external_id, title, url, description,
 			duration, file_size, thumbnail_url, thumbnail_path, video_path,
 			author, uploader, view_count, like_count, rating, category, tags,
 			metadata, status, error_message, discovered_at, scraped_at,
 			downloaded_at
 		) VALUES (
-			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?,
@@ -1067,9 +1291,15 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 		)
 	`
 
+	// Default content_type to "regular" if not set
+	contentType := video.ContentType
+	if contentType == "" {
+		contentType = "regular"
+	}
+
 	result, err := s.db.Exec(
 		query,
-		video.Source, video.SiteType, toNullString(video.ExternalID), video.Title, video.URL, toNullString(video.Description),
+		video.Source, video.SiteType, contentType, toNullString(video.ExternalID), video.Title, video.URL, toNullString(video.Description),
 		video.Duration, video.FileSize, toNullString(video.ThumbnailURL), toNullString(video.ThumbnailPath), toNullString(video.VideoPath),
 		toNullString(video.Author), toNullString(video.Uploader), video.ViewCount, video.LikeCount, video.Rating, toNullString(video.Category), string(tagsJSON),
 		video.Metadata, video.Status, toNullString(video.ErrorMessage), video.DiscoveredAt, video.ScrapedAt,
@@ -1092,7 +1322,7 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 	query := `
 		SELECT
-			id, source, site_type, external_id, title, url, description,
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
 			duration, file_size, thumbnail_url, thumbnail_path, video_path,
 			author, uploader, view_count, like_count, rating, category, tags,
 			metadata, status, error_message, discovered_at, scraped_at,
@@ -1116,7 +1346,7 @@ func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 		var scrapedAt, downloadedAt sql.NullTime
 
 		err := rows.Scan(
-			&video.ID, &video.Source, &video.SiteType, &externalID, &video.Title, &video.URL, &description,
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
 			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
 			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
 			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
@@ -1166,6 +1396,394 @@ func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 			video.Tags = []string{}
 		}
 
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			continue
+		}
+
+		// Filter out Sexuria items - they should only be shown in the Sexuria section
+		if video.SiteType == "sexuria" || video.Source == "sexuria.net" {
+			continue
+		}
+
+		videos = append(videos, video)
+	}
+
+	return videos, nil
+}
+
+// ScrapedVideosQuery represents query parameters for paginated scraped video retrieval
+type ScrapedVideosQuery struct {
+	Source      string // Filter by source (e.g., "www.pornhub.com", "luxuretv.com")
+	SiteType    string // Filter by site_type (e.g., "pornhub", "luxuretv", "sexuria")
+	ContentType string // Filter by content_type (e.g., "regular", "zoo")
+	Keyword     string // Filter by tag/keyword
+	Search      string // Search in title
+	Page        int    // Page number (1-indexed)
+	Limit       int    // Items per page
+	SortBy      string // Sort field (discovered_at, title, view_count, rating, duration)
+	SortOrder   string // Sort order (asc, desc)
+}
+
+// ScrapedVideosResult represents a paginated result of scraped videos
+type ScrapedVideosResult struct {
+	Videos     []*ScrapedVideo `json:"videos"`
+	Total      int             `json:"total"`
+	Page       int             `json:"page"`
+	Limit      int             `json:"limit"`
+	TotalPages int             `json:"totalPages"`
+}
+
+// GetScrapedVideosPaginated retrieves scraped videos with pagination and filtering
+func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*ScrapedVideosResult, error) {
+	// Set defaults
+	if q.Page < 1 {
+		q.Page = 1
+	}
+	if q.Limit < 1 || q.Limit > 100 {
+		q.Limit = 24
+	}
+	if q.SortBy == "" {
+		q.SortBy = "discovered_at"
+	}
+	if q.SortOrder == "" {
+		q.SortOrder = "desc"
+	}
+
+	// Validate sort field to prevent SQL injection
+	validSortFields := map[string]bool{
+		"discovered_at": true,
+		"title":         true,
+		"view_count":    true,
+		"rating":        true,
+		"duration":      true,
+		"created_at":    true,
+	}
+	if !validSortFields[q.SortBy] {
+		q.SortBy = "discovered_at"
+	}
+	if q.SortOrder != "asc" && q.SortOrder != "desc" {
+		q.SortOrder = "desc"
+	}
+
+	// Build WHERE clause
+	var conditions []string
+	var args []interface{}
+
+	if q.Source != "" {
+		conditions = append(conditions, "source = ?")
+		args = append(args, q.Source)
+	}
+	if q.SiteType != "" {
+		conditions = append(conditions, "site_type = ?")
+		args = append(args, q.SiteType)
+	}
+	if q.ContentType != "" {
+		conditions = append(conditions, "COALESCE(content_type, 'regular') = ?")
+		args = append(args, q.ContentType)
+	}
+	if q.Search != "" {
+		conditions = append(conditions, "title LIKE ?")
+		args = append(args, "%"+q.Search+"%")
+	}
+	if q.Keyword != "" {
+		// Search for keyword in tags JSON array
+		conditions = append(conditions, "tags LIKE ?")
+		args = append(args, "%\""+q.Keyword+"\"%")
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// Get total count
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM scraped_videos %s", whereClause)
+	var total int
+	err := s.db.QueryRow(countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count videos: %w", err)
+	}
+
+	// Calculate offset
+	offset := (q.Page - 1) * q.Limit
+
+	// Build main query with pagination
+	query := fmt.Sprintf(`
+		SELECT
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
+			duration, file_size, thumbnail_url, thumbnail_path, video_path,
+			author, uploader, view_count, like_count, rating, category, tags,
+			metadata, status, error_message, discovered_at, scraped_at,
+			downloaded_at, created_at
+		FROM scraped_videos
+		%s
+		ORDER BY %s %s
+		LIMIT ? OFFSET ?
+	`, whereClause, q.SortBy, strings.ToUpper(q.SortOrder))
+
+	// Add pagination args
+	args = append(args, q.Limit, offset)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []*ScrapedVideo
+	for rows.Next() {
+		video := &ScrapedVideo{}
+		var tagsJSON string
+		var externalID, description, thumbnailURL, thumbnailPath, videoPath sql.NullString
+		var author, uploader, category, errorMessage sql.NullString
+		var scrapedAt, downloadedAt sql.NullTime
+
+		err := rows.Scan(
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
+			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
+			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
+			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
+			&downloadedAt, &video.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		// Handle nullable fields
+		if externalID.Valid {
+			video.ExternalID = externalID.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+		if thumbnailURL.Valid {
+			video.ThumbnailURL = thumbnailURL.String
+		}
+		if thumbnailPath.Valid {
+			video.ThumbnailPath = thumbnailPath.String
+		}
+		if videoPath.Valid {
+			video.VideoPath = videoPath.String
+		}
+		if author.Valid {
+			video.Author = author.String
+		}
+		if uploader.Valid {
+			video.Uploader = uploader.String
+		}
+		if category.Valid {
+			video.Category = category.String
+		}
+		if errorMessage.Valid {
+			video.ErrorMessage = errorMessage.String
+		}
+		if scrapedAt.Valid {
+			video.ScrapedAt = &scrapedAt.Time
+		}
+		if downloadedAt.Valid {
+			video.DownloadedAt = &downloadedAt.Time
+		}
+
+		// Unmarshal tags
+		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
+			video.Tags = []string{}
+		}
+
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			total-- // Adjust total count
+			continue
+		}
+
+		videos = append(videos, video)
+	}
+
+	totalPages := (total + q.Limit - 1) / q.Limit
+
+	return &ScrapedVideosResult{
+		Videos:     videos,
+		Total:      total,
+		Page:       q.Page,
+		Limit:      q.Limit,
+		TotalPages: totalPages,
+	}, nil
+}
+
+// GetScrapedVideosBySiteType retrieves all scraped videos for a specific site type
+func (s *VideoScraperService) GetScrapedVideosBySiteType(siteType string) ([]*ScrapedVideo, error) {
+	query := `
+		SELECT
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
+			duration, file_size, thumbnail_url, thumbnail_path, video_path,
+			author, uploader, view_count, like_count, rating, category, tags,
+			metadata, status, error_message, discovered_at, scraped_at,
+			downloaded_at, created_at
+		FROM scraped_videos
+		WHERE site_type = ?
+		ORDER BY discovered_at DESC
+	`
+
+	rows, err := s.db.Query(query, siteType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []*ScrapedVideo
+	for rows.Next() {
+		video := &ScrapedVideo{}
+		var tagsJSON string
+		var externalID, description, thumbnailURL, thumbnailPath, videoPath sql.NullString
+		var author, uploader, category, errorMessage sql.NullString
+		var scrapedAt, downloadedAt sql.NullTime
+
+		err := rows.Scan(
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
+			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
+			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
+			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
+			&downloadedAt, &video.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		// Handle nullable fields
+		if externalID.Valid {
+			video.ExternalID = externalID.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+		if thumbnailURL.Valid {
+			video.ThumbnailURL = thumbnailURL.String
+		}
+		if thumbnailPath.Valid {
+			video.ThumbnailPath = thumbnailPath.String
+		}
+		if videoPath.Valid {
+			video.VideoPath = videoPath.String
+		}
+		if author.Valid {
+			video.Author = author.String
+		}
+		if uploader.Valid {
+			video.Uploader = uploader.String
+		}
+		if category.Valid {
+			video.Category = category.String
+		}
+		if errorMessage.Valid {
+			video.ErrorMessage = errorMessage.String
+		}
+		if scrapedAt.Valid {
+			video.ScrapedAt = &scrapedAt.Time
+		}
+		if downloadedAt.Valid {
+			video.DownloadedAt = &downloadedAt.Time
+		}
+
+		// Unmarshal tags
+		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
+			video.Tags = []string{}
+		}
+
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			continue
+		}
+
+		videos = append(videos, video)
+	}
+
+	return videos, nil
+}
+
+// GetScrapedVideosBySource retrieves all scraped videos for a specific source (e.g., "sexuria", "pornhub")
+func (s *VideoScraperService) GetScrapedVideosBySource(source string) ([]*ScrapedVideo, error) {
+	query := `
+		SELECT
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
+			duration, file_size, thumbnail_url, thumbnail_path, video_path,
+			author, uploader, view_count, like_count, rating, category, tags,
+			metadata, status, error_message, discovered_at, scraped_at,
+			downloaded_at, created_at
+		FROM scraped_videos
+		WHERE source = ?
+		ORDER BY discovered_at DESC
+	`
+
+	rows, err := s.db.Query(query, source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []*ScrapedVideo
+	for rows.Next() {
+		video := &ScrapedVideo{}
+		var tagsJSON string
+		var externalID, description, thumbnailURL, thumbnailPath, videoPath sql.NullString
+		var author, uploader, category, errorMessage sql.NullString
+		var scrapedAt, downloadedAt sql.NullTime
+
+		err := rows.Scan(
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
+			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
+			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
+			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
+			&downloadedAt, &video.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		// Handle nullable fields
+		if externalID.Valid {
+			video.ExternalID = externalID.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+		if thumbnailURL.Valid {
+			video.ThumbnailURL = thumbnailURL.String
+		}
+		if thumbnailPath.Valid {
+			video.ThumbnailPath = thumbnailPath.String
+		}
+		if videoPath.Valid {
+			video.VideoPath = videoPath.String
+		}
+		if author.Valid {
+			video.Author = author.String
+		}
+		if uploader.Valid {
+			video.Uploader = uploader.String
+		}
+		if category.Valid {
+			video.Category = category.String
+		}
+		if errorMessage.Valid {
+			video.ErrorMessage = errorMessage.String
+		}
+		if scrapedAt.Valid {
+			video.ScrapedAt = &scrapedAt.Time
+		}
+		if downloadedAt.Valid {
+			video.DownloadedAt = &downloadedAt.Time
+		}
+
+		// Unmarshal tags
+		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
+			video.Tags = []string{}
+		}
+
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			continue
+		}
+
 		videos = append(videos, video)
 	}
 
@@ -1176,7 +1794,7 @@ func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 func (s *VideoScraperService) GetScrapedVideoByID(id int64) (*ScrapedVideo, error) {
 	query := `
 		SELECT
-			id, source, site_type, external_id, title, url, description,
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
 			duration, file_size, thumbnail_url, thumbnail_path, video_path,
 			author, uploader, view_count, like_count, rating, category, tags,
 			metadata, status, error_message, discovered_at, scraped_at,
@@ -1192,7 +1810,7 @@ func (s *VideoScraperService) GetScrapedVideoByID(id int64) (*ScrapedVideo, erro
 	var scrapedAt, downloadedAt sql.NullTime
 
 	err := s.db.QueryRow(query, id).Scan(
-		&video.ID, &video.Source, &video.SiteType, &externalID, &video.Title, &video.URL, &description,
+		&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
 		&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
 		&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
 		&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
@@ -1431,4 +2049,514 @@ func findHighestResolution(resolutions []string) string {
 	}
 
 	return highest
+}
+
+// ScrapedDuplicateMatch represents a potential duplicate scraped video match
+type ScrapedDuplicateMatch struct {
+	Video1ID       int64   `json:"video1_id"`
+	Video1Title    string  `json:"video1_title"`
+	Video1URL      string  `json:"video1_url"`
+	Video1Source   string  `json:"video1_source"`
+	Video2ID       int64   `json:"video2_id"`
+	Video2Title    string  `json:"video2_title"`
+	Video2URL      string  `json:"video2_url"`
+	Video2Source   string  `json:"video2_source"`
+	MatchType      string  `json:"match_type"` // "exact_url", "similar_title", "external_id"
+	Similarity     float64 `json:"similarity"` // 0.0 - 1.0
+}
+
+// ScrapedDuplicateStats contains statistics about duplicates
+type ScrapedDuplicateStats struct {
+	TotalDuplicates   int                      `json:"total_duplicates"`
+	ByMatchType       map[string]int           `json:"by_match_type"`
+	BySiteType        map[string]int           `json:"by_site_type"`
+	Duplicates        []*ScrapedDuplicateMatch `json:"duplicates"`
+}
+
+// FindDuplicates finds potential duplicate videos across the database
+func (s *VideoScraperService) FindDuplicates() (*ScrapedDuplicateStats, error) {
+	stats := &ScrapedDuplicateStats{
+		ByMatchType: make(map[string]int),
+		BySiteType:  make(map[string]int),
+		Duplicates:  []*ScrapedDuplicateMatch{},
+	}
+
+	// 1. Find exact URL duplicates (same URL across different site_types)
+	exactURLQuery := `
+		SELECT
+			v1.id, v1.title, v1.url, v1.source, v1.site_type,
+			v2.id, v2.title, v2.url, v2.source, v2.site_type
+		FROM scraped_videos v1
+		JOIN scraped_videos v2 ON v1.url = v2.url AND v1.id < v2.id
+		ORDER BY v1.id
+	`
+	rows, err := s.db.Query(exactURLQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find URL duplicates: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var v1ID, v2ID int64
+		var v1Title, v1URL, v1Source, v1SiteType string
+		var v2Title, v2URL, v2Source, v2SiteType string
+		if err := rows.Scan(&v1ID, &v1Title, &v1URL, &v1Source, &v1SiteType, &v2ID, &v2Title, &v2URL, &v2Source, &v2SiteType); err != nil {
+			continue
+		}
+		dup := &ScrapedDuplicateMatch{
+			Video1ID:     v1ID,
+			Video1Title:  v1Title,
+			Video1URL:    v1URL,
+			Video1Source: v1Source,
+			Video2ID:     v2ID,
+			Video2Title:  v2Title,
+			Video2URL:    v2URL,
+			Video2Source: v2Source,
+			MatchType:    "exact_url",
+			Similarity:   1.0,
+		}
+		stats.Duplicates = append(stats.Duplicates, dup)
+		stats.ByMatchType["exact_url"]++
+		stats.BySiteType[v1SiteType]++
+	}
+	rows.Close()
+
+	// 2. Find duplicates by external_id (same external_id across sources)
+	externalIDQuery := `
+		SELECT
+			v1.id, v1.title, v1.url, v1.source, v1.site_type,
+			v2.id, v2.title, v2.url, v2.source, v2.site_type
+		FROM scraped_videos v1
+		JOIN scraped_videos v2 ON
+			v1.external_id = v2.external_id
+			AND v1.external_id IS NOT NULL
+			AND v1.external_id != ''
+			AND v1.id < v2.id
+		ORDER BY v1.id
+	`
+	rows2, err := s.db.Query(externalIDQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find external_id duplicates: %w", err)
+	}
+	defer rows2.Close()
+
+	for rows2.Next() {
+		var v1ID, v2ID int64
+		var v1Title, v1URL, v1Source, v1SiteType string
+		var v2Title, v2URL, v2Source, v2SiteType string
+		if err := rows2.Scan(&v1ID, &v1Title, &v1URL, &v1Source, &v1SiteType, &v2ID, &v2Title, &v2URL, &v2Source, &v2SiteType); err != nil {
+			continue
+		}
+		dup := &ScrapedDuplicateMatch{
+			Video1ID:     v1ID,
+			Video1Title:  v1Title,
+			Video1URL:    v1URL,
+			Video1Source: v1Source,
+			Video2ID:     v2ID,
+			Video2Title:  v2Title,
+			Video2URL:    v2URL,
+			Video2Source: v2Source,
+			MatchType:    "external_id",
+			Similarity:   1.0,
+		}
+		stats.Duplicates = append(stats.Duplicates, dup)
+		stats.ByMatchType["external_id"]++
+		stats.BySiteType[v1SiteType]++
+	}
+	rows2.Close()
+
+	// 3. Find similar titles using normalized comparison
+	// Get all videos and compare titles in memory for fuzzy matching
+	titleQuery := `
+		SELECT id, title, url, source, site_type, duration
+		FROM scraped_videos
+		ORDER BY id
+	`
+	rows3, err := s.db.Query(titleQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos for title matching: %w", err)
+	}
+	defer rows3.Close()
+
+	type videoInfo struct {
+		ID       int64
+		Title    string
+		URL      string
+		Source   string
+		SiteType string
+		Duration int
+		NormTitle string
+	}
+	var allVideos []videoInfo
+
+	for rows3.Next() {
+		var v videoInfo
+		if err := rows3.Scan(&v.ID, &v.Title, &v.URL, &v.Source, &v.SiteType, &v.Duration); err != nil {
+			continue
+		}
+		v.NormTitle = normalizeTitle(v.Title)
+		allVideos = append(allVideos, v)
+	}
+	rows3.Close()
+
+	// Track already found duplicates to avoid reporting same pair multiple times
+	foundPairs := make(map[string]bool)
+	for _, dup := range stats.Duplicates {
+		key := fmt.Sprintf("%d-%d", dup.Video1ID, dup.Video2ID)
+		foundPairs[key] = true
+	}
+
+	// Compare titles for similar matches
+	for i := 0; i < len(allVideos); i++ {
+		for j := i + 1; j < len(allVideos); j++ {
+			v1 := allVideos[i]
+			v2 := allVideos[j]
+
+			// Skip if same source (might be intentional variations)
+			if v1.Source == v2.Source {
+				continue
+			}
+
+			// Skip if already found as URL or external_id duplicate
+			key := fmt.Sprintf("%d-%d", v1.ID, v2.ID)
+			if foundPairs[key] {
+				continue
+			}
+
+			// Check exact normalized title match
+			if v1.NormTitle == v2.NormTitle && v1.NormTitle != "" && len(v1.NormTitle) > 10 {
+				dup := &ScrapedDuplicateMatch{
+					Video1ID:     v1.ID,
+					Video1Title:  v1.Title,
+					Video1URL:    v1.URL,
+					Video1Source: v1.Source,
+					Video2ID:     v2.ID,
+					Video2Title:  v2.Title,
+					Video2URL:    v2.URL,
+					Video2Source: v2.Source,
+					MatchType:    "exact_title",
+					Similarity:   1.0,
+				}
+				stats.Duplicates = append(stats.Duplicates, dup)
+				stats.ByMatchType["exact_title"]++
+				stats.BySiteType[v1.SiteType]++
+				foundPairs[key] = true
+				continue
+			}
+
+			// Check fuzzy title match (if titles are long enough)
+			if len(v1.NormTitle) > 15 && len(v2.NormTitle) > 15 {
+				similarity := calculateTitleSimilarity(v1.NormTitle, v2.NormTitle)
+				// Also check if duration matches (strong indicator of duplicate)
+				durationMatch := v1.Duration > 0 && v2.Duration > 0 &&
+					(v1.Duration == v2.Duration || absInt(v1.Duration-v2.Duration) <= 5)
+
+				// Require high similarity, or moderate similarity + same duration
+				if similarity > 0.85 || (similarity > 0.7 && durationMatch) {
+					dup := &ScrapedDuplicateMatch{
+						Video1ID:     v1.ID,
+						Video1Title:  v1.Title,
+						Video1URL:    v1.URL,
+						Video1Source: v1.Source,
+						Video2ID:     v2.ID,
+						Video2Title:  v2.Title,
+						Video2URL:    v2.URL,
+						Video2Source: v2.Source,
+						MatchType:    "similar_title",
+						Similarity:   similarity,
+					}
+					stats.Duplicates = append(stats.Duplicates, dup)
+					stats.ByMatchType["similar_title"]++
+					stats.BySiteType[v1.SiteType]++
+					foundPairs[key] = true
+				}
+			}
+		}
+	}
+
+	stats.TotalDuplicates = len(stats.Duplicates)
+	return stats, nil
+}
+
+// normalizeTitle normalizes a video title for comparison
+func normalizeTitle(title string) string {
+	// Convert to lowercase
+	normalized := strings.ToLower(title)
+
+	// Remove common patterns that vary between sites
+	// Remove resolution indicators
+	resPatterns := []string{"[4k]", "[1080p]", "[720p]", "[480p]", "[hd]", "4k", "1080p", "720p", "480p", "hd"}
+	for _, pattern := range resPatterns {
+		normalized = strings.ReplaceAll(normalized, pattern, "")
+	}
+
+	// Remove common suffixes/prefixes
+	suffixes := []string{" - pornhub.com", " - xvideos.com", " porn", " xxx", " free porn", " video"}
+	for _, suffix := range suffixes {
+		normalized = strings.TrimSuffix(normalized, suffix)
+	}
+
+	// Remove special characters except spaces
+	var result strings.Builder
+	for _, r := range normalized {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == ' ' {
+			result.WriteRune(r)
+		}
+	}
+	normalized = result.String()
+
+	// Collapse multiple spaces
+	for strings.Contains(normalized, "  ") {
+		normalized = strings.ReplaceAll(normalized, "  ", " ")
+	}
+
+	return strings.TrimSpace(normalized)
+}
+
+// calculateTitleSimilarity calculates similarity between two normalized titles
+func calculateTitleSimilarity(title1, title2 string) float64 {
+	if title1 == title2 {
+		return 1.0
+	}
+
+	// Use Jaccard similarity on word sets
+	words1 := strings.Fields(title1)
+	words2 := strings.Fields(title2)
+
+	if len(words1) == 0 || len(words2) == 0 {
+		return 0.0
+	}
+
+	// Create word sets
+	set1 := make(map[string]bool)
+	for _, w := range words1 {
+		if len(w) > 2 { // Only consider words > 2 chars
+			set1[w] = true
+		}
+	}
+	set2 := make(map[string]bool)
+	for _, w := range words2 {
+		if len(w) > 2 {
+			set2[w] = true
+		}
+	}
+
+	// Calculate intersection and union
+	intersection := 0
+	for w := range set1 {
+		if set2[w] {
+			intersection++
+		}
+	}
+
+	union := len(set1)
+	for w := range set2 {
+		if !set1[w] {
+			union++
+		}
+	}
+
+	if union == 0 {
+		return 0.0
+	}
+
+	return float64(intersection) / float64(union)
+}
+
+// absInt returns absolute value of an int
+func absInt(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// DeleteDuplicates removes duplicate videos, keeping the one with more metadata
+func (s *VideoScraperService) DeleteDuplicates(keepStrategy string) (int, error) {
+	stats, err := s.FindDuplicates()
+	if err != nil {
+		return 0, err
+	}
+
+	deleted := 0
+	for _, dup := range stats.Duplicates {
+		// Determine which video to keep based on strategy
+		var keepID, deleteID int64
+		switch keepStrategy {
+		case "keep_first":
+			keepID = dup.Video1ID
+			deleteID = dup.Video2ID
+		case "keep_last":
+			keepID = dup.Video2ID
+			deleteID = dup.Video1ID
+		default:
+			// Default: keep the one with more views/rating
+			v1, _ := s.GetScrapedVideoByID(dup.Video1ID)
+			v2, _ := s.GetScrapedVideoByID(dup.Video2ID)
+			if v1 != nil && v2 != nil {
+				// Score based on metadata completeness
+				score1 := 0
+				score2 := 0
+				if v1.ViewCount > 0 { score1++ }
+				if v2.ViewCount > 0 { score2++ }
+				if v1.Rating > 0 { score1++ }
+				if v2.Rating > 0 { score2++ }
+				if v1.Duration > 0 { score1++ }
+				if v2.Duration > 0 { score2++ }
+				if v1.ThumbnailURL != "" { score1++ }
+				if v2.ThumbnailURL != "" { score2++ }
+
+				if score1 >= score2 {
+					keepID = dup.Video1ID
+					deleteID = dup.Video2ID
+				} else {
+					keepID = dup.Video2ID
+					deleteID = dup.Video1ID
+				}
+			} else {
+				keepID = dup.Video1ID
+				deleteID = dup.Video2ID
+			}
+		}
+
+		// Delete the duplicate
+		_, err := s.db.Exec("DELETE FROM scraped_videos WHERE id = ?", deleteID)
+		if err == nil {
+			deleted++
+			fmt.Printf("Deleted duplicate video ID %d (kept ID %d)\n", deleteID, keepID)
+		}
+	}
+
+	return deleted, nil
+}
+
+// GetScrapedVideosWithTabInfo retrieves all scraped videos with their source tab name
+// This joins scraped_videos with scraper_tabs based on the source URL domain
+func (s *VideoScraperService) GetScrapedVideosWithTabInfo() ([]*ScrapedVideo, error) {
+	// Get all scraper tabs to map source domains to tab names
+	tabsQuery := `SELECT base_url, name, content_type FROM scraper_tabs WHERE is_active = 1`
+	tabRows, err := s.db.Query(tabsQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query scraper tabs: %w", err)
+	}
+	defer tabRows.Close()
+
+	// Build a map of domain -> tab info
+	type tabInfo struct {
+		Name        string
+		ContentType string
+	}
+	tabMap := make(map[string]tabInfo)
+	for tabRows.Next() {
+		var baseURL, name, contentType string
+		if err := tabRows.Scan(&baseURL, &name, &contentType); err != nil {
+			continue
+		}
+		// Extract domain from base URL
+		if parsedURL, err := url.Parse(baseURL); err == nil {
+			domain := parsedURL.Host
+			tabMap[domain] = tabInfo{Name: name, ContentType: contentType}
+		}
+	}
+
+	// Get all scraped videos
+	query := `
+		SELECT
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
+			duration, file_size, thumbnail_url, thumbnail_path, video_path,
+			author, uploader, view_count, like_count, rating, category, tags,
+			metadata, status, error_message, discovered_at, scraped_at,
+			downloaded_at, created_at
+		FROM scraped_videos
+		ORDER BY discovered_at DESC
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []*ScrapedVideo
+	for rows.Next() {
+		video := &ScrapedVideo{}
+		var tagsJSON string
+		var externalID, description, thumbnailURL, thumbnailPath, videoPath sql.NullString
+		var author, uploader, category, errorMessage sql.NullString
+		var scrapedAt, downloadedAt sql.NullTime
+
+		err := rows.Scan(
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
+			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
+			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
+			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
+			&downloadedAt, &video.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		// Handle nullable fields
+		if externalID.Valid {
+			video.ExternalID = externalID.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+		if thumbnailURL.Valid {
+			video.ThumbnailURL = thumbnailURL.String
+		}
+		if thumbnailPath.Valid {
+			video.ThumbnailPath = thumbnailPath.String
+		}
+		if videoPath.Valid {
+			video.VideoPath = videoPath.String
+		}
+		if author.Valid {
+			video.Author = author.String
+		}
+		if uploader.Valid {
+			video.Uploader = uploader.String
+		}
+		if category.Valid {
+			video.Category = category.String
+		}
+		if errorMessage.Valid {
+			video.ErrorMessage = errorMessage.String
+		}
+		if scrapedAt.Valid {
+			video.ScrapedAt = &scrapedAt.Time
+		}
+		if downloadedAt.Valid {
+			video.DownloadedAt = &downloadedAt.Time
+		}
+
+		// Unmarshal tags
+		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
+			video.Tags = []string{}
+		}
+
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			continue
+		}
+
+		// Filter out Sexuria items - they should only be shown in the Sexuria section
+		if video.SiteType == "sexuria" || video.Source == "sexuria.net" {
+			continue
+		}
+
+		// Try to match the video's source to a scraper tab
+		if info, exists := tabMap[video.Source]; exists {
+			video.SourceTabName = info.Name
+			// If the video doesn't have a content type set, use the tab's content type
+			if video.ContentType == "" || video.ContentType == "regular" {
+				video.ContentType = info.ContentType
+			}
+		}
+
+		videos = append(videos, video)
+	}
+
+	return videos, nil
 }

@@ -809,6 +809,85 @@ func runMigrations() error {
 		}
 	}
 
+	// Migration 36: Add job_type column to scraper_tab_jobs for source-specific jobs (like PornHub)
+	// and make tab_id nullable
+	migration36JobType := `ALTER TABLE scraper_tab_jobs ADD COLUMN job_type TEXT DEFAULT 'tab'`
+	if _, err := DB.Exec(migration36JobType); err != nil {
+		if !isColumnExistsError(err) {
+			// Ignore if column exists
+		}
+	}
+
+	// Migration 37: Recreate scraper_tab_jobs with nullable tab_id (SQLite workaround)
+	// Check if migration is needed by checking if we can insert with NULL tab_id
+	var needsMigration bool
+	testQuery := `INSERT INTO scraper_tab_jobs (tab_id, status, url, job_type) VALUES (NULL, 'test', 'test', 'test')`
+	if _, err := DB.Exec(testQuery); err != nil {
+		needsMigration = true
+	} else {
+		// Clean up test row
+		DB.Exec(`DELETE FROM scraper_tab_jobs WHERE status = 'test' AND url = 'test'`)
+	}
+
+	if needsMigration {
+		// Recreate the table with nullable tab_id
+		migrationSteps := []string{
+			`CREATE TABLE IF NOT EXISTS scraper_tab_jobs_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				tab_id INTEGER,
+				job_type TEXT DEFAULT 'tab',
+				status TEXT NOT NULL DEFAULT 'pending',
+				url TEXT NOT NULL,
+				total_pages INTEGER DEFAULT 0,
+				pages_completed INTEGER DEFAULT 0,
+				videos_found INTEGER DEFAULT 0,
+				videos_saved INTEGER DEFAULT 0,
+				errors_count INTEGER DEFAULT 0,
+				error_messages TEXT DEFAULT '[]',
+				started_at DATETIME,
+				completed_at DATETIME,
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				FOREIGN KEY (tab_id) REFERENCES scraper_tabs(id) ON DELETE CASCADE
+			)`,
+			`INSERT INTO scraper_tab_jobs_new SELECT id, tab_id, COALESCE(job_type, 'tab'), status, url, total_pages, pages_completed, videos_found, videos_saved, errors_count, error_messages, started_at, completed_at, created_at, updated_at FROM scraper_tab_jobs`,
+			`DROP TABLE scraper_tab_jobs`,
+			`ALTER TABLE scraper_tab_jobs_new RENAME TO scraper_tab_jobs`,
+		}
+		for i, step := range migrationSteps {
+			if _, err := DB.Exec(step); err != nil {
+				errMsg := err.Error()
+				// Allow some errors during migration (like table doesn't exist)
+				if !strings.Contains(errMsg, "no such table") && !strings.Contains(errMsg, "already exists") {
+					return fmt.Errorf("migration 37 step %d failed: %w", i+1, err)
+				}
+			}
+		}
+
+		// Recreate indexes after table rename
+		for _, idx := range scraperTabJobsIndexes {
+			DB.Exec(idx)
+		}
+	}
+
+	// Migration 38: Add content_type column to scraper_tabs for filtering (Regular/Zoo/3D/etc)
+	migration38ContentType := `ALTER TABLE scraper_tabs ADD COLUMN content_type TEXT DEFAULT 'regular'`
+	if _, err := DB.Exec(migration38ContentType); err != nil {
+		// Ignore if column exists
+		if !isColumnExistsError(err) {
+			// Allow to continue
+		}
+	}
+
+	// Migration 39: Add content_type column to scraped_videos
+	migration39ContentType := `ALTER TABLE scraped_videos ADD COLUMN content_type TEXT DEFAULT 'regular'`
+	if _, err := DB.Exec(migration39ContentType); err != nil {
+		// Ignore if column exists
+		if !isColumnExistsError(err) {
+			// Allow to continue
+		}
+	}
+
 	for i, migration := range migrations {
 		if _, err := DB.Exec(migration); err != nil {
 			errMsg := err.Error()

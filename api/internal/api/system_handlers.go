@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"time"
 
@@ -421,4 +422,136 @@ func getSystemMetrics(c *gin.Context) {
 	metrics["link_verification_timeline"] = linkVerificationTimeline
 
 	c.JSON(http.StatusOK, models.SuccessResponse(metrics, "System metrics retrieved"))
+}
+
+// openInIncognito opens a URL in Firefox browser (regular tab, not private)
+func openInIncognito(c *gin.Context) {
+	var request struct {
+		URL string `json:"url" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request body",
+			err.Error(),
+		))
+		return
+	}
+
+	var err error
+
+	switch runtime.GOOS {
+	case "windows":
+		// Use Firefox as the primary browser (regular tab, not private)
+		cmd := exec.Command("cmd", "/c", "start", "", "firefox", request.URL)
+		err = cmd.Run()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+				"Failed to open browser",
+				"Could not find Firefox. Please install Firefox.",
+			))
+			return
+		}
+		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+			"browser": "firefox",
+			"url":     request.URL,
+		}, "Opening URL in Firefox"))
+		return
+
+	case "darwin":
+		// macOS - use Firefox
+		cmd := exec.Command("open", "-na", "Firefox", "--args", request.URL)
+		if err = cmd.Run(); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+				"Failed to open browser",
+				"Could not find Firefox. Please install Firefox.",
+			))
+			return
+		}
+
+	case "linux":
+		// Linux - use Firefox
+		cmd := exec.Command("firefox", request.URL)
+		if err = cmd.Start(); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+				"Failed to open browser",
+				"Could not find Firefox. Please install Firefox.",
+			))
+			return
+		}
+
+	default:
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Unsupported operating system",
+			runtime.GOOS,
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"url": request.URL,
+	}, "Opening URL in Firefox"))
+}
+
+// openLoginHelper opens the Simpcity login page in Firefox for authentication
+func openLoginHelper(c *gin.Context) {
+	var request struct {
+		Site string `json:"site" binding:"required"` // e.g., "simpcity"
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request body",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get the login URL based on site
+	var loginURL string
+	switch request.Site {
+	case "simpcity":
+		loginURL = "https://simpcity.is/login/"
+	default:
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Unknown site",
+			request.Site,
+		))
+		return
+	}
+
+	var err error
+
+	switch runtime.GOOS {
+	case "windows":
+		// Open Firefox with the login page (regular tab)
+		cmd := exec.Command("cmd", "/c", "start", "", "firefox", loginURL)
+		err = cmd.Run()
+	case "darwin":
+		cmd := exec.Command("open", "-na", "Firefox", "--args", loginURL)
+		err = cmd.Run()
+	case "linux":
+		cmd := exec.Command("firefox", loginURL)
+		err = cmd.Start()
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to open browser",
+			"Could not find Firefox. Please install Firefox.",
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"site":      request.Site,
+		"login_url": loginURL,
+		"instructions": []string{
+			"1. Log in to your account in the Firefox window that opened",
+			"2. After logging in, press F12 to open Developer Tools",
+			"3. Go to Storage tab → Cookies → simpcity.is",
+			"4. Copy all cookie values",
+			"5. Paste them back in the app",
+		},
+	}, "Login page opened in Firefox"))
 }

@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -306,7 +308,8 @@ func startScraperJobHandler(c *gin.Context) {
 
 	// Create a new job
 	job := &services.ScraperJob{
-		TabID:          request.TabID,
+		TabID:          &request.TabID,
+		JobType:        "tab",
 		Status:         "pending",
 		URL:            request.URL,
 		ErrorMessages:  []string{},
@@ -354,10 +357,17 @@ func startScraperJobHandler(c *gin.Context) {
 			"url":    request.URL,
 		})
 
+		// Get activity ID for pause checking
+		var activityID int64 = 0
+		if activity != nil {
+			activityID = int64(activity.ID)
+		}
+
 		// Build scrape request from tab configuration
 		scrapeRequest := services.ScrapeVideoRequest{
-			URL:      request.URL,
-			SiteType: tab.SiteType,
+			URL:        request.URL,
+			SiteType:   tab.SiteType,
+			ActivityID: activityID,
 			Options: services.ScrapeOptions{
 				DownloadVideo:    false,
 				ExtractMetadata:  true,
@@ -389,19 +399,22 @@ func startScraperJobHandler(c *gin.Context) {
 			}
 			svc.UpdateScraperJob(createdJob.ID, createdJob)
 
-			// Update activity monitor
+			// Update activity monitor - NOTE: Do NOT update Details here to preserve original
 			if activity != nil {
 				progressPercent := 0
-				// We don't know total pages upfront, so show indefinite progress
 				activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
-					Message: stringPtr(fmt.Sprintf("Scraped %d pages, found %d videos", progress.PagesCompleted, progress.VideosFound)),
+					Message:  stringPtr(fmt.Sprintf("Scraped %d pages, found %d videos (page %d)", progress.PagesCompleted, progress.VideosFound, progress.CurrentPage)),
 					Progress: &progressPercent,
-					Details: map[string]interface{}{
-						"pages_completed": progress.PagesCompleted,
-						"videos_found":    progress.VideosFound,
-						"videos_saved":    progress.VideosSaved,
-						"errors_count":    len(progress.Errors),
-					},
+				})
+
+				// Save checkpoint for resume capability (separate from details)
+				// Use CurrentPage (actual page number) NOT PagesCompleted (counter)
+				activitySvc.SaveCheckpoint(int64(activity.ID), map[string]interface{}{
+					"current_page":  progress.CurrentPage, // Actual page number for correct resume
+					"videos_found":  progress.VideosFound,
+					"videos_saved":  progress.VideosSaved,
+					"url":           request.URL,
+					"tab_id":        request.TabID,
 				})
 			}
 		})
@@ -410,24 +423,32 @@ func startScraperJobHandler(c *gin.Context) {
 		createdJob.CompletedAt = &completedAt
 
 		if err != nil {
-			createdJob.Status = "failed"
-			createdJob.ErrorMessages = append(createdJob.ErrorMessages, err.Error())
-			createdJob.ErrorsCount++
+			// Check if this was a pause (not a real error)
+			if strings.Contains(err.Error(), "paused by user") {
+				createdJob.Status = "paused"
+				createdJob.ErrorMessages = append(createdJob.ErrorMessages, err.Error())
+				// Don't update activity - it's already marked as paused
+				log.Printf("✓ Scraping paused successfully, can be resumed")
+			} else {
+				createdJob.Status = "failed"
+				createdJob.ErrorMessages = append(createdJob.ErrorMessages, err.Error())
+				createdJob.ErrorsCount++
 
-			consoleLogSvc.LogAPI("error", "Scraper job failed", map[string]interface{}{
-				"job_id": createdJob.ID,
-				"error":  err.Error(),
-			})
-
-			// Update activity to failed
-			if activity != nil {
-				failedStatus := "failed"
-				errorMsg := err.Error()
-				activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
-					Status:    &failedStatus,
-					Message:   stringPtr(fmt.Sprintf("Scraping failed: %s", errorMsg)),
-					Completed: true,
+				consoleLogSvc.LogAPI("error", "Scraper job failed", map[string]interface{}{
+					"job_id": createdJob.ID,
+					"error":  err.Error(),
 				})
+
+				// Update activity to failed
+				if activity != nil {
+					failedStatus := "failed"
+					errorMsg := err.Error()
+					activitySvc.Update(activity.ID, &models.ActivityLogUpdate{
+						Status:    &failedStatus,
+						Message:   stringPtr(fmt.Sprintf("Scraping failed: %s", errorMsg)),
+						Completed: true,
+					})
+				}
 			}
 		} else {
 			createdJob.Status = "completed"

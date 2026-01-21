@@ -67,10 +67,17 @@
 					</div>
 
 					<!-- Advanced Filter Toggle -->
-					<div class="col-md-2">
+					<div class="col-md-1">
 						<button class="btn btn-outline-secondary w-100" @click="showFilters = !showFilters">
 							<font-awesome-icon :icon="['fas', 'filter']" class="me-2" />
 							{{ showFilters ? 'Hide' : 'Filters' }}
+						</button>
+					</div>
+
+					<!-- Cleanup Button -->
+					<div class="col-md-1">
+						<button class="btn btn-outline-danger w-100" @click="cleanupEmptyPerformers" :disabled="isCleaningUp" title="Delete empty performers">
+							<font-awesome-icon :icon="['fas', isCleaningUp ? 'spinner' : 'trash-alt']" :spin="isCleaningUp" />
 						</button>
 					</div>
 				</div>
@@ -188,7 +195,7 @@
 							:alt="performer.name"
 							loading="lazy"
 						/>
-						<!-- Video Preview (always loaded, visibility toggled) -->
+						<!-- Video Preview (loads only on hover) -->
 						<video
 							v-if="performer.preview_path"
 							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
@@ -199,7 +206,7 @@
 							loop
 							muted
 							playsinline
-							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
+							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
@@ -279,7 +286,7 @@
 							loop
 							muted
 							playsinline
-							:preload="performer.thumbnail_path ? 'auto' : 'metadata'"
+							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
@@ -697,6 +704,7 @@ export default {
 			performers: [],
 			loading: false,
 			error: null,
+			isCleaningUp: false,
 			searchQuery: '',
 			sortBy: 'name',
 			viewMode: settings.defaultViewMode || 'grid',
@@ -900,11 +908,16 @@ export default {
 			// Set hover state to true to show video
 			this.hoveredPerformer[performer.id] = true
 
-			// Play the video if it exists
+			// Load and play the video on hover (since preload="none")
 			this.$nextTick(() => {
 				const videoRef = this.$refs[`video-${performer.id}`]
 				if (videoRef && videoRef[0]) {
-					videoRef[0].play().catch((err) => {
+					const video = videoRef[0]
+					// Load the video if not already loaded
+					if (video.readyState === 0) {
+						video.load()
+					}
+					video.play().catch((err) => {
 						// Ignore play errors (can happen if video not loaded yet)
 						console.debug('Video play error:', err)
 					})
@@ -1212,6 +1225,33 @@ export default {
 			} catch (err) {
 				console.error('Failed to delete performer:', err)
 				this.$toast.error('Delete Failed', 'Failed to delete performer')
+			}
+		},
+		async cleanupEmptyPerformers() {
+			if (!confirm('This will delete all performers without preview videos or metadata. Are you sure?')) {
+				return
+			}
+
+			this.isCleaningUp = true
+			try {
+				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', {
+					method: 'POST'
+				})
+				const data = await response.json()
+
+				if (data.success) {
+					const deletedCount = data.data.deleted_count
+					this.$toast.success(`Cleaned up ${deletedCount} empty performers`)
+					// Reload performers list
+					await this.loadPerformers()
+				} else {
+					this.$toast.error('Cleanup Failed', data.message || 'Failed to cleanup performers')
+				}
+			} catch (err) {
+				console.error('Failed to cleanup performers:', err)
+				this.$toast.error('Cleanup Failed', 'Failed to cleanup performers')
+			} finally {
+				this.isCleaningUp = false
 			}
 		},
 		clearFilters() {

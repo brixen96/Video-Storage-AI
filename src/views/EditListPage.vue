@@ -1,202 +1,391 @@
 <template>
 	<div class="edit-list-page">
 		<div class="container-fluid py-4">
-			<!-- Page Header -->
-			<div class="page-header mb-4">
-				<div class="header-content">
-					<h1>
-						<font-awesome-icon :icon="['fas', 'list-check']" class="me-3" />
-						Edit List
-					</h1>
-					<p class="lead">Manage videos queued for editing and processing</p>
-				</div>
-				<div class="header-actions">
-					<button v-if="selectedCount > 0" class="btn btn-danger me-2" @click="removeSelectedFromList">
-						<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-						Remove Selected ({{ selectedCount }})
-					</button>
-					<button v-if="videos.length > 0" class="btn btn-warning me-2" @click="clearEditList">
-						<font-awesome-icon :icon="['fas', 'broom']" class="me-2" />
-						Clear All
-					</button>
-					<button class="btn btn-primary" @click="refreshList">
-						<font-awesome-icon :icon="['fas', 'sync']" :spin="loading" class="me-2" />
-						Refresh
-					</button>
-				</div>
-			</div>
-
-			<!-- Stats Summary -->
-			<div class="stats-summary mb-4">
-				<div class="row g-3">
-					<div class="col-md-3">
-						<StatCard :value="videos.length" label="Videos in List" :icon="['fas', 'video']" icon-class="primary" />
-					</div>
-					<div class="col-md-3">
-						<StatCard :value="selectedCount" label="Selected" :icon="['fas', 'check-circle']" icon-class="success" />
-					</div>
-					<div class="col-md-3">
-						<StatCard :value="formatTotalSize(totalSize)" label="Total Size" :icon="['fas', 'hdd']" icon-class="info" />
-					</div>
-					<div class="col-md-3">
-						<StatCard :value="formatTotalDuration(totalDuration)" label="Total Duration" :icon="['fas', 'clock']" icon-class="warning" />
-					</div>
-				</div>
-			</div>
-
-			<!-- Filters and Controls -->
-			<div class="filters-bar mb-4">
-				<div class="row g-3">
-					<div class="col-md-4">
-						<div class="input-group">
-							<span class="input-group-text">
-								<font-awesome-icon :icon="['fas', 'search']" />
-							</span>
-							<input v-model="searchQuery" type="text" class="form-control" placeholder="Search videos..." @input="filterVideos" />
-							<button v-if="searchQuery" class="btn btn-outline-secondary" @click="searchQuery = ''; filterVideos()">
-								<font-awesome-icon :icon="['fas', 'times']" />
+			<div class="row">
+				<!-- Main Content -->
+				<div :class="hoveredVideo ? 'col-md-8 col-lg-9' : 'col-12'">
+					<!-- Page Header -->
+					<div class="page-header mb-4">
+						<div class="header-content">
+							<h1>
+								<font-awesome-icon :icon="['fas', 'list-check']" class="me-3" />
+								Edit List
+							</h1>
+							<p class="lead">Manage videos queued for editing and processing</p>
+						</div>
+						<div class="header-actions">
+							<button v-if="selectedCount > 0" class="btn btn-danger me-2" @click="removeSelectedFromList">
+								<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
+								Remove Selected ({{ selectedCount }})
+							</button>
+							<button v-if="videos.length > 0" class="btn btn-warning me-2" @click="clearEditList">
+								<font-awesome-icon :icon="['fas', 'broom']" class="me-2" />
+								Clear All
+							</button>
+							<button class="btn btn-primary" @click="refreshList">
+								<font-awesome-icon :icon="['fas', 'sync']" :spin="loading" class="me-2" />
+								Refresh
 							</button>
 						</div>
 					</div>
-					<div class="col-md-2">
-						<select v-model="sortBy" class="form-select" @change="sortVideos">
-							<option value="added_date">Date Added</option>
-							<option value="title">Title</option>
-							<option value="duration">Duration</option>
-							<option value="size">File Size</option>
-							<option value="rating">Rating</option>
-						</select>
+
+					<!-- Stats Summary -->
+					<div class="stats-summary mb-4">
+						<div class="row g-3">
+							<div class="col-md-3">
+								<StatCard :value="videos.length" label="Videos in List" :icon="['fas', 'video']" icon-class="primary" />
+							</div>
+							<div class="col-md-3">
+								<StatCard :value="selectedCount" label="Selected" :icon="['fas', 'check-circle']" icon-class="success" />
+							</div>
+							<div class="col-md-3">
+								<StatCard :value="formatTotalSize(totalSize)" label="Total Size" :icon="['fas', 'hdd']" icon-class="info" />
+							</div>
+							<div class="col-md-3">
+								<StatCard :value="formatTotalDuration(totalDuration)" label="Total Duration" :icon="['fas', 'clock']" icon-class="warning" />
+							</div>
+						</div>
 					</div>
-					<div class="col-md-2">
-						<select v-model="sortOrder" class="form-select" @change="sortVideos">
-							<option value="desc">Descending</option>
-							<option value="asc">Ascending</option>
-						</select>
+
+					<!-- Filters and Controls -->
+					<div class="filters-bar mb-4">
+						<div class="row g-3">
+							<div class="col-md-4">
+								<div class="input-group">
+									<span class="input-group-text">
+										<font-awesome-icon :icon="['fas', 'search']" />
+									</span>
+									<input v-model="searchQuery" type="text" class="form-control" placeholder="Search videos..." @input="filterVideos" />
+									<button v-if="searchQuery" class="btn btn-outline-secondary" @click="searchQuery = ''; filterVideos()">
+										<font-awesome-icon :icon="['fas', 'times']" />
+									</button>
+								</div>
+							</div>
+							<div class="col-md-2">
+								<select v-model="sortBy" class="form-select" @change="sortVideos">
+									<option value="added_date">Date Added</option>
+									<option value="title">Title</option>
+									<option value="duration">Duration</option>
+									<option value="size">File Size</option>
+									<option value="rating">Rating</option>
+								</select>
+							</div>
+							<div class="col-md-2">
+								<select v-model="sortOrder" class="form-select" @change="sortVideos">
+									<option value="desc">Descending</option>
+									<option value="asc">Ascending</option>
+								</select>
+							</div>
+							<div class="col-md-4 text-end">
+								<div class="btn-group" role="group">
+									<input id="viewGrid" v-model="viewMode" type="radio" class="btn-check" value="grid" />
+									<label class="btn btn-outline-primary" for="viewGrid">
+										<font-awesome-icon :icon="['fas', 'th']" />
+									</label>
+									<input id="viewList" v-model="viewMode" type="radio" class="btn-check" value="list" />
+									<label class="btn btn-outline-primary" for="viewList">
+										<font-awesome-icon :icon="['fas', 'list']" />
+									</label>
+								</div>
+							</div>
+						</div>
 					</div>
-					<div class="col-md-4 text-end">
-						<div class="btn-group" role="group">
-							<input id="viewGrid" v-model="viewMode" type="radio" class="btn-check" value="grid" />
-							<label class="btn btn-outline-primary" for="viewGrid">
-								<font-awesome-icon :icon="['fas', 'th']" />
-							</label>
-							<input id="viewList" v-model="viewMode" type="radio" class="btn-check" value="list" />
-							<label class="btn btn-outline-primary" for="viewList">
-								<font-awesome-icon :icon="['fas', 'list']" />
-							</label>
+
+					<!-- Bulk Selection -->
+					<div v-if="filteredVideos.length > 0" class="bulk-actions mb-3">
+						<div class="form-check">
+							<input id="selectAll" :checked="allSelected" type="checkbox" class="form-check-input" @change="toggleSelectAll" />
+							<label class="form-check-label" for="selectAll"> Select All ({{ filteredVideos.length }}) </label>
+						</div>
+					</div>
+
+					<!-- Videos Display -->
+					<LoadingState v-if="loading" spinner="fontawesome" show-text loading-text="Loading edit list..." />
+
+					<EmptyState
+						v-else-if="filteredVideos.length === 0"
+						:icon="['fas', 'list-check']"
+						icon-size="5x"
+						:title="searchQuery ? 'No videos found' : 'Edit List is Empty'"
+						:message="searchQuery ? 'Try adjusting your search query' : 'Add videos to your edit list from the Videos or Browser page'"
+					/>
+
+					<!-- Grid View -->
+					<div v-else-if="viewMode === 'grid'" class="videos-grid">
+						<div
+							v-for="video in filteredVideos"
+							:key="video.id"
+							class="video-card"
+							:class="{ selected: isSelected(video.id), hovered: hoveredVideo && hoveredVideo.id === video.id }"
+							@click="toggleSelection(video.id)"
+							@mouseenter="hoveredVideo = video"
+						>
+							<div class="selection-checkbox">
+								<input type="checkbox" :checked="isSelected(video.id)" @click.stop="toggleSelection(video.id)" />
+							</div>
+
+							<div class="video-thumbnail">
+								<img v-if="video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" loading="lazy" />
+								<div v-else class="thumbnail-placeholder">
+									<font-awesome-icon :icon="['fas', 'video']" size="3x" />
+								</div>
+								<div v-if="video.duration" class="badge-duration">{{ formatDuration(video.duration) }}</div>
+							</div>
+
+							<div class="video-info">
+								<h3 class="video-title" :title="video.title">{{ video.title }}</h3>
+
+								<div class="video-badges">
+									<span v-if="video.resolution" class="badge bg-primary">{{ video.resolution }}</span>
+									<span v-if="video.file_size" class="badge bg-secondary">{{ formatFileSize(video.file_size) }}</span>
+									<span v-if="video.rating" class="badge bg-warning">
+										<font-awesome-icon :icon="['fas', 'star']" />
+										{{ video.rating }}
+									</span>
+								</div>
+
+								<div class="video-actions mt-2">
+									<button class="btn btn-sm btn-primary me-1" @click.stop="openVideo(video)">
+										<font-awesome-icon :icon="['fas', 'play']" />
+									</button>
+									<button class="btn btn-sm btn-danger" @click.stop="removeFromList(video.id)">
+										<font-awesome-icon :icon="['fas', 'trash']" />
+									</button>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- List View -->
+					<div v-else class="videos-list">
+						<div class="list-header">
+							<div class="col-select"></div>
+							<div class="col-title">Title</div>
+							<div class="col-duration">Duration</div>
+							<div class="col-size">Size</div>
+							<div class="col-rating">Rating</div>
+							<div class="col-added">Added</div>
+							<div class="col-actions">Actions</div>
+						</div>
+						<div
+							v-for="video in filteredVideos"
+							:key="video.id"
+							class="list-item"
+							:class="{ selected: isSelected(video.id), hovered: hoveredVideo && hoveredVideo.id === video.id }"
+							@click="toggleSelection(video.id)"
+							@mouseenter="hoveredVideo = video"
+						>
+							<div class="col-select">
+								<input type="checkbox" :checked="isSelected(video.id)" @click.stop="toggleSelection(video.id)" />
+							</div>
+							<div class="col-title">
+								<img v-if="video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" class="list-thumbnail" />
+								<div v-else class="list-thumbnail-placeholder">
+									<font-awesome-icon :icon="['fas', 'video']" />
+								</div>
+								<span class="title-text" :title="video.title">{{ video.title }}</span>
+							</div>
+							<div class="col-duration">{{ video.duration ? formatDuration(video.duration) : '-' }}</div>
+							<div class="col-size">{{ video.file_size ? formatFileSize(video.file_size) : '-' }}</div>
+							<div class="col-rating">
+								<span v-if="video.rating" class="badge bg-warning">
+									<font-awesome-icon :icon="['fas', 'star']" />
+									{{ video.rating }}
+								</span>
+								<span v-else>-</span>
+							</div>
+							<div class="col-added">{{ formatDate(video.created_at) }}</div>
+							<div class="col-actions">
+								<button class="btn btn-sm btn-primary me-1" @click.stop="openVideo(video)">
+									<font-awesome-icon :icon="['fas', 'play']" />
+								</button>
+								<button class="btn btn-sm btn-danger" @click.stop="removeFromList(video.id)">
+									<font-awesome-icon :icon="['fas', 'trash']" />
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>
-			</div>
+				<!-- End Main Content Column -->
 
-			<!-- Bulk Selection -->
-			<div v-if="filteredVideos.length > 0" class="bulk-actions mb-3">
-				<div class="form-check">
-					<input id="selectAll" :checked="allSelected" type="checkbox" class="form-check-input" @change="toggleSelectAll" />
-					<label class="form-check-label" for="selectAll"> Select All ({{ filteredVideos.length }}) </label>
-				</div>
-			</div>
-
-			<!-- Videos Display -->
-			<LoadingState v-if="loading" spinner="fontawesome" show-text loading-text="Loading edit list..." />
-
-			<EmptyState
-				v-else-if="filteredVideos.length === 0"
-				:icon="['fas', 'list-check']"
-				icon-size="5x"
-				:title="searchQuery ? 'No videos found' : 'Edit List is Empty'"
-				:message="searchQuery ? 'Try adjusting your search query' : 'Add videos to your edit list from the Videos or Browser page'"
-			/>
-
-			<!-- Grid View -->
-			<div v-else-if="viewMode === 'grid'" class="videos-grid">
-				<div
-					v-for="video in filteredVideos"
-					:key="video.id"
-					class="video-card"
-					:class="{ selected: isSelected(video.id) }"
-					@click="toggleSelection(video.id)"
-				>
-					<div class="selection-checkbox">
-						<input type="checkbox" :checked="isSelected(video.id)" @click.stop="toggleSelection(video.id)" />
-					</div>
-
-					<div class="video-thumbnail">
-						<img v-if="video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" loading="lazy" />
-						<div v-else class="thumbnail-placeholder">
-							<font-awesome-icon :icon="['fas', 'video']" size="3x" />
-						</div>
-						<div v-if="video.duration" class="badge-duration">{{ formatDuration(video.duration) }}</div>
-					</div>
-
-					<div class="video-info">
-						<h3 class="video-title" :title="video.title">{{ video.title }}</h3>
-
-						<div class="video-badges">
-							<span v-if="video.resolution" class="badge bg-primary">{{ video.resolution }}</span>
-							<span v-if="video.file_size" class="badge bg-secondary">{{ formatFileSize(video.file_size) }}</span>
-							<span v-if="video.rating" class="badge bg-warning">
-								<font-awesome-icon :icon="['fas', 'star']" />
-								{{ video.rating }}
-							</span>
-						</div>
-
-						<div class="video-actions mt-2">
-							<button class="btn btn-sm btn-primary me-1" @click.stop="openVideo(video)">
-								<font-awesome-icon :icon="['fas', 'play']" />
-							</button>
-							<button class="btn btn-sm btn-danger" @click.stop="removeFromList(video.id)">
-								<font-awesome-icon :icon="['fas', 'trash']" />
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- List View -->
-			<div v-else class="videos-list">
-				<div class="list-header">
-					<div class="col-select"></div>
-					<div class="col-title">Title</div>
-					<div class="col-duration">Duration</div>
-					<div class="col-size">Size</div>
-					<div class="col-rating">Rating</div>
-					<div class="col-added">Added</div>
-					<div class="col-actions">Actions</div>
-				</div>
-				<div
-					v-for="video in filteredVideos"
-					:key="video.id"
-					class="list-item"
-					:class="{ selected: isSelected(video.id) }"
-					@click="toggleSelection(video.id)"
-				>
-					<div class="col-select">
-						<input type="checkbox" :checked="isSelected(video.id)" @click.stop="toggleSelection(video.id)" />
-					</div>
-					<div class="col-title">
-						<img v-if="video.thumbnail_path" :src="getThumbnailURL(video)" :alt="video.title" class="list-thumbnail" />
-						<div v-else class="list-thumbnail-placeholder">
-							<font-awesome-icon :icon="['fas', 'video']" />
-						</div>
-						<span class="title-text" :title="video.title">{{ video.title }}</span>
-					</div>
-					<div class="col-duration">{{ video.duration ? formatDuration(video.duration) : '-' }}</div>
-					<div class="col-size">{{ video.file_size ? formatFileSize(video.file_size) : '-' }}</div>
-					<div class="col-rating">
-						<span v-if="video.rating" class="badge bg-warning">
-							<font-awesome-icon :icon="['fas', 'star']" />
-							{{ video.rating }}
-						</span>
-						<span v-else>-</span>
-					</div>
-					<div class="col-added">{{ formatDate(video.created_at) }}</div>
-					<div class="col-actions">
-						<button class="btn btn-sm btn-primary me-1" @click.stop="openVideo(video)">
-							<font-awesome-icon :icon="['fas', 'play']" />
+				<!-- Video Details Sidebar -->
+				<div v-if="hoveredVideo" class="col-md-4 col-lg-3">
+					<div class="video-details-card sticky-top">
+						<button class="btn-close-details" @click="hoveredVideo = null">
+							<font-awesome-icon :icon="['fas', 'times']" />
 						</button>
-						<button class="btn btn-sm btn-danger" @click.stop="removeFromList(video.id)">
-							<font-awesome-icon :icon="['fas', 'trash']" />
-						</button>
+
+						<!-- Large Thumbnail -->
+						<div class="details-thumbnail">
+							<img v-if="hoveredVideo.thumbnail_path" :src="getThumbnailURL(hoveredVideo)" :alt="hoveredVideo.title" />
+							<div v-else class="thumbnail-placeholder-large">
+								<font-awesome-icon :icon="['fas', 'video']" size="4x" />
+							</div>
+							<div v-if="hoveredVideo.duration" class="details-duration">{{ formatDuration(hoveredVideo.duration) }}</div>
+						</div>
+
+						<!-- Video Title -->
+						<h3 class="details-title">{{ hoveredVideo.title }}</h3>
+
+						<!-- Quick Actions -->
+						<div class="details-actions mb-3">
+							<button class="btn btn-primary btn-sm me-2" @click="openVideo(hoveredVideo)">
+								<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
+								Play
+							</button>
+							<button class="btn btn-danger btn-sm" @click="removeFromList(hoveredVideo.id)">
+								<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />
+								Remove
+							</button>
+						</div>
+
+						<!-- Video Info -->
+						<div class="details-info">
+							<!-- Library -->
+							<div class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'folder']" class="me-2" />
+									Library
+								</span>
+								<span class="info-value">{{ getLibraryName(hoveredVideo.library_id) }}</span>
+							</div>
+
+							<!-- File Path -->
+							<div class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'file-video']" class="me-2" />
+									Path
+								</span>
+								<span class="info-value path-value" :title="hoveredVideo.file_path">{{ hoveredVideo.file_path }}</span>
+							</div>
+
+							<!-- Resolution -->
+							<div v-if="hoveredVideo.resolution" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'expand']" class="me-2" />
+									Resolution
+								</span>
+								<span class="info-value">{{ hoveredVideo.resolution }}</span>
+							</div>
+
+							<!-- File Size -->
+							<div v-if="hoveredVideo.file_size" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'hdd']" class="me-2" />
+									Size
+								</span>
+								<span class="info-value">{{ formatFileSize(hoveredVideo.file_size) }}</span>
+							</div>
+
+							<!-- Duration -->
+							<div v-if="hoveredVideo.duration" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'clock']" class="me-2" />
+									Duration
+								</span>
+								<span class="info-value">{{ formatDuration(hoveredVideo.duration) }}</span>
+							</div>
+
+							<!-- Codec -->
+							<div v-if="hoveredVideo.codec" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'film']" class="me-2" />
+									Codec
+								</span>
+								<span class="info-value">{{ hoveredVideo.codec }}</span>
+							</div>
+
+							<!-- Bitrate -->
+							<div v-if="hoveredVideo.bitrate" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'tachometer-alt']" class="me-2" />
+									Bitrate
+								</span>
+								<span class="info-value">{{ formatBitrate(hoveredVideo.bitrate) }}</span>
+							</div>
+
+							<!-- FPS -->
+							<div v-if="hoveredVideo.fps" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
+									FPS
+								</span>
+								<span class="info-value">{{ hoveredVideo.fps.toFixed(2) }} fps</span>
+							</div>
+
+							<!-- Rating -->
+							<div v-if="hoveredVideo.rating" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'star']" class="me-2" />
+									Rating
+								</span>
+								<span class="info-value">
+									<span class="badge bg-warning">{{ hoveredVideo.rating }}/5</span>
+								</span>
+							</div>
+
+							<!-- Play Count -->
+							<div v-if="hoveredVideo.play_count" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'eye']" class="me-2" />
+									Plays
+								</span>
+								<span class="info-value">{{ hoveredVideo.play_count }}</span>
+							</div>
+
+							<!-- Date Added -->
+							<div class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'calendar-plus']" class="me-2" />
+									Added
+								</span>
+								<span class="info-value">{{ formatDate(hoveredVideo.created_at) }}</span>
+							</div>
+
+							<!-- Last Played -->
+							<div v-if="hoveredVideo.last_played_at" class="info-row">
+								<span class="info-label">
+									<font-awesome-icon :icon="['fas', 'history']" class="me-2" />
+									Last Played
+								</span>
+								<span class="info-value">{{ formatDate(hoveredVideo.last_played_at) }}</span>
+							</div>
+						</div>
+
+						<!-- Performers -->
+						<div v-if="hoveredVideo.performers && hoveredVideo.performers.length > 0" class="details-section">
+							<h5 class="section-title">
+								<font-awesome-icon :icon="['fas', 'users']" class="me-2" />
+								Performers
+							</h5>
+							<div class="tags-list">
+								<span v-for="performer in hoveredVideo.performers" :key="performer.id" class="badge bg-info me-1 mb-1">
+									{{ performer.name }}
+								</span>
+							</div>
+						</div>
+
+						<!-- Tags -->
+						<div v-if="hoveredVideo.tags && hoveredVideo.tags.length > 0" class="details-section">
+							<h5 class="section-title">
+								<font-awesome-icon :icon="['fas', 'tags']" class="me-2" />
+								Tags
+							</h5>
+							<div class="tags-list">
+								<span v-for="tag in hoveredVideo.tags" :key="tag.id" class="badge bg-secondary me-1 mb-1">
+									{{ tag.name }}
+								</span>
+							</div>
+						</div>
+
+						<!-- Description -->
+						<div v-if="hoveredVideo.description" class="details-section">
+							<h5 class="section-title">
+								<font-awesome-icon :icon="['fas', 'align-left']" class="me-2" />
+								Description
+							</h5>
+							<p class="description-text">{{ hoveredVideo.description }}</p>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -208,7 +397,7 @@
 </template>
 
 <script>
-import { videosAPI } from '@/services/api'
+import { videosAPI, librariesAPI } from '@/services/api'
 import { getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import { useFormatters } from '@/composables/useFormatters'
@@ -235,6 +424,8 @@ export default {
 			...useTableSelectionOptionsAPI().data(),
 			playerVisible: false,
 			selectedVideo: null,
+			hoveredVideo: null,
+			libraries: {},
 		}
 	},
 	computed: {
@@ -257,12 +448,37 @@ export default {
 		// formatTotalSize is custom, keep it local
 	},
 	async mounted() {
-		await this.loadEditList()
+		await Promise.all([this.loadEditList(), this.loadLibraries()])
 	},
 	methods: {
 		...useTableSelectionOptionsAPI().methods(function () {
 			return this.filteredVideos
 		}),
+		async loadLibraries() {
+			try {
+				const response = await librariesAPI.getAll()
+				const libs = Array.isArray(response.data) ? response.data : response.data?.data || []
+				// Build a lookup map by ID
+				this.libraries = {}
+				libs.forEach((lib) => {
+					this.libraries[lib.id] = lib
+				})
+			} catch (error) {
+				console.error('Failed to load libraries:', error)
+			}
+		},
+		getLibraryName(libraryId) {
+			if (!libraryId) return 'Unknown'
+			const lib = this.libraries[libraryId]
+			return lib ? lib.name : `Library #${libraryId}`
+		},
+		formatBitrate(bitrate) {
+			if (!bitrate) return '-'
+			if (bitrate >= 1000000) {
+				return (bitrate / 1000000).toFixed(1) + ' Mbps'
+			}
+			return (bitrate / 1000).toFixed(0) + ' Kbps'
+		},
 		async loadEditList() {
 			this.loading = true
 			try {
@@ -322,6 +538,10 @@ export default {
 				await videosAPI.update(videoId, { in_edit_list: false })
 				this.videos = this.videos.filter((v) => v.id !== videoId)
 				this.selectedItems = this.selectedItems.filter((id) => id !== videoId)
+				// Clear hovered video if it was removed
+				if (this.hoveredVideo && this.hoveredVideo.id === videoId) {
+					this.hoveredVideo = null
+				}
 				this.filterVideos()
 				this.$toast.success('Removed', `"${video.title}" removed from edit list`)
 			} catch (error) {
