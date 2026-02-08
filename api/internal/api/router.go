@@ -90,6 +90,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
+			videos.PATCH("/content-type/folder", updateFolderContentType) // Update content type for folder recursively
 			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
 		}
 
@@ -231,6 +232,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.GET("/threads/:id", getScrapedThread)          // Get single thread
 			scraper.POST("/threads/scrape", scrapeThread)          // Scrape a thread
 			scraper.POST("/threads/:id/rescrape", rescrapeThread)  // Rescrape an existing thread
+			scraper.POST("/threads/:id/watch", toggleThreadWatch)  // Toggle watch status for thread
 			scraper.DELETE("/threads/:id", deleteThread)           // Delete a thread
 			scraper.DELETE("/threads", deleteMultipleThreads)      // Delete multiple threads
 			scraper.DELETE("/threads/all", deleteAllThreads)       // Delete all threads
@@ -304,6 +306,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/sexuria/item-details", getSexuriaItemDetailsHandler)          // Get detailed info for an item
 			scraper.GET("/sexuria/search-options", getSexuriaSearchOptionsHandler)       // Get advanced search options
 			scraper.POST("/sexuria/advanced-search", startSexuriaAdvancedSearchHandler)  // Start advanced search scrape
+
+			// Sexuria link verification endpoints
+			scraper.GET("/sexuria/links/stats", getSexuriaLinkStats)                     // Get Sexuria link statistics
+			scraper.POST("/sexuria/items/:id/extract-links", extractSexuriaItemLinks)    // Extract links from item page
+			scraper.GET("/sexuria/items/:id/links", getSexuriaItemLinks)                 // Get links for item
+			scraper.POST("/sexuria/items/:id/verify-links", verifySexuriaItemLinks)      // Verify links for item
+			scraper.POST("/sexuria/links/verify-all", verifyAllSexuriaLinks)             // Batch verify all links
+
+			// Rule34Video scraper endpoints
+			scraper.POST("/rule34video/scrape", startRule34VideoScrapeHandler)           // Start Rule34Video scrape (Straight filter)
+			scraper.GET("/rule34video/sort-options", getRule34VideoSortOptionsHandler)   // Get available sort options
+			scraper.GET("/rule34video/videos", getRule34VideoVideosHandler)              // Get scraped Rule34Video videos
+			scraper.GET("/rule34video/stats", getRule34VideoStatsHandler)                // Get Rule34Video scraping stats
+			scraper.GET("/rule34video/download-url", getRule34VideoDownloadURLHandler)   // Get download URL for a video
 		}
 
 		// Download Tracking endpoints
@@ -323,13 +339,52 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// JDownloader Integration endpoints
 		jdownloader := v1.Group("/jdownloader")
 		{
-			jdownloader.GET("/status", checkJDownloaderStatus)              // Check if JDownloader is available
-			jdownloader.POST("/send-links", sendLinksToJDownloader)         // Send custom links to JDownloader
+			// Configuration
+			jdownloader.GET("/config", getJDownloaderConfig)                // Get JDownloader configuration
+			jdownloader.PUT("/config", updateJDownloaderConfig)             // Update JDownloader configuration
+			jdownloader.POST("/test", testJDownloaderConnection)            // Test connection to JDownloader
+			jdownloader.GET("/available", checkJDownloaderAvailability)     // Quick availability check
+
+			// System info
+			jdownloader.GET("/system", getJDSystemInfo)                     // Get system info (version, uptime, state)
+			jdownloader.GET("/speed", getJDSpeed)                           // Get current download speed
+			jdownloader.POST("/speed-limit", setJDSpeedLimit)               // Set speed limit
+
+			// Send links
+			jdownloader.POST("/send", sendToJDownloader)                    // Send links to JDownloader (new format)
+			jdownloader.POST("/send-links", sendLinksToJDownloader)         // Send custom links (legacy)
 			jdownloader.POST("/threads/:id/send", sendThreadToJDownloader)  // Send entire thread to JDownloader
-			jdownloader.GET("/downloads/status", getJDownloaderStatus)      // Get current download status
-			jdownloader.GET("/downloads/list", getJDownloaderDownloads)     // Get all downloads
-			jdownloader.POST("/downloads/start", startJDownloaderDownloads) // Start all downloads
-			jdownloader.POST("/downloads/stop", stopJDownloaderDownloads)   // Stop all downloads
+
+			// History
+			jdownloader.GET("/history", getJDownloaderHistory)              // Get send history
+			jdownloader.DELETE("/history", clearJDownloaderHistory)         // Clear history
+			jdownloader.GET("/package-timestamps", getJDPackageAddedTimes)  // Get locally-tracked package add times
+
+			// Download control
+			jdownloader.GET("/status", getJDownloaderConnectionStatus)      // Get connection status
+			jdownloader.POST("/start", startJDownloaderDownloads)           // Start all downloads
+			jdownloader.POST("/stop", stopJDownloaderDownloads)             // Stop all downloads
+			jdownloader.POST("/pause", pauseJDDownloads)                    // Pause/resume downloads
+
+			// LinkGrabber
+			jdownloader.GET("/linkgrabber/links", getLinkGrabberLinks)      // Get LinkGrabber links
+			jdownloader.GET("/linkgrabber/packages", getLinkGrabberPackages) // Get LinkGrabber packages
+			jdownloader.POST("/linkgrabber/move", moveToDownloads)          // Move to download list
+			jdownloader.POST("/linkgrabber/remove", removeLinkGrabberLinks) // Remove from LinkGrabber
+			jdownloader.POST("/linkgrabber/clear", clearLinkGrabber)        // Clear LinkGrabber
+
+			// Downloads
+			jdownloader.GET("/downloads/links", getDownloadLinks)           // Get download links
+			jdownloader.GET("/downloads/packages", getDownloadPackages)     // Get download packages
+			jdownloader.POST("/downloads/remove", removeDownloadLinks)      // Remove from downloads
+			jdownloader.POST("/downloads/force", forceDownload)             // Force download
+			jdownloader.POST("/downloads/cleanup", cleanupFinished)         // Cleanup finished
+			jdownloader.POST("/downloads/reset", resetLinks)                // Reset failed links
+
+			// Common operations
+			jdownloader.POST("/enable", setLinkEnabled)                     // Enable/disable links
+			jdownloader.POST("/priority", setLinkPriority)                  // Set priority
+			jdownloader.POST("/rename", renamePackage)                      // Rename package
 		}
 
 		// AI Audit endpoints
@@ -355,6 +410,28 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scheduler.DELETE("/jobs/:id", deleteJob)                      // Delete job
 			scheduler.POST("/jobs/:id/toggle", toggleJob)                 // Toggle job enabled/disabled
 			scheduler.GET("/jobs/:id/history", getJobExecutionHistory)    // Get job execution history
+		}
+
+		// Auto-Update endpoints
+		autoUpdate := v1.Group("/auto-update")
+		{
+			autoUpdate.GET("/configs", getAutoUpdateConfigs)              // Get all scraper auto-update configs
+			autoUpdate.GET("/configs/:type", getAutoUpdateConfig)         // Get config for specific scraper
+			autoUpdate.PUT("/configs/:type", updateAutoUpdateConfig)      // Update scraper config
+			autoUpdate.POST("/configs/:type/toggle", toggleAutoUpdate)    // Enable/disable auto-update
+			autoUpdate.POST("/configs/:type/check-now", checkNowAutoUpdate) // Trigger immediate check
+			autoUpdate.GET("/status", getAutoUpdateStatus)                // Get overall auto-update status
+		}
+
+		// Dashboard endpoints
+		dashboard := v1.Group("/dashboard")
+		{
+			dashboard.GET("/stats", getDashboardStats)                    // Get aggregated dashboard stats
+			dashboard.GET("/feed", getDashboardFeed)                      // Get activity feed items
+			dashboard.GET("/scrapers", getDashboardScrapers)              // Get scraper status cards
+			dashboard.GET("/running-tasks", getDashboardRunningTasks)     // Get currently running tasks
+			dashboard.POST("/quick-action/:action", executeDashboardQuickAction) // Execute quick action
+			dashboard.POST("/feed", addDashboardFeedItem)                 // Add feed item (internal)
 		}
 
 		// System Health endpoints
@@ -403,6 +480,23 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			consoleLogs.DELETE("/:id", deleteConsoleLog)     // Delete a console log
 			consoleLogs.POST("/clear", clearConsoleLogs)     // Clear all console logs
 			consoleLogs.POST("/clean", cleanOldConsoleLogs)  // Clean old console logs
+		}
+
+		// Video Lists endpoints
+		lists := v1.Group("/lists")
+		{
+			lists.GET("", getAllListsHandler)                    // Get all video lists
+			lists.GET("/for-video", getListsForVideoHandler)     // Get lists containing a video
+			lists.GET("/:id", getListByIDHandler)                // Get single list
+			lists.GET("/:id/items", getListItemsHandler)         // Get list items with video details
+			lists.GET("/:id/stats", getListStatsHandler)         // Get list statistics
+			lists.POST("", createListHandler)                    // Create new list
+			lists.PUT("/:id", updateListHandler)                 // Update list
+			lists.DELETE("/:id", deleteListHandler)              // Delete list
+			lists.POST("/:id/videos", addToListHandler)          // Add videos to list
+			lists.DELETE("/:id/videos", removeFromListHandler)   // Remove videos from list
+			lists.POST("/:id/reorder", reorderListItemsHandler)  // Reorder items in list
+			lists.PUT("/:id/items/:itemId/notes", updateItemNotesHandler) // Update item notes
 		}
 
 		// WebSocket endpoint

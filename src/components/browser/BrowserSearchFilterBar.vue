@@ -61,9 +61,6 @@
 					<button class="btn btn-sm btn-outline-danger" :class="{ active: showNotInterested }" @click="toggleShowNotInterested" title="Show Not Interested">
 						<font-awesome-icon :icon="['fas', 'times-circle']" />
 					</button>
-					<button class="btn btn-sm btn-outline-success" :class="{ active: showEditList }" @click="toggleShowEditList" title="Show Edit List">
-						<font-awesome-icon :icon="['fas', 'list']" />
-					</button>
 
 					<div class="vr d-none d-md-block"></div>
 					<button class="btn btn-sm btn-outline-primary" @click="$emit('refresh')" title="Refresh folder">
@@ -102,17 +99,13 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-	showEditList: {
-		type: Boolean,
-		default: false,
-	},
 	isLoading: {
 		type: Boolean,
 		default: false,
 	},
 })
 
-const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'update:showEditList', 'refresh'])
+const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'refresh'])
 
 // Toggle methods
 const toggleSortOrder = () => {
@@ -121,10 +114,6 @@ const toggleSortOrder = () => {
 
 const toggleShowNotInterested = () => {
 	emit('update:showNotInterested', !props.showNotInterested)
-}
-
-const toggleShowEditList = () => {
-	emit('update:showEditList', !props.showEditList)
 }
 </script>
 

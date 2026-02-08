@@ -384,6 +384,19 @@
 	font-weight: 600;
 }
 
+.badge-list {
+	font-size: 0.7rem;
+	padding: 0.2rem 0.5rem;
+	border-radius: 0.3rem;
+	font-weight: 600;
+	display: inline-block;
+}
+
+.content-item.in-list {
+	border-width: 2px;
+	border-style: solid;
+}
+
 .folder-icon {
 	font-size: 4rem;
 	color: #00d9ff;
@@ -483,7 +496,11 @@
 	backdrop-filter: blur(10px);
 	min-width: 200px;
 	z-index: 9999;
-	overflow: hidden;
+	overflow: visible;
+}
+
+.context-menu-items {
+	overflow: visible;
 }
 
 .context-menu-item {
@@ -494,6 +511,10 @@
 	display: flex;
 	align-items: center;
 	font-size: 0.9rem;
+	width: 100%;
+	border: none;
+	background: transparent;
+	text-align: left;
 }
 
 .context-menu-item:hover {
@@ -505,6 +526,73 @@
 	height: 1px;
 	background: rgba(255, 255, 255, 0.1);
 	margin: 4px 0;
+}
+
+/* Context Menu Submenu */
+.context-menu-submenu {
+	position: relative;
+}
+
+.context-menu-item.has-submenu {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.submenu-arrow {
+	font-size: 0.7rem;
+	opacity: 0.6;
+	margin-left: auto;
+}
+
+.context-submenu {
+	position: absolute;
+	left: 100%;
+	top: -4px;
+	min-width: 160px;
+	background: rgba(20, 20, 30, 0.98);
+	border: 1px solid rgba(0, 217, 255, 0.3);
+	border-radius: 8px;
+	padding: 4px 0;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	backdrop-filter: blur(10px);
+	z-index: 10000;
+	display: none;
+}
+
+/* Show submenu on hover using CSS */
+.context-menu-submenu:hover .context-submenu {
+	display: block;
+}
+
+.context-submenu .context-menu-item {
+	padding: 10px 16px;
+	display: flex;
+	align-items: center;
+	width: 100%;
+	border: none;
+	background: transparent;
+	color: rgba(255, 255, 255, 0.9);
+	font-size: 0.9rem;
+	cursor: pointer;
+	transition: all 0.2s;
+	text-align: left;
+}
+
+.context-submenu .context-menu-item:hover {
+	background: rgba(0, 217, 255, 0.1);
+	color: #00d9ff;
+}
+
+.context-submenu .context-menu-item.active {
+	color: #00d9ff;
+}
+
+.list-color-dot {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
 }
 
 /* Pagination */
@@ -562,4 +650,32 @@
 	color: rgba(255, 255, 255, 0.9);
 	font-size: 0.75rem;
 	font-weight: 500;
+}
+
+/* Selection Toolbar */
+.selection-toolbar {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0.75rem 1rem;
+	background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+	border: 1px solid rgba(102, 126, 234, 0.3);
+	border-radius: 8px;
+	margin-bottom: 1rem;
+}
+
+.selection-info {
+	display: flex;
+	align-items: center;
+	color: white;
+	font-weight: 500;
+}
+
+.selection-info svg {
+	color: #667eea;
+}
+
+.selection-actions {
+	display: flex;
+	gap: 0.5rem;
 }

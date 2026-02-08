@@ -103,6 +103,21 @@
 	background: rgba(23, 162, 184, 0.15);
 }
 
+.scraper-tab.rule34video-tab {
+	border-bottom-color: #00d4aa;
+}
+
+.scraper-tab.rule34video-tab:hover {
+	color: #00d4aa;
+	background: rgba(0, 212, 170, 0.1);
+}
+
+.scraper-tab.rule34video-tab.active {
+	color: #00d4aa;
+	border-bottom-color: #00d4aa;
+	background: rgba(0, 212, 170, 0.15);
+}
+
 /* Sexuria Card Styles */
 .sexuria-card .video-title {
 	min-height: auto;
@@ -350,8 +365,8 @@
 /* Threads Grid */
 .threads-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-	gap: 1.5rem;
+	grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+	gap: 1rem;
 }
 
 .thread-card {
@@ -371,6 +386,91 @@
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
+.thread-card.watched {
+	border-color: rgba(251, 191, 36, 0.4);
+	box-shadow: 0 0 15px rgba(251, 191, 36, 0.1);
+}
+
+.thread-card.watched:hover {
+	border-color: rgba(251, 191, 36, 0.6);
+}
+
+/* Watch button overlay */
+.thread-actions-overlay {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	display: flex;
+	gap: 6px;
+	z-index: 10;
+	opacity: 0;
+	transition: opacity 0.2s;
+}
+
+.thread-card {
+	position: relative;
+}
+
+.thread-card:hover .thread-actions-overlay,
+.thread-card.watched .thread-actions-overlay {
+	opacity: 1;
+}
+
+.watch-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	background: rgba(30, 30, 40, 0.85);
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+	backdrop-filter: blur(10px);
+}
+
+.watch-btn:hover {
+	background: rgba(251, 191, 36, 0.3);
+	color: #fbbf24;
+}
+
+.watch-btn.active {
+	background: rgba(251, 191, 36, 0.25);
+	color: #fbbf24;
+}
+
+.verify-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	background: rgba(30, 30, 40, 0.85);
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+	backdrop-filter: blur(10px);
+}
+
+.verify-btn:hover {
+	background: rgba(40, 167, 69, 0.3);
+	color: #28a745;
+}
+
+/* List view watched indicator */
+.watched-indicator {
+	color: #fbbf24;
+	font-size: 0.875rem;
+}
+
+.thread-list-item.watched {
+	border-left: 3px solid #fbbf24;
+}
+
 .thread-thumbnail {
 	width: 100%;
 	height: 180px;
@@ -384,7 +484,7 @@
 .thread-thumbnail img {
 	width: 100%;
 	height: 100%;
-	object-fit: cover;
+	object-fit: contain;
 }
 
 .thread-thumbnail.placeholder {
@@ -809,7 +909,7 @@
 	justify-content: center;
 }
 
-.thread-checkbox input[type="checkbox"] {
+.thread-checkbox input[type='checkbox'] {
 	width: 20px;
 	height: 20px;
 	cursor: pointer;
@@ -888,7 +988,7 @@
 /* Video Grid */
 .video-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(450px, 3fr));
 	gap: 1.25rem;
 	padding: 1.5rem;
 }
@@ -905,10 +1005,10 @@
 }
 
 .video-card:hover {
-	background: rgba(255, 255, 255, 0.08);
+	background: rgba(255, 255, 255, 1);
 	border-color: rgba(77, 171, 247, 0.5);
-	transform: translateY(-4px);
 	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+	z-index: 99999;
 }
 
 .video-card.selected {
@@ -928,7 +1028,7 @@
 	cursor: pointer;
 }
 
-.video-checkbox input[type="checkbox"] {
+.video-checkbox input[type='checkbox'] {
 	width: 18px;
 	height: 18px;
 	cursor: pointer;
@@ -952,10 +1052,6 @@
 	height: 100%;
 	object-fit: cover;
 	transition: transform 0.3s ease;
-}
-
-.video-card:hover .video-thumbnail img {
-	transform: scale(1.05);
 }
 
 .video-thumbnail .no-thumbnail {
@@ -1131,6 +1227,8 @@
 
 /* Sexuria Details Hover Card */
 .sexuria-details-card {
+	position: fixed;
+	z-index: 99999;
 	background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
 	border: 1px solid rgba(23, 162, 184, 0.5);
 	border-radius: 12px;
@@ -1229,21 +1327,6 @@
 	letter-spacing: 0.5px;
 }
 
-/* Large Screenshot Preview */
-.sexuria-details-card .screenshot-preview-large {
-	margin-bottom: 0.75rem;
-	border-radius: 8px;
-	overflow: hidden;
-	background: #000;
-}
-
-.sexuria-details-card .screenshot-preview-large img {
-	width: 100%;
-	max-height: 300px;
-	object-fit: contain;
-	display: block;
-}
-
 /* Screenshots Grid */
 .sexuria-details-card .screenshots-grid {
 	display: grid;
@@ -1257,15 +1340,8 @@
 	object-fit: cover;
 	border-radius: 6px;
 	cursor: pointer;
-	transition: all 0.2s ease;
 	border: 2px solid transparent;
 	opacity: 0.7;
-}
-
-.sexuria-details-card .screenshot-thumb:hover,
-.sexuria-details-card .screenshot-thumb.active {
-	opacity: 1;
-	border-color: #17a2b8;
 }
 
 /* Tags List */
@@ -1365,7 +1441,7 @@
 	background: rgba(255, 255, 255, 0.1);
 }
 
-.multi-select-dropdown .dropdown-item input[type="checkbox"] {
+.multi-select-dropdown .dropdown-item input[type='checkbox'] {
 	accent-color: #17a2b8;
 }
 
@@ -1380,4 +1456,520 @@
 .multi-select-dropdown .dropdown-items-container::-webkit-scrollbar-thumb {
 	background: rgba(23, 162, 184, 0.5);
 	border-radius: 3px;
+}
+
+/* Auto-update unavailable message for generic tabs */
+.auto-update-unavailable {
+	background: rgba(100, 100, 120, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 10px;
+	padding: 0.75rem 1rem;
+	margin-bottom: 1rem;
+	font-size: 0.875rem;
+	color: rgba(255, 255, 255, 0.6);
+	display: flex;
+	align-items: center;
+}
+
+/* Auto-update info message */
+.auto-update-info {
+	background: rgba(59, 130, 246, 0.15);
+	border: 1px solid rgba(59, 130, 246, 0.3);
+	border-radius: 8px;
+	padding: 0.5rem 0.75rem;
+	margin-bottom: 1rem;
+	font-size: 0.8125rem;
+	color: rgba(255, 255, 255, 0.8);
+	display: flex;
+	align-items: center;
+}
+
+.auto-update-info svg {
+	color: #60a5fa;
+}
+
+/* Sexuria Links Modal */
+.links-list {
+	max-height: 400px;
+	overflow-y: auto;
+}
+
+.link-item {
+	border: 1px solid transparent;
+	transition: all 0.2s ease;
+}
+
+.link-item:hover {
+	background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+.link-item.border-success {
+	border-color: rgba(40, 167, 69, 0.3) !important;
+}
+
+.link-item.border-danger {
+	border-color: rgba(220, 53, 69, 0.3) !important;
+}
+
+.link-item a {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.link-item a:hover {
+	color: #4dabf7 !important;
+}
+
+/* Screenshot overlay on Sexuria cards */
+.video-thumbnail {
+	position: relative;
+}
+
+.screenshot-overlay {
+	position: absolute;
+	bottom: 8px;
+	right: 8px;
+	background: rgba(0, 0, 0, 0.7);
+	color: rgba(255, 255, 255, 0.8);
+	padding: 4px 8px;
+	border-radius: 4px;
+	font-size: 0.75rem;
+	opacity: 0;
+	transition: opacity 0.2s ease;
+}
+
+.video-thumbnail:hover .screenshot-overlay {
+	opacity: 1;
+}
+
+/* Screenshot Viewer Modal */
+.screenshot-viewer {
+	position: relative;
+	background: #000;
+}
+
+.screenshot-main {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	min-height: 400px;
+	max-height: 70vh;
+	overflow: hidden;
+}
+
+.screenshot-main img {
+	max-width: 100%;
+	max-height: 70vh;
+	object-fit: contain;
+}
+
+.screenshot-thumbnails {
+	display: flex;
+	gap: 8px;
+	padding: 12px;
+	background: rgba(0, 0, 0, 0.8);
+	overflow-x: auto;
+	justify-content: center;
+}
+
+.screenshot-nav {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	background: rgba(0, 0, 0, 0.5);
+	border: none;
+	color: white;
+	padding: 20px 15px;
+	cursor: pointer;
+	transition: background 0.2s ease;
+	z-index: 10;
+}
+
+.screenshot-nav:hover {
+	background: rgba(0, 0, 0, 0.8);
+}
+
+.screenshot-nav-prev {
+	left: 0;
+	border-radius: 0 8px 8px 0;
+}
+
+.screenshot-nav-next {
+	right: 0;
+	border-radius: 8px 0 0 8px;
+}
+
+.screenshot-counter {
+	position: absolute;
+	bottom: 70px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: rgba(0, 0, 0, 0.7);
+	color: white;
+	padding: 4px 12px;
+	border-radius: 12px;
+	font-size: 0.875rem;
+}
+
+/* ==================== Sexuria Screenshot Modal ==================== */
+
+.screenshot-modal-backdrop {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.9);
+	z-index: 100000;
+}
+
+.screenshot-modal {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 100001;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 20px;
+}
+
+.screenshot-modal-close {
+	position: absolute;
+	top: 20px;
+	right: 20px;
+	background: rgba(255, 255, 255, 0.1);
+	border: none;
+	color: white;
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	font-size: 1.25rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100002;
+}
+
+.screenshot-modal-close:hover {
+	background: rgba(255, 255, 255, 0.2);
+	transform: scale(1.1);
+}
+
+.screenshot-modal-nav {
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	background: rgba(255, 255, 255, 0.1);
+	border: none;
+	color: white;
+	width: 50px;
+	height: 80px;
+	font-size: 1.5rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 100002;
+}
+
+.screenshot-modal-nav:hover {
+	background: rgba(255, 255, 255, 0.2);
+}
+
+.screenshot-modal-prev {
+	left: 10px;
+	border-radius: 0 8px 8px 0;
+}
+
+.screenshot-modal-next {
+	right: 10px;
+	border-radius: 8px 0 0 8px;
+}
+
+.screenshot-modal-image {
+	max-width: calc(100vw - 140px);
+	max-height: calc(100vh - 100px);
+	object-fit: contain;
+	border-radius: 8px;
+	box-shadow: 0 10px 50px rgba(0, 0, 0, 0.5);
+}
+
+.screenshot-modal-counter {
+	position: absolute;
+	bottom: 20px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: rgba(0, 0, 0, 0.7);
+	color: white;
+	padding: 8px 16px;
+	border-radius: 20px;
+	font-size: 0.9rem;
+	z-index: 100002;
+}
+
+/* ==================== Collapsible Controls ==================== */
+
+.collapse-toggle-btn {
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	color: rgba(255, 255, 255, 0.7);
+	padding: 0.5rem 1rem;
+	border-radius: 6px;
+	font-size: 0.85rem;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.collapse-toggle-btn:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: rgba(255, 255, 255, 0.9);
+}
+
+.collapse-toggle-btn .icon {
+	transition: transform 0.3s ease;
+}
+
+.collapse-toggle-btn.collapsed .icon {
+	transform: rotate(-90deg);
+}
+
+.collapsible-section {
+	overflow: hidden;
+	transition: all 0.3s ease;
+}
+
+/* Vue transition for collapse */
+.collapse-enter-active,
+.collapse-leave-active {
+	transition: all 0.3s ease;
+	max-height: 1000px;
+	opacity: 1;
+}
+
+.collapse-enter-from,
+.collapse-leave-to {
+	max-height: 0;
+	opacity: 0;
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+}
+
+/* ==================== Moderate Spacing Reductions ==================== */
+
+/* Reduce section margins (mb-4 -> mb-3 equivalent) */
+.scraper-page .stats-row,
+.scraper-page .scraper-config-card,
+.scraper-page .provider-breakdown {
+	margin-bottom: 1rem !important;
+}
+
+/* Tighter video grid */
+.video-grid {
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
+	gap: 1rem !important;
+}
+
+/* Tighter threads grid */
+.threads-grid {
+	grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)) !important;
+	gap: 0.875rem !important;
+}
+
+/* Reduce loading/empty state padding */
+.loading-state,
+.empty-state {
+	padding: 2.5rem 0 !important;
+}
+
+/* Reduce pagination margins */
+.pagination-controls {
+	padding: 0.75rem !important;
+}
+
+/* Filter bar - always visible, compact */
+.filter-bar {
+	background: rgba(0, 0, 0, 0.2);
+	border-radius: 8px;
+	padding: 0.75rem 1rem;
+	margin-bottom: 1rem;
+}
+
+.filter-bar .row {
+	--bs-gutter-x: 0.75rem;
+	--bs-gutter-y: 0.5rem;
+}
+
+/* Compact tabs */
+.scraper-tab {
+	padding: 0.75rem 1.5rem !important;
+	font-size: 0.9rem !important;
+}
+
+/* ==================== Side-by-Side Layout ==================== */
+
+.scraper-layout {
+	display: flex;
+	gap: 1.5rem;
+	align-items: flex-start;
+}
+
+.scraper-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.scraper-sidebar {
+	width: 320px;
+	flex-shrink: 0;
+	position: sticky;
+	top: 1rem;
+	max-height: calc(100vh - 2rem);
+	overflow-y: auto;
+}
+
+.scraper-sidebar::-webkit-scrollbar {
+	width: 6px;
+}
+
+.scraper-sidebar::-webkit-scrollbar-track {
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 3px;
+}
+
+.scraper-sidebar::-webkit-scrollbar-thumb {
+	background: rgba(255, 255, 255, 0.2);
+	border-radius: 3px;
+}
+
+.scraper-sidebar.collapsed {
+	width: 0;
+	overflow: hidden;
+	padding: 0;
+}
+
+.scraper-layout.sidebar-collapsed .sidebar-toggle {
+	display: flex;
+}
+
+/* Sidebar card styling */
+.scraper-sidebar .card {
+	margin-bottom: 1rem;
+}
+
+.scraper-sidebar .card:last-child {
+	margin-bottom: 0;
+}
+
+.scraper-sidebar .card-header {
+	padding: 0.75rem 1rem;
+	font-size: 0.9rem;
+}
+
+.scraper-sidebar .card-body {
+	padding: 1rem;
+}
+
+/* Compact stat cards in sidebar */
+.scraper-sidebar .stat-card {
+	padding: 0.75rem;
+}
+
+.scraper-sidebar .stat-card .stat-value {
+	font-size: 1.25rem;
+}
+
+.scraper-sidebar .stat-card .stat-label {
+	font-size: 0.7rem;
+}
+
+/* Stats grid in sidebar - 1 stat per row */
+.sidebar-stats-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0.5rem;
+}
+
+/* Compact stat card in sidebar */
+.sidebar-stats-grid .stat-card {
+	padding: 0.5rem 0.75rem;
+	flex-direction: row;
+	gap: 0.75rem;
+}
+
+.sidebar-stats-grid .stat-card .stat-icon {
+	width: 36px;
+	height: 36px;
+	font-size: 1rem;
+	border-radius: 8px;
+}
+
+.sidebar-stats-grid .stat-card .stat-content {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex: 1;
+}
+
+.sidebar-stats-grid .stat-card .stat-value {
+	font-size: 1.1rem;
+	order: 2;
+}
+
+.sidebar-stats-grid .stat-card .stat-label {
+	font-size: 0.75rem;
+	order: 1;
+}
+
+/* Sidebar toggle button (fixed position when collapsed) */
+.sidebar-toggle {
+	position: fixed;
+	right: 0;
+	top: 50%;
+	transform: translateY(-50%);
+	background: linear-gradient(135deg, #4dabf7 0%, #228be6 100%);
+	border: none;
+	color: white;
+	width: 36px;
+	height: 100px;
+	border-radius: 8px 0 0 8px;
+	cursor: pointer;
+	z-index: 1000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s ease;
+	box-shadow: -2px 0 10px rgba(0, 0, 0, 0.3);
+}
+
+.sidebar-toggle:hover {
+	width: 44px;
+	background: linear-gradient(135deg, #339af0 0%, #1c7ed6 100%);
+}
+
+/* Responsive: Stack on smaller screens */
+@media (max-width: 1200px) {
+	.scraper-layout {
+		flex-direction: column;
+	}
+
+	.scraper-sidebar {
+		width: 100%;
+		position: static;
+		max-height: none;
+		order: -1; /* Move sidebar above main on mobile */
+	}
+
+	.sidebar-toggle {
+		display: none !important;
+	}
 }

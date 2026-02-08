@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // LuxureTVScraperService handles scraping from LuxureTV
@@ -504,4 +506,102 @@ func (s *LuxureTVScraperService) FetchEmbedIDsForVideos(videos []*ScrapedVideo) 
 	}
 
 	return updated, nil
+}
+
+// CheckForNewVideos checks for new videos since last checkpoint
+func (s *LuxureTVScraperService) CheckForNewVideos(categories []string, maxPages int, activityID int) (*models.NewContentResult, error) {
+	result := &models.NewContentResult{
+		ScraperType: "luxuretv",
+		CheckedAt:   time.Now(),
+		Details:     map[string]interface{}{},
+		NewItems:    []models.NewItemInfo{},
+	}
+
+	// If no categories specified, use default
+	if len(categories) == 0 {
+		categories = []string{"https://en.luxuretv.com/videos/zoo/"}
+	}
+
+	autoUpdateSvc := NewAutoUpdateService(nil, nil)
+	totalNewVideos := 0
+
+	for _, category := range categories {
+		// Get checkpoint for this category
+		checkpoint, _ := autoUpdateSvc.GetCheckpoint("luxuretv", "last_video_url", category)
+		lastSeenURL := ""
+		if checkpoint != nil {
+			lastSeenURL = checkpoint.CheckpointValue
+		}
+
+		log.Printf("Checking LuxureTV category: %s (last seen: %s)", category, lastSeenURL)
+
+		newVideosForCategory := 0
+		firstVideoURL := ""
+
+		// Scrape up to maxPages looking for new videos
+		for page := 1; page <= maxPages; page++ {
+			pageURL := category
+			if page > 1 {
+				pageURL = fmt.Sprintf("%spage%d.html", category, page)
+			}
+
+			videos, err := s.scrapeLuxureTVPage(pageURL)
+			if err != nil {
+				log.Printf("Error scraping page %d: %v", page, err)
+				break
+			}
+
+			if len(videos) == 0 {
+				break
+			}
+
+			foundCheckpoint := false
+			for _, video := range videos {
+				if firstVideoURL == "" {
+					firstVideoURL = video.URL
+				}
+
+				if video.URL == lastSeenURL {
+					foundCheckpoint = true
+					break
+				}
+
+				if err := s.videoScraperService.saveVideo(video); err == nil {
+					newVideosForCategory++
+					if len(result.NewItems) < 10 {
+						result.NewItems = append(result.NewItems, models.NewItemInfo{
+							URL:       video.URL,
+							Title:     video.Title,
+							Thumbnail: video.ThumbnailURL,
+							Type:      "video",
+						})
+					}
+				}
+			}
+
+			if foundCheckpoint {
+				break
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+
+		if firstVideoURL != "" && newVideosForCategory > 0 {
+			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
+				ScraperType:     "luxuretv",
+				CheckpointType:  "last_video_url",
+				CheckpointValue: firstVideoURL,
+				TargetID:        category,
+			})
+		}
+
+		totalNewVideos += newVideosForCategory
+		log.Printf("Found %d new videos for category: %s", newVideosForCategory, category)
+	}
+
+	result.NewItemsFound = totalNewVideos
+	result.Details["categories_checked"] = len(categories)
+	result.Details["total_new_videos"] = totalNewVideos
+
+	return result, nil
 }

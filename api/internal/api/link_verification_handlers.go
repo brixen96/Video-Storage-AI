@@ -207,3 +207,192 @@ func getProviderHealth(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.SuccessResponse(health, "Provider health retrieved successfully"))
 }
+
+// ==================== Sexuria Link Verification ====================
+
+// getSexuriaLinkStats returns statistics for all Sexuria download links
+func getSexuriaLinkStats(c *gin.Context) {
+	svc := ensureLinkVerificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Link verification service not initialized",
+		))
+		return
+	}
+
+	stats, err := svc.GetSexuriaLinkStats()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get Sexuria link stats",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(stats, "Sexuria link statistics retrieved successfully"))
+}
+
+// verifySexuriaItemLinks verifies all download links for a specific Sexuria item
+func verifySexuriaItemLinks(c *gin.Context) {
+	svc := ensureLinkVerificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Link verification service not initialized",
+		))
+		return
+	}
+
+	videoIDStr := c.Param("id")
+	videoID, err := strconv.ParseInt(videoIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid video ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Run verification and return results
+	results, err := svc.VerifySexuriaItemLinks(videoID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to verify Sexuria item links",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(results, "Sexuria item links verified"))
+}
+
+// verifyAllSexuriaLinks batch verifies Sexuria links
+func verifyAllSexuriaLinks(c *gin.Context) {
+	svc := ensureLinkVerificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Link verification service not initialized",
+		))
+		return
+	}
+
+	// Get optional limit from query param
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 || limit > 1000 {
+		limit = 100
+	}
+
+	// Cutoff days (verify links not checked in X days)
+	cutoffStr := c.DefaultQuery("cutoff_days", "7")
+	cutoffDays, err := strconv.Atoi(cutoffStr)
+	if err != nil || cutoffDays < 1 {
+		cutoffDays = 7
+	}
+
+	// Start verification in background
+	go func() {
+		if err := svc.VerifyAllSexuriaLinks(limit, cutoffDays); err != nil {
+			log.Printf("Error verifying Sexuria links: %v", err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{
+		"limit":       limit,
+		"cutoff_days": cutoffDays,
+		"message":     "Sexuria link verification started in background",
+	}, "Verification started"))
+}
+
+// extractSexuriaItemLinks extracts and saves download links from a Sexuria item page
+func extractSexuriaItemLinks(c *gin.Context) {
+	sexuriaSvc := ensureSexuriaScraperService()
+	if sexuriaSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Sexuria scraper service not initialized",
+		))
+		return
+	}
+
+	videoIDStr := c.Param("id")
+	videoID, err := strconv.ParseInt(videoIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid video ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Get the video URL from request body or query
+	var request struct {
+		URL string `json:"url"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		// Try query param
+		request.URL = c.Query("url")
+	}
+
+	if request.URL == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			"URL is required",
+		))
+		return
+	}
+
+	links, err := sexuriaSvc.ExtractAndSaveLinks(videoID, request.URL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to extract links",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"video_id":    videoID,
+		"links_count": len(links),
+		"links":       links,
+	}, "Links extracted and saved"))
+}
+
+// getSexuriaItemLinks returns all download links for a Sexuria item
+func getSexuriaItemLinks(c *gin.Context) {
+	sexuriaSvc := ensureSexuriaScraperService()
+	if sexuriaSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"Service unavailable",
+			"Sexuria scraper service not initialized",
+		))
+		return
+	}
+
+	videoIDStr := c.Param("id")
+	videoID, err := strconv.ParseInt(videoIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid video ID",
+			err.Error(),
+		))
+		return
+	}
+
+	links, err := sexuriaSvc.GetDownloadLinks(videoID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get links",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"video_id":    videoID,
+		"links_count": len(links),
+		"links":       links,
+	}, "Links retrieved"))
+}

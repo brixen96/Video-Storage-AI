@@ -16,42 +16,232 @@ var jdownloaderService *services.JDownloaderService
 // ensureJDownloaderService initializes the JDownloader service if needed
 func ensureJDownloaderService() *services.JDownloaderService {
 	if jdownloaderService == nil {
-		jdownloaderService = services.NewJDownloaderService("")
+		jdownloaderService = services.NewJDownloaderService()
 		log.Println("📥 JDownloader Service initialized")
 	}
 	return jdownloaderService
 }
 
-// checkJDownloaderStatus checks if JDownloader is available
+// getJDownloaderConfig handles GET /api/v1/jdownloader/config
+func getJDownloaderConfig(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	config, err := svc.GetConfig()
+	if err != nil {
+		log.Printf("Failed to get JDownloader config: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get configuration"})
+		return
+	}
+
+	c.JSON(http.StatusOK, config)
+}
+
+// updateJDownloaderConfig handles PUT /api/v1/jdownloader/config
+func updateJDownloaderConfig(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var config models.JDownloaderConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.UpdateConfig(&config); err != nil {
+		log.Printf("Failed to update JDownloader config: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update configuration"})
+		return
+	}
+
+	// Return updated config
+	updatedConfig, _ := svc.GetConfig()
+	c.JSON(http.StatusOK, updatedConfig)
+}
+
+// testJDownloaderConnection handles POST /api/v1/jdownloader/test
+func testJDownloaderConnection(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	result, err := svc.TestConnection()
+	if err != nil {
+		log.Printf("Failed to test JDownloader connection: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to test connection"})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// sendToJDownloader handles POST /api/v1/jdownloader/send
+func sendToJDownloader(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var request models.JDownloaderSendLinksRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(request.Links) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No links provided"})
+		return
+	}
+
+	results, err := svc.SendLinks(request.Links)
+	if err != nil {
+		log.Printf("Failed to send links to JDownloader: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Count successes and failures
+	successCount := 0
+	failCount := 0
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		} else {
+			failCount++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"results":      results,
+		"successCount": successCount,
+		"failCount":    failCount,
+		"total":        len(results),
+	})
+}
+
+// getJDownloaderConnectionStatus handles GET /api/v1/jdownloader/status
+func getJDownloaderConnectionStatus(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	status, err := svc.GetConnectionStatus()
+	if err != nil {
+		log.Printf("Failed to get JDownloader status: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get status"})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
+// getJDownloaderHistory handles GET /api/v1/jdownloader/history
+func getJDownloaderHistory(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	// Parse pagination parameters
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	history, total, err := svc.GetHistory(limit, offset)
+	if err != nil {
+		log.Printf("Failed to get JDownloader history: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":   history,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+// getJDPackageAddedTimes returns locally-tracked timestamps for packages added via our app
+func getJDPackageAddedTimes(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	times, err := svc.GetPackageAddedTimes()
+	if err != nil {
+		log.Printf("Failed to get package added times: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get package timestamps"})
+		return
+	}
+
+	c.JSON(http.StatusOK, times)
+}
+
+// clearJDownloaderHistory handles DELETE /api/v1/jdownloader/history
+func clearJDownloaderHistory(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	if err := svc.ClearHistory(); err != nil {
+		log.Printf("Failed to clear JDownloader history: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "History cleared"})
+}
+
+// startJDownloaderDownloads handles POST /api/v1/jdownloader/start
+func startJDownloaderDownloads(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	if err := svc.StartDownloads(); err != nil {
+		log.Printf("Failed to start JDownloader downloads: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Downloads started"})
+}
+
+// stopJDownloaderDownloads handles POST /api/v1/jdownloader/stop
+func stopJDownloaderDownloads(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	if err := svc.StopDownloads(); err != nil {
+		log.Printf("Failed to stop JDownloader downloads: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Downloads stopped"})
+}
+
+// checkJDownloaderAvailability handles GET /api/v1/jdownloader/available
+func checkJDownloaderAvailability(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	available := svc.IsAvailable()
+
+	c.JSON(http.StatusOK, gin.H{"available": available})
+}
+
+// Legacy handlers for backward compatibility
+
+// checkJDownloaderStatus checks if JDownloader is available (legacy)
 func checkJDownloaderStatus(c *gin.Context) {
 	svc := ensureJDownloaderService()
 
 	available := svc.IsAvailable()
-	var version string
-	var err error
-
-	if available {
-		version, err = svc.GetVersion()
-		if err != nil {
-			log.Printf("Error getting JDownloader version: %v", err)
-		}
-	}
+	config, _ := svc.GetConfig()
 
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 		"available": available,
-		"version":   version,
-		"url":       "http://localhost:3128",
+		"host":      config.LocalHost,
+		"port":      config.LocalPort,
 	}, "JDownloader status retrieved"))
 }
 
-// sendLinksToJDownloader sends links to JDownloader
+// sendLinksToJDownloader sends links to JDownloader (legacy format)
 func sendLinksToJDownloader(c *gin.Context) {
 	svc := ensureJDownloaderService()
 
 	if !svc.IsAvailable() {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
 			"JDownloader not available",
-			"Make sure JDownloader is running and Direct Connection is enabled",
+			"Make sure JDownloader is running and Remote API is enabled",
 		))
 		return
 	}
@@ -79,13 +269,17 @@ func sendLinksToJDownloader(c *gin.Context) {
 		return
 	}
 
-	var err error
-	if req.AutoStart {
-		err = svc.AddLinksAndStart(req.Links, req.PackageName, req.DestinationDir)
-	} else {
-		err = svc.AddLinks(req.Links, req.PackageName, req.DestinationDir)
+	// Convert to new format
+	linkRequests := make([]models.JDownloaderLinkRequest, len(req.Links))
+	for i, link := range req.Links {
+		linkRequests[i] = models.JDownloaderLinkRequest{
+			URL:         link,
+			PackageName: req.PackageName,
+			AutoStart:   req.AutoStart,
+		}
 	}
 
+	results, err := svc.SendLinks(linkRequests)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to send links to JDownloader",
@@ -94,8 +288,15 @@ func sendLinksToJDownloader(c *gin.Context) {
 		return
 	}
 
+	successCount := 0
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		}
+	}
+
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"links_sent": len(req.Links),
+		"links_sent": successCount,
 		"auto_start": req.AutoStart,
 	}, "Links sent to JDownloader successfully"))
 }
@@ -107,7 +308,7 @@ func sendThreadToJDownloader(c *gin.Context) {
 	if !svc.IsAvailable() {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
 			"JDownloader not available",
-			"Make sure JDownloader is running and Direct Connection is enabled",
+			"Make sure JDownloader is running and Remote API is enabled",
 		))
 		return
 	}
@@ -125,12 +326,11 @@ func sendThreadToJDownloader(c *gin.Context) {
 	var req struct {
 		DestinationDir string `json:"destination_dir"`
 		AutoStart      bool   `json:"auto_start"`
-		OnlyActive     bool   `json:"only_active"`     // Only send active (verified) links
-		OnlyPending    bool   `json:"only_pending"`    // Only send not-yet-downloaded links
+		OnlyActive     bool   `json:"only_active"`
+		OnlyPending    bool   `json:"only_pending"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// Use defaults if no body provided
 		req.OnlyActive = true
 		req.OnlyPending = true
 	}
@@ -181,16 +381,20 @@ func sendThreadToJDownloader(c *gin.Context) {
 	}
 	defer rows.Close()
 
-	var links []string
+	var linkRequests []models.JDownloaderLinkRequest
 	for rows.Next() {
 		var url string
 		if err := rows.Scan(&url); err != nil {
 			continue
 		}
-		links = append(links, url)
+		linkRequests = append(linkRequests, models.JDownloaderLinkRequest{
+			URL:         url,
+			PackageName: threadTitle,
+			AutoStart:   req.AutoStart,
+		})
 	}
 
-	if len(links) == 0 {
+	if len(linkRequests) == 0 {
 		c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
 			"links_sent": 0,
 			"message":    "No links matching criteria found",
@@ -198,24 +402,24 @@ func sendThreadToJDownloader(c *gin.Context) {
 		return
 	}
 
-	// Send to JDownloader
-	var sendErr error
-	if req.AutoStart {
-		sendErr = svc.AddLinksAndStart(links, threadTitle, req.DestinationDir)
-	} else {
-		sendErr = svc.AddLinks(links, threadTitle, req.DestinationDir)
-	}
-
-	if sendErr != nil {
+	results, err := svc.SendLinks(linkRequests)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to send links to JDownloader",
-			sendErr.Error(),
+			err.Error(),
 		))
 		return
 	}
 
+	successCount := 0
+	for _, r := range results {
+		if r.Success {
+			successCount++
+		}
+	}
+
 	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"links_sent":   len(links),
+		"links_sent":   successCount,
 		"thread_title": threadTitle,
 		"auto_start":   req.AutoStart,
 		"filters": gin.H{
@@ -225,22 +429,14 @@ func sendThreadToJDownloader(c *gin.Context) {
 	}, "Thread links sent to JDownloader successfully"))
 }
 
-// getJDownloaderStatus returns current JDownloader download status
+// getJDownloaderStatus returns current JDownloader download status (legacy)
 func getJDownloaderStatus(c *gin.Context) {
 	svc := ensureJDownloaderService()
 
-	if !svc.IsAvailable() {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
-			"JDownloader not available",
-			"Make sure JDownloader is running",
-		))
-		return
-	}
-
-	status, err := svc.GetDownloadStatus()
+	status, err := svc.GetConnectionStatus()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
-			"Failed to get download status",
+			"Failed to get status",
 			err.Error(),
 		))
 		return
@@ -249,75 +445,319 @@ func getJDownloaderStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(status, "JDownloader status retrieved"))
 }
 
-// startJDownloaderDownloads starts all downloads
-func startJDownloaderDownloads(c *gin.Context) {
+// ============ Extended JDownloader Control Handlers ============
+
+// getJDSystemInfo returns JDownloader system information
+func getJDSystemInfo(c *gin.Context) {
 	svc := ensureJDownloaderService()
 
-	if !svc.IsAvailable() {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
-			"JDownloader not available",
-			"Make sure JDownloader is running",
-		))
-		return
-	}
-
-	if err := svc.StartDownloads(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
-			"Failed to start downloads",
-			err.Error(),
-		))
-		return
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Downloads started"))
-}
-
-// stopJDownloaderDownloads stops all downloads
-func stopJDownloaderDownloads(c *gin.Context) {
-	svc := ensureJDownloaderService()
-
-	if !svc.IsAvailable() {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
-			"JDownloader not available",
-			"Make sure JDownloader is running",
-		))
-		return
-	}
-
-	if err := svc.StopDownloads(); err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
-			"Failed to stop downloads",
-			err.Error(),
-		))
-		return
-	}
-
-	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Downloads stopped"))
-}
-
-// getJDownloaderDownloads returns all downloads in JDownloader
-func getJDownloaderDownloads(c *gin.Context) {
-	svc := ensureJDownloaderService()
-
-	if !svc.IsAvailable() {
-		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
-			"JDownloader not available",
-			"Make sure JDownloader is running",
-		))
-		return
-	}
-
-	downloads, err := svc.GetDownloadList()
+	info, err := svc.GetSystemInfo()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
-			"Failed to get download list",
-			err.Error(),
-		))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
-		"downloads": downloads,
-		"count":     len(downloads),
-	}, "Download list retrieved"))
+	c.JSON(http.StatusOK, info)
+}
+
+// pauseJDDownloads pauses/resumes downloads
+func pauseJDDownloads(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		Pause bool `json:"pause"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.PauseDownloads(req.Pause); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Downloads paused state updated", "paused": req.Pause})
+}
+
+// getJDSpeed returns current download speed
+func getJDSpeed(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	speed, err := svc.GetDownloadSpeed()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"speed": speed})
+}
+
+// setJDSpeedLimit sets the download speed limit
+func setJDSpeedLimit(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		Limit int64 `json:"limit"` // bytes per second, 0 = unlimited
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.SetSpeedLimit(req.Limit); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Speed limit updated", "limit": req.Limit})
+}
+
+// getLinkGrabberLinks returns LinkGrabber links
+func getLinkGrabberLinks(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	links, err := svc.GetLinkGrabberLinks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": links, "total": len(links)})
+}
+
+// getLinkGrabberPackages returns LinkGrabber packages
+func getLinkGrabberPackages(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	packages, err := svc.GetLinkGrabberPackages()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": packages, "total": len(packages)})
+}
+
+// getDownloadLinks returns download list links
+func getDownloadLinks(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	links, err := svc.GetDownloadLinks()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": links, "total": len(links)})
+}
+
+// getDownloadPackages returns download list packages
+func getDownloadPackages(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	packages, err := svc.GetDownloadPackages()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": packages, "total": len(packages)})
+}
+
+// moveToDownloads moves links from LinkGrabber to download list
+func moveToDownloads(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.MoveToDownloads(req.LinkIDs, req.PackageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Links moved to downloads"})
+}
+
+// removeLinkGrabberLinks removes links from LinkGrabber
+func removeLinkGrabberLinks(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.RemoveLinkGrabberLinks(req.LinkIDs, req.PackageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Links removed from LinkGrabber"})
+}
+
+// removeDownloadLinks removes links from download list
+func removeDownloadLinks(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.RemoveDownloadLinks(req.LinkIDs, req.PackageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Links removed from downloads"})
+}
+
+// clearLinkGrabber clears all links from LinkGrabber
+func clearLinkGrabber(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	if err := svc.ClearLinkGrabber(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "LinkGrabber cleared"})
+}
+
+// setLinkEnabled enables/disables links
+func setLinkEnabled(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		Enabled    bool    `json:"enabled"`
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+		IsDownload bool    `json:"isDownload"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.SetLinkEnabled(req.Enabled, req.LinkIDs, req.PackageIDs, req.IsDownload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Link enabled state updated"})
+}
+
+// forceDownload forces download of specific links
+func forceDownload(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.ForceDownload(req.LinkIDs, req.PackageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Download forced"})
+}
+
+// cleanupFinished removes finished downloads
+func cleanupFinished(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	if err := svc.CleanupFinished(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Finished downloads cleaned up"})
+}
+
+// resetLinks resets failed/skipped links
+func resetLinks(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.ResetLinks(req.LinkIDs, req.PackageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Links reset"})
+}
+
+// setLinkPriority sets download priority
+func setLinkPriority(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		Priority   string  `json:"priority"` // HIGHEST, HIGHER, HIGH, DEFAULT, LOW, LOWER, LOWEST
+		LinkIDs    []int64 `json:"linkIds"`
+		PackageIDs []int64 `json:"packageIds"`
+		IsDownload bool    `json:"isDownload"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.SetPriority(req.Priority, req.LinkIDs, req.PackageIDs, req.IsDownload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Priority updated"})
+}
+
+// renamePackage renames a package
+func renamePackage(c *gin.Context) {
+	svc := ensureJDownloaderService()
+
+	var req struct {
+		PackageID  int64  `json:"packageId"`
+		NewName    string `json:"newName"`
+		IsDownload bool   `json:"isDownload"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := svc.RenamePackage(req.PackageID, req.NewName, req.IsDownload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Package renamed"})
 }

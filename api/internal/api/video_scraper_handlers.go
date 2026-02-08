@@ -124,10 +124,16 @@ func getScrapedVideosHandler(c *gin.Context) {
 	// Check if we want to include tab info
 	includeTabInfo := c.Query("includeTabInfo") == "true"
 
+	// Check if filtering by source
+	source := c.Query("source")
+
 	var videos []*services.ScrapedVideo
 	var err error
 
-	if includeTabInfo {
+	if source != "" {
+		// Filter by source for better performance
+		videos, err = svc.GetScrapedVideosBySource(source)
+	} else if includeTabInfo {
 		videos, err = svc.GetScrapedVideosWithTabInfo()
 	} else {
 		videos, err = svc.GetScrapedVideos()

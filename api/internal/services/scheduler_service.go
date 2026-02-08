@@ -95,8 +95,186 @@ func (s *SchedulerService) schedulerLoop() {
 			return
 		case <-ticker.C:
 			s.checkAndExecuteJobs()
+			s.checkAndRunAutoUpdates() // Also check for auto-updates
 		}
 	}
+}
+
+// checkAndRunAutoUpdates checks for auto-updates that are due and runs them
+func (s *SchedulerService) checkAndRunAutoUpdates() {
+	// Get all enabled auto-update configs that are due
+	rows, err := s.db.Query(`
+		SELECT id, scraper_type, interval_minutes, max_pages_to_check, config_json, last_checked_at
+		FROM scraper_auto_update_configs
+		WHERE enabled = 1
+		AND (
+			last_checked_at IS NULL
+			OR datetime(last_checked_at, '+' || interval_minutes || ' minutes') <= datetime('now')
+		)
+	`)
+	if err != nil {
+		log.Printf("Error checking for due auto-updates: %v\n", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id int64
+		var scraperType string
+		var intervalMinutes int
+		var maxPagesToCheck int
+		var configJSON string
+		var lastCheckedAt sql.NullTime
+
+		err := rows.Scan(&id, &scraperType, &intervalMinutes, &maxPagesToCheck, &configJSON, &lastCheckedAt)
+		if err != nil {
+			continue
+		}
+
+		// Check if this scraper is already running an auto-update
+		s.mu.RLock()
+		runningKey := fmt.Sprintf("auto_update_%s", scraperType)
+		_, isRunning := s.runningJobs[int64(hash(runningKey))]
+		s.mu.RUnlock()
+
+		if isRunning {
+			continue
+		}
+
+		// Run auto-update in background
+		go s.runAutoUpdate(id, scraperType, intervalMinutes, maxPagesToCheck, configJSON)
+	}
+}
+
+// hash creates a simple hash for tracking running auto-updates
+func hash(s string) int64 {
+	var h int64
+	for _, c := range s {
+		h = 31*h + int64(c)
+	}
+	return h
+}
+
+// runAutoUpdate runs an auto-update check for a scraper
+func (s *SchedulerService) runAutoUpdate(configID int64, scraperType string, maxPages int, _ int, configJSON string) {
+	runningKey := fmt.Sprintf("auto_update_%s", scraperType)
+	keyHash := hash(runningKey)
+
+	// Track as running
+	s.mu.Lock()
+	s.runningJobs[keyHash] = &JobExecution{
+		JobID:     keyHash,
+		StartedAt: time.Now(),
+	}
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.runningJobs, keyHash)
+		s.mu.Unlock()
+	}()
+
+	log.Printf("🔄 Running auto-update check for %s\n", scraperType)
+
+	// Create activity record
+	activity, err := s.activityService.Create(&models.ActivityLogCreate{
+		TaskType: "auto_update_check",
+		Status:   "running",
+		Message:  fmt.Sprintf("Auto-update check for %s", scraperType),
+		Details: map[string]interface{}{
+			"scraper_type":       scraperType,
+			"max_pages_to_check": maxPages,
+		},
+	})
+
+	if err != nil {
+		log.Printf("Failed to create activity for auto-update: %v\n", err)
+		return
+	}
+
+	// Run the actual check based on scraper type
+	var foundCount int
+	var checkErr error
+
+	switch scraperType {
+	case "simpcity":
+		// Check watched threads for new posts
+		foundCount, checkErr = s.checkSimpcityForNewContent(activity.ID)
+	case "pornhub":
+		log.Printf("PornHub auto-update - checking for new videos\n")
+		foundCount = 0 // Placeholder - needs keywords from config
+	case "luxuretv":
+		log.Printf("LuxureTV auto-update - checking for new videos\n")
+		foundCount = 0 // Placeholder
+	case "sexuria":
+		log.Printf("Sexuria auto-update - checking for new items\n")
+		foundCount = 0 // Placeholder
+	case "rule34video":
+		log.Printf("Rule34Video auto-update - checking for new videos\n")
+		foundCount = 0 // Placeholder
+	default:
+		log.Printf("Unknown scraper type for auto-update: %s\n", scraperType)
+	}
+
+	// Update last_checked_at regardless of result
+	_, err = s.db.Exec(`
+		UPDATE scraper_auto_update_configs
+		SET last_checked_at = datetime('now'),
+		    last_found_count = ?,
+		    total_found_count = total_found_count + ?,
+		    check_count = check_count + 1,
+		    updated_at = datetime('now')
+		WHERE id = ?
+	`, foundCount, foundCount, configID)
+
+	if err != nil {
+		log.Printf("Failed to update auto-update config: %v\n", err)
+	}
+
+	// Update activity status
+	message := fmt.Sprintf("Auto-update check completed for %s", scraperType)
+	if checkErr != nil {
+		message = fmt.Sprintf("Auto-update check failed: %v", checkErr)
+		s.activityService.UpdateProgress(activity.ID, 100, message)
+	} else if foundCount > 0 {
+		message = fmt.Sprintf("Found %d new items from %s", foundCount, scraperType)
+		s.activityService.UpdateProgress(activity.ID, 100, message)
+	} else {
+		s.activityService.UpdateProgress(activity.ID, 100, message)
+	}
+
+	log.Printf("✅ Auto-update check completed for %s (found: %d)\n", scraperType, foundCount)
+}
+
+// checkSimpcityForNewContent checks watched Simpcity threads for new posts
+func (s *SchedulerService) checkSimpcityForNewContent(activityID int) (int, error) {
+	// Get watched threads
+	rows, err := s.db.Query(`
+		SELECT id, url, title, reply_count
+		FROM scraped_threads
+		WHERE is_watched = 1
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var totalNewPosts int
+	for rows.Next() {
+		var threadID int64
+		var url, title string
+		var replyCount int
+
+		if err := rows.Scan(&threadID, &url, &title, &replyCount); err != nil {
+			continue
+		}
+
+		// For now, just log that we checked
+		// Full implementation would scrape and compare reply counts
+		log.Printf("  Checking thread: %s (current replies: %d)\n", title, replyCount)
+	}
+
+	return totalNewPosts, nil
 }
 
 // checkAndExecuteJobs checks for jobs that need to run

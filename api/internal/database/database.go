@@ -888,6 +888,267 @@ func runMigrations() error {
 		}
 	}
 
+	// Migration 40: Add content_type column to videos table
+	migration40ContentType := `ALTER TABLE videos ADD COLUMN content_type TEXT DEFAULT 'regular'`
+	if _, err := DB.Exec(migration40ContentType); err != nil {
+		// Ignore if column exists
+		if !isColumnExistsError(err) {
+			// Allow to continue
+		}
+	}
+
+	// Migration 41: Video Lists System - Custom named lists for videos
+	migration41VideoLists := []string{
+		// video_lists table - stores named lists
+		`CREATE TABLE IF NOT EXISTS video_lists (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT,
+			color TEXT DEFAULT '#007bff',
+			icon TEXT DEFAULT 'list',
+			is_default BOOLEAN DEFAULT 0,
+			position INTEGER DEFAULT 0,
+			video_count INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// video_list_items junction table - links videos to lists
+		`CREATE TABLE IF NOT EXISTS video_list_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			list_id INTEGER NOT NULL,
+			video_id INTEGER,
+			scraped_video_id INTEGER,
+			position INTEGER DEFAULT 0,
+			notes TEXT,
+			added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (list_id) REFERENCES video_lists(id) ON DELETE CASCADE,
+			FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+			FOREIGN KEY (scraped_video_id) REFERENCES scraped_videos(id) ON DELETE CASCADE,
+			UNIQUE(list_id, video_id),
+			UNIQUE(list_id, scraped_video_id)
+		)`,
+		// Indexes for video_lists
+		`CREATE INDEX IF NOT EXISTS idx_video_lists_name ON video_lists(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_lists_position ON video_lists(position)`,
+		// Indexes for video_list_items
+		`CREATE INDEX IF NOT EXISTS idx_video_list_items_list ON video_list_items(list_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_list_items_video ON video_list_items(video_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_list_items_scraped ON video_list_items(scraped_video_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_list_items_position ON video_list_items(position)`,
+		// Create default "Edit List" to migrate existing in_edit_list videos
+		`INSERT OR IGNORE INTO video_lists (name, description, icon, is_default, position)
+		 VALUES ('Edit List', 'Default list for videos queued for editing', 'edit', 1, 0)`,
+	}
+
+	for _, migration := range migration41VideoLists {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "UNIQUE constraint failed") {
+				return fmt.Errorf("migration 41 (video lists) failed: %w", err)
+			}
+		}
+	}
+
+	// Migrate existing in_edit_list videos to the default Edit List
+	migrateEditListSQL := `
+		INSERT OR IGNORE INTO video_list_items (list_id, video_id, added_at)
+		SELECT
+			(SELECT id FROM video_lists WHERE is_default = 1 LIMIT 1),
+			id,
+			CURRENT_TIMESTAMP
+		FROM videos
+		WHERE in_edit_list = 1
+	`
+	if _, err := DB.Exec(migrateEditListSQL); err != nil {
+		// Ignore errors - migration might already be done
+	}
+
+	// Update video_count for the default list
+	updateCountSQL := `
+		UPDATE video_lists SET video_count = (
+			SELECT COUNT(*) FROM video_list_items WHERE list_id = video_lists.id
+		)
+	`
+	if _, err := DB.Exec(updateCountSQL); err != nil {
+		// Ignore errors
+	}
+
+	// Migration 42: Auto-Update System & Dashboard
+	migration42AutoUpdate := []string{
+		// Scraper auto-update configurations
+		`CREATE TABLE IF NOT EXISTS scraper_auto_update_configs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			scraper_type TEXT UNIQUE NOT NULL,
+			enabled BOOLEAN DEFAULT 0,
+			interval_minutes INTEGER DEFAULT 60,
+			max_pages_to_check INTEGER DEFAULT 3,
+			last_checked_at DATETIME,
+			last_found_count INTEGER DEFAULT 0,
+			total_found_count INTEGER DEFAULT 0,
+			check_count INTEGER DEFAULT 0,
+			config_json TEXT DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// Index for enabled configs
+		`CREATE INDEX IF NOT EXISTS idx_auto_update_enabled ON scraper_auto_update_configs(enabled)`,
+		`CREATE INDEX IF NOT EXISTS idx_auto_update_last_checked ON scraper_auto_update_configs(last_checked_at)`,
+
+		// Track seen content to detect NEW items only
+		`CREATE TABLE IF NOT EXISTS scraper_checkpoints (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			scraper_type TEXT NOT NULL,
+			checkpoint_type TEXT NOT NULL,
+			checkpoint_value TEXT NOT NULL,
+			target_id TEXT,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_checkpoint_unique ON scraper_checkpoints(scraper_type, checkpoint_type, target_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_checkpoint_type ON scraper_checkpoints(scraper_type)`,
+
+		// Dashboard activity feed cache
+		`CREATE TABLE IF NOT EXISTS dashboard_feed_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			item_type TEXT NOT NULL,
+			title TEXT NOT NULL,
+			message TEXT NOT NULL,
+			icon TEXT DEFAULT 'bell',
+			color TEXT DEFAULT 'primary',
+			scraper_type TEXT,
+			metadata TEXT DEFAULT '{}',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_feed_created ON dashboard_feed_items(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_feed_type ON dashboard_feed_items(item_type)`,
+
+		// Add is_watched column to scraped_threads for simpcity auto-update
+		`ALTER TABLE scraped_threads ADD COLUMN is_watched BOOLEAN DEFAULT 0`,
+
+		// Insert default auto-update configs for each scraper type
+		`INSERT OR IGNORE INTO scraper_auto_update_configs (scraper_type, enabled, interval_minutes, max_pages_to_check, config_json)
+		 VALUES ('simpcity', 0, 60, 3, '{}')`,
+		`INSERT OR IGNORE INTO scraper_auto_update_configs (scraper_type, enabled, interval_minutes, max_pages_to_check, config_json)
+		 VALUES ('pornhub', 0, 120, 3, '{"keywords": []}')`,
+		`INSERT OR IGNORE INTO scraper_auto_update_configs (scraper_type, enabled, interval_minutes, max_pages_to_check, config_json)
+		 VALUES ('rule34video', 0, 120, 3, '{}')`,
+		`INSERT OR IGNORE INTO scraper_auto_update_configs (scraper_type, enabled, interval_minutes, max_pages_to_check, config_json)
+		 VALUES ('luxuretv', 0, 180, 3, '{"categories": []}')`,
+		`INSERT OR IGNORE INTO scraper_auto_update_configs (scraper_type, enabled, interval_minutes, max_pages_to_check, config_json)
+		 VALUES ('sexuria', 0, 180, 3, '{"categories": []}')`,
+	}
+
+	for _, migration := range migration42AutoUpdate {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate column name") && !strings.Contains(errMsg, "UNIQUE constraint failed") {
+				return fmt.Errorf("migration 42 (auto-update) failed: %w", err)
+			}
+		}
+	}
+
+	// Create index on is_watched if not exists
+	if _, err := DB.Exec(`CREATE INDEX IF NOT EXISTS idx_threads_watched ON scraped_threads(is_watched)`); err != nil {
+		// Ignore if already exists
+	}
+
+	// Migration 43: Sexuria Download Links Table for link verification
+	migration43SexuriaLinks := []string{
+		// Sexuria download links table
+		`CREATE TABLE IF NOT EXISTS sexuria_download_links (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			video_id INTEGER NOT NULL,
+			source TEXT NOT NULL DEFAULT 'sexuria',
+			provider TEXT NOT NULL,
+			url TEXT NOT NULL,
+			original_url TEXT,
+			filename TEXT,
+			file_size TEXT,
+			file_type TEXT,
+			status TEXT DEFAULT 'unknown',
+			last_checked_at DATETIME,
+			last_status_code INTEGER,
+			metadata TEXT DEFAULT '{}',
+			discovered_at DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (video_id) REFERENCES scraped_videos(id) ON DELETE CASCADE,
+			UNIQUE(url, video_id)
+		)`,
+		// Indexes for efficient queries
+		`CREATE INDEX IF NOT EXISTS idx_sexuria_links_video ON sexuria_download_links(video_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sexuria_links_provider ON sexuria_download_links(provider)`,
+		`CREATE INDEX IF NOT EXISTS idx_sexuria_links_status ON sexuria_download_links(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_sexuria_links_last_checked ON sexuria_download_links(last_checked_at)`,
+		// Add links_extracted flag to scraped_videos for Sexuria items
+		`ALTER TABLE scraped_videos ADD COLUMN links_extracted BOOLEAN DEFAULT 0`,
+		`ALTER TABLE scraped_videos ADD COLUMN links_last_extracted_at DATETIME`,
+	}
+
+	for _, migration := range migration43SexuriaLinks {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate column name") && !strings.Contains(errMsg, "UNIQUE constraint failed") {
+				return fmt.Errorf("migration 43 (sexuria links) failed: %w", err)
+			}
+		}
+	}
+
+	// Migration 44: JDownloader 2 Integration
+	migration44JDownloader := []string{
+		// JDownloader configuration table
+		`CREATE TABLE IF NOT EXISTS jdownloader_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			connection_type TEXT NOT NULL DEFAULT 'local',
+			local_host TEXT DEFAULT '192.168.1.10',
+			local_port INTEGER DEFAULT 3128,
+			local_password TEXT DEFAULT '',
+			local_use_auth BOOLEAN DEFAULT 0,
+			cloud_email TEXT DEFAULT '',
+			cloud_password TEXT DEFAULT '',
+			cloud_device_id TEXT DEFAULT '',
+			cloud_device_name TEXT DEFAULT '',
+			default_package_name TEXT DEFAULT '',
+			auto_start_downloads BOOLEAN DEFAULT 0,
+			enabled BOOLEAN DEFAULT 1,
+			last_connected_at DATETIME,
+			connection_status TEXT DEFAULT 'disconnected',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// JDownloader download history table
+		`CREATE TABLE IF NOT EXISTS jdownloader_history (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			video_id INTEGER,
+			link_url TEXT NOT NULL,
+			package_name TEXT,
+			status TEXT DEFAULT 'queued',
+			error_message TEXT,
+			sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE SET NULL
+		)`,
+		// Indexes for JDownloader tables
+		`CREATE INDEX IF NOT EXISTS idx_jd_history_video ON jdownloader_history(video_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_jd_history_status ON jdownloader_history(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_jd_history_sent ON jdownloader_history(sent_at DESC)`,
+	}
+
+	for _, migration := range migration44JDownloader {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate column name") {
+				return fmt.Errorf("migration 44 (jdownloader) failed: %w", err)
+			}
+		}
+	}
+
+	// Insert default JDownloader config if not exists
+	if _, err := DB.Exec(`INSERT OR IGNORE INTO jdownloader_config (id, connection_type) VALUES (1, 'local')`); err != nil {
+		// Ignore if already exists
+	}
+
+	// Fix JDownloader port from 3129 to 3128 (correct default port)
+	DB.Exec(`UPDATE jdownloader_config SET local_port = 3128 WHERE local_port = 3129`)
+
 	for i, migration := range migrations {
 		if _, err := DB.Exec(migration); err != nil {
 			errMsg := err.Error()

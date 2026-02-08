@@ -82,7 +82,6 @@
 										v-if="getTabById(tabId).libraryId"
 										:pathSegments="getTabById(tabId).pathSegments"
 										:showNotInterested="getTabById(tabId).showNotInterested"
-										:showEditList="getTabById(tabId).showEditList"
 										@navigate-to="navigateToSegment(getTabById(tabId), $event)"
 										@back="goBack(getTabById(tabId))"
 									/>
@@ -95,13 +94,29 @@
 										v-model:sortBy="getTabById(tabId).sortBy"
 										v-model:sortOrder="getTabById(tabId).sortOrder"
 										v-model:showNotInterested="getTabById(tabId).showNotInterested"
-										v-model:showEditList="getTabById(tabId).showEditList"
 										:isLoading="getTabById(tabId).loading"
 										@update:searchQuery="applyFilters(getTabById(tabId))"
 										@update:showNotInterested="toggleShowNotInterested(getTabById(tabId))"
-										@update:showEditList="toggleShowEditList(getTabById(tabId))"
 										@refresh="refreshCurrentFolder(getTabById(tabId))"
 									/>
+
+									<!-- Selection Toolbar -->
+									<div v-if="getSelectedCount(tabId) > 0" class="selection-toolbar">
+										<div class="selection-info">
+											<font-awesome-icon :icon="['fas', 'check-square']" class="me-2" />
+											{{ getSelectedCount(tabId) }} item{{ getSelectedCount(tabId) > 1 ? 's' : '' }} selected
+										</div>
+										<div class="selection-actions">
+											<button class="btn btn-sm btn-primary me-2" @click="addSelectedToList(tabId)">
+												<font-awesome-icon :icon="['fas', 'folder-plus']" class="me-2" />
+												Add to List
+											</button>
+											<button class="btn btn-sm btn-outline-secondary" @click="clearSelection(tabId)">
+												<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
+												Clear Selection
+											</button>
+										</div>
+									</div>
 
 									<!-- Loading State -->
 									<div v-if="getTabById(tabId).loading" class="text-center py-5">
@@ -127,10 +142,12 @@
 												folder: item.type === 'folder',
 												video: item.type === 'video',
 												'not-interested': item.not_interested,
-												'in-edit-list': item.in_edit_list,
+												'in-edit-list': item.in_edit_list && (!item.lists || item.lists.length === 0),
+												'in-list': item.lists && item.lists.length > 0,
 												'drag-over': dropTargetTab === tabId,
 												'selected': isItemSelected(tabId, item.path),
 											}"
+											:style="getListBorderStyle(item)"
 											draggable="true"
 											@dragstart="handleItemDragStart($event, item, getTabById(tabId))"
 											@dragend="handleItemDragEnd"
@@ -151,7 +168,17 @@
 												<div class="item-name" :title="item.name">
 													{{ item.name }}
 													<span v-if="item.not_interested" class="badge-not-interested ms-1">Not Interested</span>
-													<span v-if="item.in_edit_list" class="badge-edit-list ms-1">Edit List</span>
+													<template v-if="item.lists && item.lists.length > 0">
+														<span
+															v-for="list in item.lists"
+															:key="list.id"
+															class="badge-list ms-1"
+															:style="{ backgroundColor: list.color || '#6366f1', color: getContrastColor(list.color || '#6366f1') }"
+														>
+															{{ list.name }}
+														</span>
+													</template>
+													<span v-else-if="item.in_edit_list" class="badge-edit-list ms-1">Edit List</span>
 												</div>
 												<div class="item-meta">
 													<span v-if="item.type === 'folder'">
@@ -200,8 +227,10 @@
 			@play="playVideo(contextMenu.item); closeContextMenu()"
 			@open="navigateToFolder(contextMenu.tab, contextMenu.item.path); closeContextMenu()"
 			@toggle-not-interested="toggleNotInterested(contextMenu.tab, contextMenu.item); closeContextMenu()"
-			@toggle-edit-list="toggleEditList(contextMenu.tab, contextMenu.item); closeContextMenu()"
+			@add-to-list="openAddToListModal(contextMenu.item); closeContextMenu()"
+			@remove-from-list="removeFromList(contextMenu.item, $event); closeContextMenu()"
 			@copy-path="copyPathToClipboard(contextMenu.item); closeContextMenu()"
+			@set-content-type="setContentType(contextMenu.tab, contextMenu.item, $event); closeContextMenu()"
 		/>
 
 		<!-- Video Preview on Hover -->
@@ -237,12 +266,23 @@
 			@close="closePlayer"
 			@video-converted="handleVideoConverted"
 		/>
+
+		<!-- Add to List Modal -->
+		<AddToListModal
+			:visible="addToListModal.visible"
+			:video="addToListModal.video"
+			:videos="addToListModal.videos"
+			:is-scraped="false"
+			@close="addToListModal.visible = false; addToListModal.videos = null"
+			@added="onAddedToList"
+		/>
 	</div>
 </template>
 
 <script>
-import { librariesAPI, videosAPI, filesAPI, getAssetURL } from '@/services/api'
+import { librariesAPI, videosAPI, filesAPI, videoListsAPI, getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
+import AddToListModal from '@/components/AddToListModal.vue'
 import { BrowserPaginationControls, BrowserSearchFilterBar, BrowserBreadcrumbNav, BrowserContextMenu } from '@/components/browser'
 import { useFormatters } from '@/composables/useFormatters'
 
@@ -250,6 +290,7 @@ export default {
 	name: 'BrowserPage',
 	components: {
 		VideoPlayer,
+		AddToListModal,
 		BrowserPaginationControls,
 		BrowserSearchFilterBar,
 		BrowserBreadcrumbNav,
@@ -272,6 +313,12 @@ export default {
 				y: 0,
 				item: null,
 				tab: null,
+			},
+			// Add to list modal
+			addToListModal: {
+				visible: false,
+				video: null,
+				videos: null,
 			},
 			// Split view state
 			splitPanels: [{ id: 1, tabIds: [], width: 100, activeTabId: null }],
@@ -380,7 +427,6 @@ export default {
 				searchQuery: '',
 				filterType: 'all',
 				showNotInterested: false,
-				showEditList: false,
 				sortBy: 'name',
 				sortOrder: 'asc',
 				currentPage: 1,
@@ -691,7 +737,7 @@ export default {
 
 			try {
 				const hasSearchQuery = this.tabs[tabIndex].searchQuery && this.tabs[tabIndex].searchQuery.trim()
-				if (hasSearchQuery || this.tabs[tabIndex].showNotInterested || this.tabs[tabIndex].showEditList) {
+				if (hasSearchQuery || this.tabs[tabIndex].showNotInterested) {
 					const params = {
 						library_id: this.tabs[tabIndex].libraryId,
 						per_page: 1000,
@@ -703,10 +749,6 @@ export default {
 
 					if (this.tabs[tabIndex].showNotInterested) {
 						params.not_interested = true
-					}
-
-					if (this.tabs[tabIndex].showEditList) {
-						params.in_edit_list = true
 					}
 
 					const response = await videosAPI.getAll(params)
@@ -942,16 +984,40 @@ export default {
 				item.not_interested = !item.not_interested
 			}
 		},
-		async toggleEditList(tab, item) {
-			item.in_edit_list = !item.in_edit_list
+		async setContentType(tab, item, contentType) {
+			const oldContentType = item.content_type
+			item.content_type = contentType
 
 			try {
-				await videosAPI.updateVideoMarksByPath(item.full_path, {
-					in_edit_list: item.in_edit_list,
-				})
+				if (item.type === 'folder') {
+					// Update all videos in the folder recursively
+					const response = await fetch('http://localhost:8080/api/v1/videos/content-type/folder', {
+						method: 'PATCH',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							folder_path: item.full_path,
+							content_type: contentType,
+						}),
+					})
+					const data = await response.json()
+					if (data.success) {
+						this.$toast.success(`Set ${data.data.updated} videos to "${contentType}"`)
+						// Refresh the folder contents to reflect changes
+						await this.refreshCurrentFolder(tab)
+					} else {
+						throw new Error(data.message || 'Failed to update content type')
+					}
+				} else {
+					// Update single video
+					await videosAPI.updateVideoMarksByPath(item.full_path, {
+						content_type: contentType,
+					})
+					this.$toast.success(`Set content type to "${contentType}"`)
+				}
 			} catch (error) {
-				console.error('Failed to update edit list status:', error)
-				item.in_edit_list = !item.in_edit_list
+				console.error('Failed to update content type:', error)
+				item.content_type = oldContentType
+				this.$toast.error('Failed to update content type')
 			}
 		},
 		filteredItems(tab) {
@@ -960,7 +1026,7 @@ export default {
 			let filtered = [...tab.items]
 
 			const hasSearchQuery = tab.searchQuery && tab.searchQuery.trim()
-			if (!hasSearchQuery && !tab.showNotInterested && !tab.showEditList) {
+			if (!hasSearchQuery && !tab.showNotInterested) {
 				if (tab.filterType === 'videos') {
 					filtered = filtered.filter((item) => item.type === 'video')
 				} else if (tab.filterType === 'folders') {
@@ -1036,16 +1102,6 @@ export default {
 		},
 		toggleShowNotInterested(tab) {
 			tab.showNotInterested = !tab.showNotInterested
-			if (tab.showNotInterested) {
-				tab.showEditList = false
-			}
-			this.loadLibraryContent(tab)
-		},
-		toggleShowEditList(tab) {
-			tab.showEditList = !tab.showEditList
-			if (tab.showEditList) {
-				tab.showNotInterested = false
-			}
 			this.loadLibraryContent(tab)
 		},
 		// formatDuration now provided by useFormatters composable
@@ -1066,6 +1122,97 @@ export default {
 			this.contextMenu.visible = false
 			this.contextMenu.item = null
 			this.contextMenu.tab = null
+		},
+		openAddToListModal(item) {
+			if (item.type !== 'video') {
+				this.$toast.error('Only videos can be added to lists')
+				return
+			}
+			if (!item.id) {
+				this.$toast.warning('This video needs to be scanned first. Run a scan to add it to lists.')
+				return
+			}
+			this.addToListModal.video = {
+				id: item.id,
+				title: item.name,
+				thumbnail_path: item.thumbnail,
+				duration: item.duration,
+			}
+			this.addToListModal.visible = true
+		},
+		onAddedToList(listIds, videoCount) {
+			const count = videoCount || 1
+			this.$toast.success(`Added ${count > 1 ? count + ' videos' : ''} to ${listIds.length} list${listIds.length > 1 ? 's' : ''}`)
+			// Clear selection after bulk add
+			if (this.addToListModal.videos) {
+				this.clearSelection(this.activeTabId)
+			}
+			// Refresh to show updated list badges
+			const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
+			if (activeTab) {
+				this.loadLibraryContent(activeTab)
+			}
+		},
+
+		// Selection helpers for bulk operations
+		getSelectedCount(tabId) {
+			return this.selectedItems[tabId]?.length || 0
+		},
+
+		addSelectedToList(tabId) {
+			const tab = this.tabs.find(t => t.id === tabId)
+			if (!tab) return
+
+			const selectedPaths = this.selectedItems[tabId] || []
+			if (selectedPaths.length === 0) return
+
+			// Get selected video items (only videos that have database IDs)
+			const selectedVideos = tab.items
+				.filter(item => selectedPaths.includes(item.path) && item.type === 'video' && item.id)
+				.map(item => ({
+					id: item.id,
+					title: item.name,
+					thumbnail_path: item.thumbnail,
+					duration: item.duration,
+				}))
+
+			if (selectedVideos.length === 0) {
+				this.$toast.warning('No valid videos selected. Videos need to be scanned first.')
+				return
+			}
+
+			if (selectedVideos.length < selectedPaths.length) {
+				const skipped = selectedPaths.length - selectedVideos.length
+				this.$toast.info(`${skipped} item${skipped > 1 ? 's' : ''} skipped (not scanned or not videos)`)
+			}
+
+			// Open modal in bulk mode
+			this.addToListModal.video = null
+			this.addToListModal.videos = selectedVideos
+			this.addToListModal.visible = true
+		},
+
+		async removeFromList(item, list) {
+			if (!item.id) {
+				this.$toast.error('Cannot remove: video not in database')
+				return
+			}
+			try {
+				await videoListsAPI.removeVideos(list.id, { video_ids: [item.id] })
+				this.$toast.success(`Removed from "${list.name}"`)
+				// Update the item's lists locally
+				if (item.lists) {
+					item.lists = item.lists.filter(l => l.id !== list.id)
+				}
+				// Refresh to update badges
+				const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
+				if (activeTab) {
+					this.loadLibraryContent(activeTab)
+				}
+			} catch (error) {
+				console.error('Failed to remove from list:', error)
+				this.$toast.error('Failed to remove from list')
+			}
 		},
 		loadPreviewFrames(item) {
 			if (!item.preview_path) {
@@ -1165,6 +1312,27 @@ export default {
 			} catch (error) {
 				console.error('Failed to copy path:', error)
 			}
+		},
+		getListBorderStyle(item) {
+			if (item.lists && item.lists.length > 0) {
+				// Use the first list's color for the border
+				const color = item.lists[0].color || '#6366f1'
+				return {
+					borderColor: color,
+					boxShadow: `0 0 10px ${color}40, inset 0 0 20px ${color}10`,
+				}
+			}
+			return {}
+		},
+		getContrastColor(hexColor) {
+			// Convert hex to RGB
+			const hex = hexColor.replace('#', '')
+			const r = parseInt(hex.substr(0, 2), 16)
+			const g = parseInt(hex.substr(2, 2), 16)
+			const b = parseInt(hex.substr(4, 2), 16)
+			// Calculate luminance
+			const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+			return luminance > 0.5 ? '#000000' : '#ffffff'
 		},
 		handleKeyPress(event) {
 			if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {

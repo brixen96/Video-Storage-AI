@@ -122,6 +122,16 @@
 								<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
 								Open Source
 							</a>
+							<!-- Download button for Rule34Video -->
+							<button
+								v-if="isRule34Video"
+								class="btn btn-outline-success"
+								@click="fetchAndDownload"
+								:disabled="downloadLoading"
+							>
+								<font-awesome-icon :icon="['fas', downloadLoading ? 'spinner' : 'download']" :spin="downloadLoading" class="me-1" />
+								{{ downloadLoading ? 'Fetching...' : 'Download (Best Quality)' }}
+							</button>
 						</div>
 
 						<!-- Description / Details -->
@@ -310,12 +320,17 @@ export default {
 			relatedVideos: [],
 			showMetadataModal: false,
 			showTagModal: false,
+			downloadLoading: false,
 		}
 	},
 	computed: {
 		isScrapedVideo() {
 			// Check if this is a scraped video (has a source field)
 			return this.video && this.video.source
+		},
+		isRule34Video() {
+			// Check if this is a Rule34Video
+			return this.video && this.video.url && this.video.url.includes('rule34video.com')
 		},
 		embedUrl() {
 			if (!this.isScrapedVideo) return ''
@@ -329,6 +344,16 @@ export default {
 				const viewkeyMatch = url.match(/viewkey=([a-zA-Z0-9]+)/)
 				if (viewkeyMatch && viewkeyMatch[1]) {
 					return `https://www.pornhub.com/embed/${viewkeyMatch[1]}`
+				}
+			}
+
+			// Handle Rule34Video URLs - extract video ID and use embed format
+			// URL: https://rule34video.com/video/4202425/video-title-slug/
+			// Embed: https://rule34video.com/embed/4202425
+			if (url && url.includes('rule34video.com')) {
+				const videoIdMatch = url.match(/\/video\/(\d+)\//)
+				if (videoIdMatch && videoIdMatch[1]) {
+					return `https://rule34video.com/embed/${videoIdMatch[1]}`
 				}
 			}
 
@@ -541,6 +566,28 @@ export default {
 			} catch (error) {
 				console.error('Failed to toggle edit list:', error)
 				this.$toast.error('Error', 'Failed to update edit list')
+			}
+		},
+		async fetchAndDownload() {
+			if (!this.video || !this.video.url) return
+
+			this.downloadLoading = true
+			try {
+				const response = await fetch(`http://localhost:8080/api/v1/scraper/rule34video/download-url?url=${encodeURIComponent(this.video.url)}`)
+				const data = await response.json()
+
+				if (data.success && data.data && data.data.download_url) {
+					// Open download URL in new tab
+					window.open(data.data.download_url, '_blank')
+					this.$toast.success('Download started')
+				} else {
+					throw new Error(data.message || 'Failed to get download URL')
+				}
+			} catch (error) {
+				console.error('Failed to fetch download URL:', error)
+				this.$toast.error('Failed to get download URL. Try opening the source page.')
+			} finally {
+				this.downloadLoading = false
 			}
 		},
 		editMetadata() {

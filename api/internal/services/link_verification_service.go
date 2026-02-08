@@ -499,3 +499,282 @@ func (s *LinkVerificationService) GetProviderHealth(provider string) (*ProviderH
 
 	return ph, nil
 }
+
+// ===== SEXURIA LINK VERIFICATION =====
+
+// SexuriaLinkResult represents the result of verifying a Sexuria link
+type SexuriaLinkResult struct {
+	LinkID     int64  `json:"link_id"`
+	URL        string `json:"url"`
+	Provider   string `json:"provider"`
+	Status     string `json:"status"`
+	StatusCode int    `json:"status_code"`
+}
+
+// VerifySexuriaLink verifies a single Sexuria download link
+func (s *LinkVerificationService) VerifySexuriaLink(linkID int64, url string) (*SexuriaLinkResult, error) {
+	result := &SexuriaLinkResult{
+		LinkID: linkID,
+		URL:    url,
+	}
+
+	// Create HEAD request first for efficiency
+	req, err := http.NewRequestWithContext(s.ctx, "HEAD", url, nil)
+	if err != nil {
+		result.Status = "dead"
+		return result, nil
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		result.Status = "dead"
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	result.StatusCode = resp.StatusCode
+
+	// Determine status based on HTTP status code
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		result.Status = "active"
+	case resp.StatusCode == 404:
+		result.Status = "dead"
+	case resp.StatusCode == 410:
+		result.Status = "expired"
+	case resp.StatusCode == 403 || resp.StatusCode == 401:
+		// Many file hosts return 403 for valid links - consider active
+		result.Status = "active"
+	case resp.StatusCode >= 500:
+		result.Status = "unknown" // Server error, try again later
+	default:
+		result.Status = "dead"
+	}
+
+	return result, nil
+}
+
+// UpdateSexuriaLinkStatus updates a Sexuria link's status in the database
+func (s *LinkVerificationService) UpdateSexuriaLinkStatus(linkID int64, status string, statusCode int) error {
+	_, err := s.db.Exec(`
+		UPDATE sexuria_download_links
+		SET status = ?, last_checked_at = ?, last_status_code = ?
+		WHERE id = ?
+	`, status, time.Now(), statusCode, linkID)
+	return err
+}
+
+// VerifySexuriaItemLinks verifies all links for a specific Sexuria item
+func (s *LinkVerificationService) VerifySexuriaItemLinks(videoID int64) (map[string]int, error) {
+	// Get all links for this item
+	rows, err := s.db.Query(`
+		SELECT id, url, provider
+		FROM sexuria_download_links
+		WHERE video_id = ?
+	`, videoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []struct {
+		ID       int64
+		URL      string
+		Provider string
+	}
+
+	for rows.Next() {
+		var link struct {
+			ID       int64
+			URL      string
+			Provider string
+		}
+		if err := rows.Scan(&link.ID, &link.URL, &link.Provider); err != nil {
+			continue
+		}
+		links = append(links, link)
+	}
+
+	if len(links) == 0 {
+		return map[string]int{"total": 0}, nil
+	}
+
+	stats := map[string]int{
+		"total":   len(links),
+		"active":  0,
+		"dead":    0,
+		"expired": 0,
+		"unknown": 0,
+	}
+
+	for i, link := range links {
+		// Rate limiting
+		if i > 0 {
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		result, err := s.VerifySexuriaLink(link.ID, link.URL)
+		if err != nil {
+			log.Printf("Error verifying Sexuria link %d: %v", link.ID, err)
+			continue
+		}
+
+		// Update status in database
+		s.UpdateSexuriaLinkStatus(link.ID, result.Status, result.StatusCode)
+
+		// Update stats
+		stats[result.Status]++
+	}
+
+	return stats, nil
+}
+
+// VerifyAllSexuriaLinks verifies Sexuria links that haven't been checked recently
+func (s *LinkVerificationService) VerifyAllSexuriaLinks(limit int, cutoffDays int) error {
+	cutoffTime := time.Now().Add(-time.Duration(cutoffDays) * 24 * time.Hour)
+
+	rows, err := s.db.Query(`
+		SELECT id, video_id, url, provider, status
+		FROM sexuria_download_links
+		WHERE last_checked_at IS NULL OR last_checked_at < ?
+		ORDER BY last_checked_at ASC NULLS FIRST
+		LIMIT ?
+	`, cutoffTime, limit)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	count := 0
+	activeCount := 0
+	deadCount := 0
+
+	for rows.Next() {
+		var link struct {
+			ID       int64
+			VideoID  int64
+			URL      string
+			Provider string
+			Status   string
+		}
+		if err := rows.Scan(&link.ID, &link.VideoID, &link.URL, &link.Provider, &link.Status); err != nil {
+			continue
+		}
+
+		// Rate limiting
+		if count > 0 {
+			time.Sleep(800 * time.Millisecond)
+		}
+
+		result, err := s.VerifySexuriaLink(link.ID, link.URL)
+		if err != nil {
+			log.Printf("Error verifying Sexuria link %d: %v", link.ID, err)
+			continue
+		}
+
+		s.UpdateSexuriaLinkStatus(link.ID, result.Status, result.StatusCode)
+
+		if result.Status == "active" {
+			activeCount++
+		} else if result.Status == "dead" {
+			deadCount++
+		}
+
+		count++
+	}
+
+	log.Printf("🔗 Verified %d Sexuria links (Active: %d, Dead: %d)", count, activeCount, deadCount)
+	return nil
+}
+
+// GetSexuriaLinkStats returns overall statistics for Sexuria download links
+func (s *LinkVerificationService) GetSexuriaLinkStats() (map[string]interface{}, error) {
+	stats := make(map[string]interface{})
+
+	// Total links by status
+	rows, err := s.db.Query(`
+		SELECT status, COUNT(*) as count
+		FROM sexuria_download_links
+		GROUP BY status
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	totalLinks := 0
+	activeLinks := 0
+	deadLinks := 0
+	unknownLinks := 0
+
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			continue
+		}
+
+		totalLinks += count
+		switch status {
+		case "active":
+			activeLinks = count
+		case "dead", "expired":
+			deadLinks += count
+		default:
+			unknownLinks += count
+		}
+	}
+
+	stats["total_links"] = totalLinks
+	stats["active_links"] = activeLinks
+	stats["dead_links"] = deadLinks
+	stats["unknown_links"] = unknownLinks
+
+	// Calculate health percentage
+	if totalLinks > 0 {
+		checkedLinks := activeLinks + deadLinks
+		if checkedLinks > 0 {
+			stats["health_percent"] = float64(activeLinks) / float64(checkedLinks) * 100
+		} else {
+			stats["health_percent"] = 0.0
+		}
+	} else {
+		stats["health_percent"] = 0.0
+	}
+
+	// Provider breakdown
+	providerRows, err := s.db.Query(`
+		SELECT provider, status, COUNT(*) as count
+		FROM sexuria_download_links
+		GROUP BY provider, status
+		ORDER BY provider
+	`)
+	if err == nil {
+		defer providerRows.Close()
+
+		providerStats := make(map[string]map[string]int)
+		for providerRows.Next() {
+			var provider, status string
+			var count int
+			if err := providerRows.Scan(&provider, &status, &count); err != nil {
+				continue
+			}
+			if _, exists := providerStats[provider]; !exists {
+				providerStats[provider] = make(map[string]int)
+			}
+			providerStats[provider][status] = count
+		}
+		stats["providers"] = providerStats
+	}
+
+	// Last verification time
+	var lastChecked sql.NullTime
+	s.db.QueryRow(`SELECT MAX(last_checked_at) FROM sexuria_download_links`).Scan(&lastChecked)
+	if lastChecked.Valid {
+		stats["last_verified"] = lastChecked.Time
+	}
+
+	return stats, nil
+}

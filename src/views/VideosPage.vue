@@ -324,8 +324,8 @@
 						:currentPage="currentPage"
 						:itemsPerPage="pageSize"
 						:totalItems="totalVideos"
-						@update:currentPage="currentPage = $event; loadVideos()"
-						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos()"
+						@update:currentPage="currentPage = $event; loadVideos(); window.scrollTo({ top: 0, behavior: 'smooth' })"
+						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos(); window.scrollTo({ top: 0, behavior: 'smooth' })"
 					/>
 				</div>
 			</div>
@@ -342,6 +342,10 @@
 				<div class="vp-context-menu-item" @click="copyVideoUrl(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'copy']" />
 					Copy URL
+				</div>
+				<div class="vp-context-menu-item" @click="openAddToListModal(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'folder-plus']" />
+					Add to List...
 				</div>
 				<div class="vp-context-menu-item text-muted" style="font-size: 0.8em; pointer-events: none;">
 					<font-awesome-icon :icon="['fas', 'globe']" />
@@ -365,6 +369,10 @@
 				<div class="vp-context-menu-item" @click="openTagModal(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'tag']" />
 					Add Tags
+				</div>
+				<div class="vp-context-menu-item" @click="openAddToListModal(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'folder-plus']" />
+					Add to List...
 				</div>
 				<div class="vp-context-menu-item" @click="openInExplorer(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'folder-open']" />
@@ -424,6 +432,15 @@
 			@confirm="deleteModal.isBulk ? confirmBulkDelete() : confirmDeleteVideo()"
 			@cancel="deleteModal.show = false"
 		/>
+
+		<!-- Add to List Modal -->
+		<AddToListModal
+			:visible="addToListModal.visible"
+			:video="addToListModal.video"
+			:is-scraped="addToListModal.isScraped"
+			@close="addToListModal.visible = false"
+			@added="onAddedToList"
+		/>
 	</div>
 </template>
 
@@ -441,6 +458,7 @@ import { useTableSelectionOptionsAPI } from '@/composables/useTableSelection'
 const VideoPlayerModal = defineAsyncComponent(() => import('@/components/VideoPlayerModal.vue'))
 const EditMetadataModal = defineAsyncComponent(() => import('@/components/EditMetadataModal.vue'))
 const AddTagModal = defineAsyncComponent(() => import('@/components/AddTagModal.vue'))
+const AddToListModal = defineAsyncComponent(() => import('@/components/AddToListModal.vue'))
 
 export default {
 	name: 'VideosPage',
@@ -449,6 +467,7 @@ export default {
 		VideoPlayerModal,
 		EditMetadataModal,
 		AddTagModal,
+		AddToListModal,
 		BrowserPaginationControls,
 		DeleteConfirmationModal,
 	},
@@ -490,6 +509,11 @@ export default {
 				x: 0,
 				y: 0,
 				video: null,
+			},
+			addToListModal: {
+				visible: false,
+				video: null,
+				isScraped: false,
 			},
 			performers: [],
 			studios: [],
@@ -626,7 +650,7 @@ export default {
 					group_id: this.filters.groupId || undefined,
 					tag_id: this.filters.tagId || undefined,
 					tag_ids: this.filters.selectedTags.length > 0 ? this.filters.selectedTags : undefined,
-					category: this.filters.contentType || undefined,
+					content_type: this.filters.contentType || undefined,
 					has_preview: this.filters.hasPreview || undefined,
 					missing_metadata: this.filters.missingMetadata || undefined,
 					date_from: this.filters.dateFrom || undefined,
@@ -690,6 +714,16 @@ export default {
 				// Apply client-side content type filter
 				if (this.filters.contentType) {
 					mappedVideos = mappedVideos.filter(v => v.content_type === this.filters.contentType)
+				}
+
+				// Apply client-side duration filter
+				if (this.filters.minDuration) {
+					const minSeconds = this.filters.minDuration * 60
+					mappedVideos = mappedVideos.filter(v => (v.duration || 0) >= minSeconds)
+				}
+				if (this.filters.maxDuration) {
+					const maxSeconds = this.filters.maxDuration * 60
+					mappedVideos = mappedVideos.filter(v => (v.duration || 0) <= maxSeconds)
 				}
 
 				// Apply client-side sorting
@@ -893,10 +927,19 @@ export default {
 		hideContextMenu() {
 			this.contextMenu.show = false
 		},
+		openAddToListModal(video) {
+			this.addToListModal.video = video
+			this.addToListModal.isScraped = video.is_scraped || false
+			this.addToListModal.visible = true
+			this.hideContextMenu()
+		},
+		onAddedToList(listIds) {
+			this.$toast.success(`Added to ${listIds.length} list${listIds.length > 1 ? 's' : ''}`)
+		},
 		playVideo(video) {
-			// For scraped videos, open in new tab instead of playing locally
-			if (video.is_scraped && video.source_url) {
-				window.open(video.source_url, '_blank')
+			// For scraped videos, navigate to our video player page
+			if (video.is_scraped) {
+				this.$router.push(`/watch/scraped/${video.id}`)
 				return
 			}
 			this.videoForModal = video

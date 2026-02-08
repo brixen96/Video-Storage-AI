@@ -101,6 +101,11 @@ const routes = [
 		name: 'LinkHealth',
 		component: () => import(/* webpackChunkName: "link-health" */ '@/views/LinkHealthPage.vue'),
 	},
+	{
+		path: '/jdownloader',
+		name: 'JDownloader',
+		component: () => import(/* webpackChunkName: "jdownloader" */ '@/views/JDownloaderPage.vue'),
+	},
 ]
 
 const router = createRouter({

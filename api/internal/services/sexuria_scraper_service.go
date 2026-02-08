@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // SexuriaScraperService handles scraping from Sexuria.net
@@ -238,7 +240,7 @@ func (s *SexuriaScraperService) ScrapeAdvancedSearchWithProgress(req SexuriaAdva
 
 		// Save items to database
 		for _, item := range items {
-			item.Source = "sexuria"
+			item.Source = "sexuria.net"
 			item.SiteType = "advanced_search"
 			err := s.videoScraperService.saveVideo(item)
 			if err != nil {
@@ -697,9 +699,8 @@ func extractSexuriaID(url string) string {
 
 // GetSexuriaItems returns all scraped Sexuria items (filtered for blocked content)
 func (s *SexuriaScraperService) GetSexuriaItems() ([]*ScrapedVideo, error) {
-	// Query by source instead of site_type since Sexuria items may have different site_types
-	// (e.g., "sexuria", "advanced_search", etc.)
-	videos, err := s.videoScraperService.GetScrapedVideosBySource("sexuria")
+	// Query by source - match both "sexuria" and "sexuria.net" for backwards compatibility
+	videos, err := s.videoScraperService.GetScrapedVideosBySourceLike("sexuria%")
 	if err != nil {
 		return nil, err
 	}
@@ -862,4 +863,379 @@ func (s *SexuriaScraperService) GetItemByID(id int64) (*ScrapedVideo, error) {
 	}
 
 	return nil, fmt.Errorf("item not found")
+}
+
+// CheckForNewItems checks for new items since last checkpoint
+func (s *SexuriaScraperService) CheckForNewItems(categories []string, maxPages int, activityID int) (*models.NewContentResult, error) {
+	result := &models.NewContentResult{
+		ScraperType: "sexuria",
+		CheckedAt:   time.Now(),
+		Details:     map[string]interface{}{},
+		NewItems:    []models.NewItemInfo{},
+	}
+
+	// If no categories specified, use default
+	if len(categories) == 0 {
+		categories = []string{"https://sexuria.net/v1/"}
+	}
+
+	autoUpdateSvc := NewAutoUpdateService(nil, nil)
+	totalNewItems := 0
+
+	for _, category := range categories {
+		// Get checkpoint for this category
+		checkpoint, _ := autoUpdateSvc.GetCheckpoint("sexuria", "last_item_url", category)
+		lastSeenURL := ""
+		if checkpoint != nil {
+			lastSeenURL = checkpoint.CheckpointValue
+		}
+
+		log.Printf("Checking Sexuria category: %s (last seen: %s)", category, lastSeenURL)
+
+		newItemsForCategory := 0
+		firstItemURL := ""
+
+		// Scrape up to maxPages looking for new items
+		for page := 1; page <= maxPages; page++ {
+			pageURL := category
+			if page > 1 {
+				pageURL = fmt.Sprintf("%spage/%d/", category, page)
+			}
+
+			items, err := s.scrapeSexuriaPage(pageURL)
+			if err != nil {
+				log.Printf("Error scraping page %d: %v", page, err)
+				break
+			}
+
+			if len(items) == 0 {
+				break
+			}
+
+			foundCheckpoint := false
+			for _, item := range items {
+				if firstItemURL == "" {
+					firstItemURL = item.URL
+				}
+
+				if item.URL == lastSeenURL {
+					foundCheckpoint = true
+					break
+				}
+
+				if err := s.videoScraperService.saveVideo(item); err == nil {
+					newItemsForCategory++
+					if len(result.NewItems) < 10 {
+						result.NewItems = append(result.NewItems, models.NewItemInfo{
+							URL:       item.URL,
+							Title:     item.Title,
+							Thumbnail: item.ThumbnailURL,
+							Type:      "item",
+						})
+					}
+				}
+			}
+
+			if foundCheckpoint {
+				break
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+
+		if firstItemURL != "" && newItemsForCategory > 0 {
+			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
+				ScraperType:     "sexuria",
+				CheckpointType:  "last_item_url",
+				CheckpointValue: firstItemURL,
+				TargetID:        category,
+			})
+		}
+
+		totalNewItems += newItemsForCategory
+		log.Printf("Found %d new items for category: %s", newItemsForCategory, category)
+	}
+
+	result.NewItemsFound = totalNewItems
+	result.Details["categories_checked"] = len(categories)
+	result.Details["total_new_items"] = totalNewItems
+
+	return result, nil
+}
+
+// SexuriaDownloadLink represents a download link extracted from a Sexuria item page
+type SexuriaDownloadLink struct {
+	ID            int64      `json:"id"`
+	VideoID       int64      `json:"video_id"`
+	Source        string     `json:"source"`
+	Provider      string     `json:"provider"`
+	URL           string     `json:"url"`
+	OriginalURL   string     `json:"original_url,omitempty"`
+	Filename      string     `json:"filename,omitempty"`
+	FileSize      string     `json:"file_size,omitempty"`
+	FileType      string     `json:"file_type,omitempty"`
+	Status        string     `json:"status"`
+	LastCheckedAt *time.Time `json:"last_checked_at,omitempty"`
+	StatusCode    int        `json:"status_code,omitempty"`
+	DiscoveredAt  time.Time  `json:"discovered_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ExtractDownloadLinks fetches and extracts download links from a Sexuria item page
+func (s *SexuriaScraperService) ExtractDownloadLinks(itemURL string) ([]*SexuriaDownloadLink, error) {
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", itemURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("received status code %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	var links []*SexuriaDownloadLink
+	now := time.Now()
+
+	// Known file host patterns
+	hostPatterns := map[string]string{
+		"rapidgator":    "rapidgator",
+		"keep2share":    "keep2share",
+		"k2s.cc":        "keep2share",
+		"katfile":       "katfile",
+		"filespace":     "filespace",
+		"file.al":       "file.al",
+		"nitro.download": "nitroflare",
+		"nitroflare":    "nitroflare",
+		"uploaded":      "uploaded",
+		"turbobit":      "turbobit",
+		"filejoker":     "filejoker",
+		"mexashare":     "mexashare",
+		"fastfile":      "fastfile",
+		"rapidcloud":    "rapidcloud",
+		"dropapk":       "dropapk",
+	}
+
+	// Extract download links from the page
+	// Look for links in the download section
+	doc.Find("a[href]").Each(func(i int, sel *goquery.Selection) {
+		href, exists := sel.Attr("href")
+		if !exists || href == "" {
+			return
+		}
+
+		// Check if URL matches known file hosts
+		lowerHref := strings.ToLower(href)
+		for pattern, provider := range hostPatterns {
+			if strings.Contains(lowerHref, pattern) {
+				// Try to extract filename from link text or URL
+				filename := strings.TrimSpace(sel.Text())
+				if filename == "" || len(filename) > 200 {
+					// Try to extract from URL
+					parts := strings.Split(href, "/")
+					if len(parts) > 0 {
+						filename = parts[len(parts)-1]
+					}
+				}
+
+				link := &SexuriaDownloadLink{
+					Source:       "sexuria",
+					Provider:     provider,
+					URL:          href,
+					Filename:     filename,
+					Status:       "unknown",
+					DiscoveredAt: now,
+				}
+				links = append(links, link)
+				break
+			}
+		}
+	})
+
+	return links, nil
+}
+
+// SaveDownloadLinks saves extracted download links to the database
+func (s *SexuriaScraperService) SaveDownloadLinks(videoID int64, links []*SexuriaDownloadLink) error {
+	for _, link := range links {
+		link.VideoID = videoID
+
+		_, err := s.db.Exec(`
+			INSERT OR IGNORE INTO sexuria_download_links
+			(video_id, source, provider, url, original_url, filename, file_size, file_type, status, discovered_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, link.VideoID, link.Source, link.Provider, link.URL, link.OriginalURL,
+			link.Filename, link.FileSize, link.FileType, link.Status, link.DiscoveredAt)
+
+		if err != nil {
+			log.Printf("Error saving download link: %v", err)
+		}
+	}
+
+	// Mark video as having links extracted
+	_, err := s.db.Exec(`
+		UPDATE scraped_videos
+		SET links_extracted = 1, links_last_extracted_at = ?
+		WHERE id = ?
+	`, time.Now(), videoID)
+
+	return err
+}
+
+// GetDownloadLinks returns all download links for a Sexuria item
+func (s *SexuriaScraperService) GetDownloadLinks(videoID int64) ([]*SexuriaDownloadLink, error) {
+	rows, err := s.db.Query(`
+		SELECT id, video_id, source, provider, url, original_url, filename,
+		       file_size, file_type, status, last_checked_at, last_status_code,
+		       discovered_at, created_at
+		FROM sexuria_download_links
+		WHERE video_id = ?
+		ORDER BY provider, created_at
+	`, videoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var links []*SexuriaDownloadLink
+	for rows.Next() {
+		link := &SexuriaDownloadLink{}
+		var originalURL, filename, fileSize, fileType sql.NullString
+		var lastCheckedAt sql.NullTime
+		var statusCode sql.NullInt64
+
+		err := rows.Scan(
+			&link.ID, &link.VideoID, &link.Source, &link.Provider, &link.URL,
+			&originalURL, &filename, &fileSize, &fileType, &link.Status,
+			&lastCheckedAt, &statusCode, &link.DiscoveredAt, &link.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+
+		if originalURL.Valid {
+			link.OriginalURL = originalURL.String
+		}
+		if filename.Valid {
+			link.Filename = filename.String
+		}
+		if fileSize.Valid {
+			link.FileSize = fileSize.String
+		}
+		if fileType.Valid {
+			link.FileType = fileType.String
+		}
+		if lastCheckedAt.Valid {
+			link.LastCheckedAt = &lastCheckedAt.Time
+		}
+		if statusCode.Valid {
+			link.StatusCode = int(statusCode.Int64)
+		}
+
+		links = append(links, link)
+	}
+
+	return links, nil
+}
+
+// ExtractAndSaveLinks extracts links from item page and saves them
+func (s *SexuriaScraperService) ExtractAndSaveLinks(videoID int64, itemURL string) ([]*SexuriaDownloadLink, error) {
+	links, err := s.ExtractDownloadLinks(itemURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(links) > 0 {
+		if err := s.SaveDownloadLinks(videoID, links); err != nil {
+			return nil, err
+		}
+	}
+
+	return links, nil
+}
+
+// GetLinkStats returns link statistics for Sexuria items
+func (s *SexuriaScraperService) GetLinkStats() (map[string]interface{}, error) {
+	stats := make(map[string]interface{})
+
+	// Total links by status
+	rows, err := s.db.Query(`
+		SELECT status, COUNT(*) as count
+		FROM sexuria_download_links
+		GROUP BY status
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	statusCounts := make(map[string]int)
+	totalLinks := 0
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			continue
+		}
+		statusCounts[status] = count
+		totalLinks += count
+	}
+
+	stats["total_links"] = totalLinks
+	stats["status_counts"] = statusCounts
+
+	// Links by provider
+	providerRows, err := s.db.Query(`
+		SELECT provider, COUNT(*) as count
+		FROM sexuria_download_links
+		GROUP BY provider
+		ORDER BY count DESC
+	`)
+	if err != nil {
+		return stats, nil // Return partial stats
+	}
+	defer providerRows.Close()
+
+	providerCounts := make(map[string]int)
+	for providerRows.Next() {
+		var provider string
+		var count int
+		if err := providerRows.Scan(&provider, &count); err != nil {
+			continue
+		}
+		providerCounts[provider] = count
+	}
+	stats["provider_counts"] = providerCounts
+
+	// Items with/without links extracted
+	var extractedCount, notExtractedCount int
+	s.db.QueryRow(`
+		SELECT COUNT(*) FROM scraped_videos
+		WHERE (site_type = 'sexuria' OR source = 'sexuria.net') AND links_extracted = 1
+	`).Scan(&extractedCount)
+	s.db.QueryRow(`
+		SELECT COUNT(*) FROM scraped_videos
+		WHERE (site_type = 'sexuria' OR source = 'sexuria.net') AND (links_extracted = 0 OR links_extracted IS NULL)
+	`).Scan(&notExtractedCount)
+
+	stats["items_with_links"] = extractedCount
+	stats["items_without_links"] = notExtractedCount
+
+	return stats, nil
 }

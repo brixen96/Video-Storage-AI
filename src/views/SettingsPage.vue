@@ -34,6 +34,12 @@
 					</button>
 				</li>
 				<li class="nav-item" role="presentation">
+					<button :class="['nav-link', { active: activeTab === 'integrations' }]" @click="activeTab = 'integrations'" type="button">
+						<font-awesome-icon :icon="['fas', 'plug']" class="me-2" />
+						Integrations
+					</button>
+				</li>
+				<li class="nav-item" role="presentation">
 					<button :class="['nav-link', { active: activeTab === 'about' }]" @click="activeTab = 'about'" type="button">
 						<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
 						About
@@ -263,6 +269,121 @@
 					</div>
 				</div>
 
+				<!-- Integrations -->
+				<div v-if="activeTab === 'integrations'" class="settings-section">
+					<!-- JDownloader 2 Section -->
+					<div class="card bg-dark mb-4">
+						<div class="card-header d-flex justify-content-between align-items-center">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'download']" class="me-2 text-warning" />
+								JDownloader 2
+							</h5>
+							<div class="d-flex align-items-center gap-2">
+								<span :class="['badge', jdStatus.connected ? 'bg-success' : 'bg-secondary']">
+									{{ jdStatus.connected ? 'Connected' : 'Disconnected' }}
+								</span>
+								<div class="form-check form-switch mb-0">
+									<input v-model="jdConfig.enabled" class="form-check-input" type="checkbox" id="jdEnabledSwitch" @change="saveJDConfig" />
+								</div>
+							</div>
+						</div>
+						<div class="card-body">
+							<div class="row g-3">
+								<!-- Connection Type -->
+								<div class="col-md-6">
+									<label class="form-label">Connection Type</label>
+									<select v-model="jdConfig.connectionType" class="form-select" @change="saveJDConfig">
+										<option value="local">Local API (Docker/Same Network)</option>
+										<option value="cloud" disabled>MyJDownloader Cloud (Coming Soon)</option>
+									</select>
+								</div>
+
+								<!-- Host -->
+								<div class="col-md-4">
+									<label class="form-label">Host / IP Address</label>
+									<input v-model="jdConfig.localHost" type="text" class="form-control" placeholder="192.168.1.10" />
+								</div>
+
+								<!-- Port -->
+								<div class="col-md-2">
+									<label class="form-label">API Port</label>
+									<input v-model.number="jdConfig.localPort" type="number" class="form-control" placeholder="3129" />
+								</div>
+
+								<!-- Password -->
+								<div class="col-md-6">
+									<label class="form-label">Password (optional)</label>
+									<div class="input-group">
+										<input
+											v-model="jdConfig.localPassword"
+											:type="showJDPassword ? 'text' : 'password'"
+											class="form-control"
+											placeholder="Leave blank if not configured"
+										/>
+										<button class="btn btn-outline-secondary" type="button" @click="showJDPassword = !showJDPassword">
+											<font-awesome-icon :icon="['fas', showJDPassword ? 'eye-slash' : 'eye']" />
+										</button>
+									</div>
+								</div>
+
+								<!-- Use Auth -->
+								<div class="col-md-6 d-flex align-items-end">
+									<div class="form-check">
+										<input v-model="jdConfig.localUseAuth" class="form-check-input" type="checkbox" id="jdUseAuth" />
+										<label class="form-check-label" for="jdUseAuth">Use Password Authentication</label>
+									</div>
+								</div>
+
+								<!-- Default Package Name -->
+								<div class="col-md-6">
+									<label class="form-label">Default Package Name</label>
+									<input v-model="jdConfig.defaultPackageName" type="text" class="form-control" placeholder="Leave blank for auto (uses URL host)" />
+								</div>
+
+								<!-- Auto-start Downloads -->
+								<div class="col-md-6 d-flex align-items-end">
+									<div class="form-check">
+										<input v-model="jdConfig.autoStartDownloads" class="form-check-input" type="checkbox" id="jdAutoStart" />
+										<label class="form-check-label" for="jdAutoStart">Auto-start downloads when adding links</label>
+									</div>
+								</div>
+							</div>
+
+							<!-- Actions -->
+							<div class="d-flex gap-2 mt-4">
+								<button class="btn btn-primary" @click="saveJDConfig" :disabled="savingJD">
+									<font-awesome-icon :icon="['fas', savingJD ? 'spinner' : 'save']" :spin="savingJD" class="me-2" />
+									Save Configuration
+								</button>
+								<button class="btn btn-outline-info" @click="testJDConnection" :disabled="testingJD">
+									<font-awesome-icon :icon="['fas', testingJD ? 'spinner' : 'plug']" :spin="testingJD" class="me-2" />
+									Test Connection
+								</button>
+							</div>
+
+							<!-- Test Result -->
+							<div v-if="jdTestResult" class="alert mt-3" :class="jdTestResult.success ? 'alert-success' : 'alert-danger'">
+								<font-awesome-icon :icon="['fas', jdTestResult.success ? 'check-circle' : 'times-circle']" class="me-2" />
+								<strong>{{ jdTestResult.message }}</strong>
+								<p v-if="jdTestResult.errorDetails" class="mb-0 mt-2 small">{{ jdTestResult.errorDetails }}</p>
+								<p v-if="jdTestResult.version" class="mb-0 mt-1 small text-muted">Version: {{ jdTestResult.version }}</p>
+							</div>
+
+							<!-- Info Box -->
+							<div class="alert alert-info mt-3 mb-0">
+								<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
+								<strong>Setup Instructions:</strong>
+								<ol class="mb-0 mt-2 small">
+									<li>In JDownloader 2: Settings → Advanced Settings → search "RemoteAPI"</li>
+									<li>Enable "Deprecated API" option</li>
+									<li>If using Docker, ensure the API port (default 3129) is exposed</li>
+									<li>Your Docker container is at: <code>192.168.1.10:5800</code> (Web UI) - API port is different</li>
+								</ol>
+							</div>
+						</div>
+					</div>
+				</div>
+
 				<!-- About -->
 				<div v-if="activeTab === 'about'" class="settings-section">
 					<div class="about-content">
@@ -355,6 +476,7 @@
 
 <script>
 import settingsService from '@/services/settingsService'
+import { jdownloaderAPI } from '@/services/api'
 
 export default {
 	name: 'SettingsPage',
@@ -362,6 +484,25 @@ export default {
 		return {
 			activeTab: 'general',
 			settings: settingsService.getSettings(),
+			// JDownloader settings
+			jdConfig: {
+				connectionType: 'local',
+				localHost: '192.168.1.10',
+				localPort: 3129,
+				localPassword: '',
+				localUseAuth: false,
+				defaultPackageName: '',
+				autoStartDownloads: false,
+				enabled: true,
+			},
+			jdStatus: {
+				connected: false,
+				type: 'local',
+			},
+			jdTestResult: null,
+			showJDPassword: false,
+			testingJD: false,
+			savingJD: false,
 		}
 	},
 	watch: {
@@ -370,6 +511,18 @@ export default {
 			settingsService.updateSetting('theme', newTheme)
 			settingsService.applyTheme()
 		},
+		// Load JDownloader config when tab is active
+		activeTab(newTab) {
+			if (newTab === 'integrations') {
+				this.loadJDConfig()
+			}
+		},
+	},
+	mounted() {
+		// Load JD config if starting on integrations tab
+		if (this.activeTab === 'integrations') {
+			this.loadJDConfig()
+		}
 	},
 	methods: {
 		saveSettings() {
@@ -387,6 +540,74 @@ export default {
 				this.settings = settingsService.getSettings()
 				settingsService.applyTheme()
 				this.$toast.info('Settings Reset', 'All settings have been restored to defaults')
+			}
+		},
+		// JDownloader methods
+		async loadJDConfig() {
+			try {
+				const config = await jdownloaderAPI.getConfig()
+				this.jdConfig = {
+					connectionType: config.connectionType || 'local',
+					localHost: config.localHost || '192.168.1.10',
+					localPort: config.localPort || 3129,
+					localPassword: config.localPassword || '',
+					localUseAuth: config.localUseAuth || false,
+					defaultPackageName: config.defaultPackageName || '',
+					autoStartDownloads: config.autoStartDownloads || false,
+					enabled: config.enabled !== false,
+				}
+				// Also check status
+				this.checkJDStatus()
+			} catch (error) {
+				console.error('Failed to load JDownloader config:', error)
+			}
+		},
+		async checkJDStatus() {
+			try {
+				const status = await jdownloaderAPI.getStatus()
+				this.jdStatus = {
+					connected: status.connected || false,
+					type: status.type || 'local',
+				}
+			} catch (error) {
+				this.jdStatus = { connected: false, type: 'local' }
+			}
+		},
+		async saveJDConfig() {
+			this.savingJD = true
+			try {
+				await jdownloaderAPI.updateConfig(this.jdConfig)
+				this.$toast.success('JDownloader configuration saved')
+				this.checkJDStatus()
+			} catch (error) {
+				console.error('Failed to save JDownloader config:', error)
+				this.$toast.error('Failed to save configuration')
+			} finally {
+				this.savingJD = false
+			}
+		},
+		async testJDConnection() {
+			this.testingJD = true
+			this.jdTestResult = null
+			try {
+				// Save config first
+				await jdownloaderAPI.updateConfig(this.jdConfig)
+				// Then test
+				const result = await jdownloaderAPI.testConnection()
+				this.jdTestResult = result
+				if (result.success) {
+					this.jdStatus.connected = true
+					this.$toast.success('Connection successful!')
+				}
+			} catch (error) {
+				console.error('Failed to test JDownloader connection:', error)
+				this.jdTestResult = {
+					success: false,
+					message: 'Connection test failed',
+					errorDetails: error.message || 'Unknown error',
+				}
+			} finally {
+				this.testingJD = false
 			}
 		},
 	},

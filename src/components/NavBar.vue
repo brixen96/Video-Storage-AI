@@ -105,6 +105,12 @@
 							Link Health
 						</router-link>
 					</li>
+					<li class="nav-item">
+						<router-link to="/jdownloader" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
+							JDownloader
+						</router-link>
+					</li>
 				</ul>
 
 				<!-- Right side items -->

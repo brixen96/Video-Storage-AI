@@ -342,12 +342,14 @@ const formatTime = (dateStr) => {
 const nextPage = () => {
 	currentPage.value++
 	loadDeadLinks()
+	window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 const prevPage = () => {
 	if (currentPage.value > 0) {
 		currentPage.value--
 		loadDeadLinks()
+		window.scrollTo({ top: 0, behavior: 'smooth' })
 	}
 }
 

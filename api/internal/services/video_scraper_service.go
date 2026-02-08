@@ -4,12 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // VideoScraperService handles scraping videos from various sites
@@ -439,17 +441,35 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 	// Remove trailing slash for consistency
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	// Detect if the URL already ends with a page number (like /extreme-test/1)
-	// If so, remove it to get the base path
+	// Detect pagination style:
+	// 1. Query parameter pagination (e.g., ?page=2)
+	// 2. Path-based pagination (e.g., /videos/2)
+	paginationStyle := "path" // default to path-based
 	hasPageNumber := false
-	parts := strings.Split(baseURL, "/")
-	if len(parts) > 0 {
-		lastPart := parts[len(parts)-1]
-		// Check if last part is a number (page number)
-		if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
-			// Remove the page number from the base URL
-			baseURL = strings.Join(parts[:len(parts)-1], "/")
-			hasPageNumber = true
+
+	// Check if URL already has query parameter pagination
+	if strings.Contains(baseURL, "?page=") || strings.Contains(baseURL, "&page=") {
+		paginationStyle = "query"
+		// Remove existing page parameter to get base URL
+		if idx := strings.Index(baseURL, "?page="); idx != -1 {
+			baseURL = baseURL[:idx]
+		} else if idx := strings.Index(baseURL, "&page="); idx != -1 {
+			baseURL = baseURL[:idx]
+		}
+	} else if strings.Contains(baseURL, "index.php") || strings.Contains(source, "fapzoo") {
+		// Sites like fapzoo.fun use query parameter pagination
+		paginationStyle = "query"
+	} else {
+		// Check if the URL already ends with a page number (like /extreme-test/1)
+		parts := strings.Split(baseURL, "/")
+		if len(parts) > 0 {
+			lastPart := parts[len(parts)-1]
+			// Check if last part is a number (page number)
+			if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+				// Remove the page number from the base URL
+				baseURL = strings.Join(parts[:len(parts)-1], "/")
+				hasPageNumber = true
+			}
 		}
 	}
 
@@ -475,13 +495,26 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 			}
 		}
 		var pageURL string
-		if page == 1 && !hasPageNumber {
-			// First page without explicit page number in original URL
-			// Try base URL as-is (might be /videos/ or /category/)
-			pageURL = baseURL
+		if paginationStyle == "query" {
+			// Query parameter pagination (e.g., ?page=2)
+			if page == 1 {
+				pageURL = baseURL
+			} else {
+				if strings.Contains(baseURL, "?") {
+					pageURL = baseURL + "&page=" + fmt.Sprintf("%d", page)
+				} else {
+					pageURL = baseURL + "?page=" + fmt.Sprintf("%d", page)
+				}
+			}
 		} else {
-			// Construct page URL by appending page number to base URL
-			pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
+			// Path-based pagination (e.g., /videos/2)
+			if page == 1 && !hasPageNumber {
+				// First page without explicit page number in original URL
+				pageURL = baseURL
+			} else {
+				// Construct page URL by appending page number to base URL
+				pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
+			}
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
@@ -558,17 +591,35 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 	// Remove trailing slash for consistency
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	// Detect if the URL already ends with a page number (like /extreme-test/1)
-	// If so, remove it to get the base path
+	// Detect pagination style:
+	// 1. Query parameter pagination (e.g., ?page=2)
+	// 2. Path-based pagination (e.g., /videos/2)
+	paginationStyle := "path" // default to path-based
 	hasPageNumber := false
-	parts := strings.Split(baseURL, "/")
-	if len(parts) > 0 {
-		lastPart := parts[len(parts)-1]
-		// Check if last part is a number (page number)
-		if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
-			// Remove the page number from the base URL
-			baseURL = strings.Join(parts[:len(parts)-1], "/")
-			hasPageNumber = true
+
+	// Check if URL already has query parameter pagination
+	if strings.Contains(baseURL, "?page=") || strings.Contains(baseURL, "&page=") {
+		paginationStyle = "query"
+		// Remove existing page parameter to get base URL
+		if idx := strings.Index(baseURL, "?page="); idx != -1 {
+			baseURL = baseURL[:idx]
+		} else if idx := strings.Index(baseURL, "&page="); idx != -1 {
+			baseURL = baseURL[:idx]
+		}
+	} else if strings.Contains(baseURL, "index.php") || strings.Contains(source, "fapzoo") {
+		// Sites like fapzoo.fun use query parameter pagination
+		paginationStyle = "query"
+	} else {
+		// Check if the URL already ends with a page number (like /extreme-test/1)
+		parts := strings.Split(baseURL, "/")
+		if len(parts) > 0 {
+			lastPart := parts[len(parts)-1]
+			// Check if last part is a number (page number)
+			if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+				// Remove the page number from the base URL
+				baseURL = strings.Join(parts[:len(parts)-1], "/")
+				hasPageNumber = true
+			}
 		}
 	}
 
@@ -594,13 +645,26 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 			}
 		}
 		var pageURL string
-		if page == 1 && !hasPageNumber {
-			// First page without explicit page number in original URL
-			// Try base URL as-is (might be /videos/ or /category/)
-			pageURL = baseURL
+		if paginationStyle == "query" {
+			// Query parameter pagination (e.g., ?page=2)
+			if page == 1 {
+				pageURL = baseURL
+			} else {
+				if strings.Contains(baseURL, "?") {
+					pageURL = baseURL + "&page=" + fmt.Sprintf("%d", page)
+				} else {
+					pageURL = baseURL + "?page=" + fmt.Sprintf("%d", page)
+				}
+			}
 		} else {
-			// Construct page URL by appending page number to base URL
-			pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
+			// Path-based pagination (e.g., /videos/2)
+			if page == 1 && !hasPageNumber {
+				// First page without explicit page number in original URL
+				pageURL = baseURL
+			} else {
+				// Construct page URL by appending page number to base URL
+				pageURL = baseURL + "/" + fmt.Sprintf("%d", page)
+			}
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
@@ -822,6 +886,9 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 		"a.js-linkVideoThumb",
 		".phimage a[href*='view_video']",
 		"a[href*='viewkey=']",
+		// FapZoo-specific selectors (video-card-wrapper with a.video-card)
+		".video-card-wrapper a.video-card",
+		".video-grid a.video-card",
 		// Most specific first - for sites with li.video structure
 		"li.video > a.image",
 		"li.video > span.title > a",
@@ -1415,6 +1482,7 @@ func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 // ScrapedVideosQuery represents query parameters for paginated scraped video retrieval
 type ScrapedVideosQuery struct {
 	Source      string // Filter by source (e.g., "www.pornhub.com", "luxuretv.com")
+	SourceLike  string // Filter by source using LIKE (e.g., "sexuria%" to match both "sexuria" and "sexuria.net")
 	SiteType    string // Filter by site_type (e.g., "pornhub", "luxuretv", "sexuria")
 	ContentType string // Filter by content_type (e.g., "regular", "zoo")
 	Keyword     string // Filter by tag/keyword
@@ -1440,8 +1508,10 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 	if q.Page < 1 {
 		q.Page = 1
 	}
-	if q.Limit < 1 || q.Limit > 100 {
+	if q.Limit < 1 {
 		q.Limit = 24
+	} else if q.Limit > 50000 {
+		q.Limit = 50000 // Cap at 50000 for performance
 	}
 	if q.SortBy == "" {
 		q.SortBy = "discovered_at"
@@ -1473,6 +1543,10 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 	if q.Source != "" {
 		conditions = append(conditions, "source = ?")
 		args = append(args, q.Source)
+	}
+	if q.SourceLike != "" {
+		conditions = append(conditions, "source LIKE ?")
+		args = append(args, q.SourceLike)
 	}
 	if q.SiteType != "" {
 		conditions = append(conditions, "site_type = ?")
@@ -1715,6 +1789,96 @@ func (s *VideoScraperService) GetScrapedVideosBySource(source string) ([]*Scrape
 	`
 
 	rows, err := s.db.Query(query, source)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query videos: %w", err)
+	}
+	defer rows.Close()
+
+	var videos []*ScrapedVideo
+	for rows.Next() {
+		video := &ScrapedVideo{}
+		var tagsJSON string
+		var externalID, description, thumbnailURL, thumbnailPath, videoPath sql.NullString
+		var author, uploader, category, errorMessage sql.NullString
+		var scrapedAt, downloadedAt sql.NullTime
+
+		err := rows.Scan(
+			&video.ID, &video.Source, &video.SiteType, &video.ContentType, &externalID, &video.Title, &video.URL, &description,
+			&video.Duration, &video.FileSize, &thumbnailURL, &thumbnailPath, &videoPath,
+			&author, &uploader, &video.ViewCount, &video.LikeCount, &video.Rating, &category, &tagsJSON,
+			&video.Metadata, &video.Status, &errorMessage, &video.DiscoveredAt, &scrapedAt,
+			&downloadedAt, &video.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan video: %w", err)
+		}
+
+		// Handle nullable fields
+		if externalID.Valid {
+			video.ExternalID = externalID.String
+		}
+		if description.Valid {
+			video.Description = description.String
+		}
+		if thumbnailURL.Valid {
+			video.ThumbnailURL = thumbnailURL.String
+		}
+		if thumbnailPath.Valid {
+			video.ThumbnailPath = thumbnailPath.String
+		}
+		if videoPath.Valid {
+			video.VideoPath = videoPath.String
+		}
+		if author.Valid {
+			video.Author = author.String
+		}
+		if uploader.Valid {
+			video.Uploader = uploader.String
+		}
+		if category.Valid {
+			video.Category = category.String
+		}
+		if errorMessage.Valid {
+			video.ErrorMessage = errorMessage.String
+		}
+		if scrapedAt.Valid {
+			video.ScrapedAt = &scrapedAt.Time
+		}
+		if downloadedAt.Valid {
+			video.DownloadedAt = &downloadedAt.Time
+		}
+
+		// Unmarshal tags
+		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
+			video.Tags = []string{}
+		}
+
+		// Filter out blocked content
+		if IsVideoBlocked(video) {
+			continue
+		}
+
+		videos = append(videos, video)
+	}
+
+	return videos, nil
+}
+
+// GetScrapedVideosBySourceLike retrieves all scraped videos matching a source pattern (e.g., "sexuria%")
+func (s *VideoScraperService) GetScrapedVideosBySourceLike(sourcePattern string) ([]*ScrapedVideo, error) {
+	query := `
+		SELECT
+			id, source, site_type, COALESCE(content_type, 'regular'), external_id, title, url, description,
+			duration, file_size, thumbnail_url, thumbnail_path, video_path,
+			author, uploader, view_count, like_count, rating, category, tags,
+			metadata, status, error_message, discovered_at, scraped_at,
+			downloaded_at, created_at
+		FROM scraped_videos
+		WHERE source LIKE ?
+		ORDER BY discovered_at DESC
+	`
+
+	rows, err := s.db.Query(query, sourcePattern)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query videos: %w", err)
 	}
@@ -2559,4 +2723,151 @@ func (s *VideoScraperService) GetScrapedVideosWithTabInfo() ([]*ScrapedVideo, er
 	}
 
 	return videos, nil
+}
+
+// CheckForNewVideos checks for new videos on a generic scraper tab since last checkpoint
+func (s *VideoScraperService) CheckForNewVideos(scraperType string, baseURL string, maxPages int, activityID int) (*models.NewContentResult, error) {
+	result := &models.NewContentResult{
+		ScraperType: scraperType,
+		CheckedAt:   time.Now(),
+		Details:     map[string]interface{}{},
+		NewItems:    []models.NewItemInfo{},
+	}
+
+	autoUpdateSvc := NewAutoUpdateService(nil, nil)
+
+	// Get checkpoint for this tab
+	checkpoint, _ := autoUpdateSvc.GetCheckpoint(scraperType, "last_video_url", "")
+	lastSeenURL := ""
+	if checkpoint != nil {
+		lastSeenURL = checkpoint.CheckpointValue
+	}
+
+	log.Printf("Checking generic scraper %s for new videos (last seen: %s)", scraperType, lastSeenURL)
+
+	// Parse the base URL to get the source
+	parsedURL, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+	source := parsedURL.Host
+
+	totalNewVideos := 0
+	firstVideoURL := ""
+
+	// Detect pagination style
+	paginationStyle := "path"
+	cleanBaseURL := strings.TrimRight(baseURL, "/")
+
+	if strings.Contains(cleanBaseURL, "?page=") || strings.Contains(cleanBaseURL, "&page=") {
+		paginationStyle = "query"
+		if idx := strings.Index(cleanBaseURL, "?page="); idx != -1 {
+			cleanBaseURL = cleanBaseURL[:idx]
+		} else if idx := strings.Index(cleanBaseURL, "&page="); idx != -1 {
+			cleanBaseURL = cleanBaseURL[:idx]
+		}
+	} else if strings.Contains(cleanBaseURL, "index.php") || strings.Contains(source, "fapzoo") {
+		paginationStyle = "query"
+	}
+
+	// Check if URL ends with a page number
+	hasPageNumber := false
+	parts := strings.Split(cleanBaseURL, "/")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+			cleanBaseURL = strings.Join(parts[:len(parts)-1], "/")
+			hasPageNumber = true
+		}
+	}
+
+	// Scrape up to maxPages looking for new videos
+	for page := 1; page <= maxPages; page++ {
+		var pageURL string
+		if paginationStyle == "query" {
+			if page == 1 {
+				pageURL = cleanBaseURL
+			} else {
+				if strings.Contains(cleanBaseURL, "?") {
+					pageURL = cleanBaseURL + "&page=" + fmt.Sprintf("%d", page)
+				} else {
+					pageURL = cleanBaseURL + "?page=" + fmt.Sprintf("%d", page)
+				}
+			}
+		} else {
+			if page == 1 && !hasPageNumber {
+				pageURL = cleanBaseURL
+			} else {
+				pageURL = cleanBaseURL + "/" + fmt.Sprintf("%d", page)
+			}
+		}
+
+		log.Printf("Checking page %d: %s", page, pageURL)
+
+		videos, err := s.scrapeListingPage(pageURL, source)
+		if err != nil {
+			log.Printf("Error scraping page %d: %v", page, err)
+			break
+		}
+
+		if len(videos) == 0 {
+			log.Printf("No videos found on page %d, stopping", page)
+			break
+		}
+
+		foundCheckpoint := false
+		for _, video := range videos {
+			// Save first video URL as new checkpoint
+			if firstVideoURL == "" {
+				firstVideoURL = video.URL
+			}
+
+			// If we hit the last seen video, stop
+			if video.URL == lastSeenURL {
+				foundCheckpoint = true
+				log.Printf("Found checkpoint video, stopping at page %d", page)
+				break
+			}
+
+			// This is a new video - save it
+			saveErr := s.saveVideo(video)
+			// saveVideo returns error for updates too, so we check if it's a real error
+			if saveErr == nil || strings.HasPrefix(saveErr.Error(), "Updated existing video") {
+				totalNewVideos++
+				if len(result.NewItems) < 10 {
+					result.NewItems = append(result.NewItems, models.NewItemInfo{
+						URL:       video.URL,
+						Title:     video.Title,
+						Thumbnail: video.ThumbnailURL,
+						Type:      "video",
+						Duration:  video.Duration,
+						Views:     video.ViewCount,
+					})
+				}
+			}
+		}
+
+		if foundCheckpoint {
+			break
+		}
+
+		time.Sleep(800 * time.Millisecond)
+	}
+
+	// Update checkpoint with newest video
+	if firstVideoURL != "" && totalNewVideos > 0 {
+		autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
+			ScraperType:     scraperType,
+			CheckpointType:  "last_video_url",
+			CheckpointValue: firstVideoURL,
+			TargetID:        "",
+		})
+	}
+
+	result.NewItemsFound = totalNewVideos
+	result.Details["total_new_videos"] = totalNewVideos
+	result.Details["base_url"] = baseURL
+	log.Printf("Found %d new videos from generic scraper %s", totalNewVideos, scraperType)
+
+	return result, nil
 }

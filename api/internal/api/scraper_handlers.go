@@ -247,6 +247,43 @@ func rescrapeThread(c *gin.Context) {
 	c.JSON(http.StatusAccepted, models.SuccessResponse(nil, "Thread rescraping started. Check activity logs for progress."))
 }
 
+// toggleThreadWatch toggles the watch status for a thread
+func toggleThreadWatch(c *gin.Context) {
+	svc := ensureScraperService()
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid thread ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Toggle watch status
+	isWatched, err := svc.ToggleThreadWatch(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to toggle watch status",
+			err.Error(),
+		))
+		return
+	}
+
+	message := "Thread is now being watched"
+	if !isWatched {
+		message = "Thread is no longer being watched"
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(
+		map[string]interface{}{
+			"is_watched": isWatched,
+		},
+		message,
+	))
+}
+
 // deleteThread deletes a scraped thread and all its associated data
 func deleteThread(c *gin.Context) {
 	svc := ensureScraperService()

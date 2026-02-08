@@ -123,8 +123,22 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 
 				// Get existing marks from batch-loaded map
 				if videoMarks, exists := videoMarksMap[itemFullPath]; exists && videoMarks != nil {
+					item.ID = videoMarks.ID
 					item.NotInterested = videoMarks.NotInterested
 					item.InEditList = videoMarks.InEditList
+					item.ContentType = videoMarks.ContentType
+					if videoMarks.ContentType != "" {
+						log.Printf("Browse: %s has content_type=%s", entry.Name(), videoMarks.ContentType)
+					}
+					// Convert VideoListInfo to BrowseItemList
+					for _, listInfo := range videoMarks.Lists {
+						item.Lists = append(item.Lists, models.BrowseItemList{
+							ID:    listInfo.ID,
+							Name:  listInfo.Name,
+							Color: listInfo.Color,
+							Icon:  listInfo.Icon,
+						})
+					}
 				}
 
 				// Always check for existing thumbnails, even if not extracting metadata

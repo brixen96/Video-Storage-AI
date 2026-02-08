@@ -154,6 +154,8 @@ func searchVideos(c *gin.Context) {
 		return
 	}
 
+	log.Printf("searchVideos: content_type=%s, category=%s, library_id=%d", query.ContentType, query.Category, query.LibraryID)
+
 	// Get videos
 	videos, total, err := svc.GetAll(&query)
 	if err != nil {
@@ -349,9 +351,10 @@ func updateVideoMarksByPath(c *gin.Context) {
 	svc := ensureVideoService()
 
 	var request struct {
-		FilePath      string `json:"file_path" binding:"required"`
-		NotInterested *bool  `json:"not_interested,omitempty"`
-		InEditList    *bool  `json:"in_edit_list,omitempty"`
+		FilePath      string  `json:"file_path" binding:"required"`
+		NotInterested *bool   `json:"not_interested,omitempty"`
+		InEditList    *bool   `json:"in_edit_list,omitempty"`
+		ContentType   *string `json:"content_type,omitempty"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -371,6 +374,7 @@ func updateVideoMarksByPath(c *gin.Context) {
 	update := models.VideoUpdate{
 		NotInterested: request.NotInterested,
 		InEditList:    request.InEditList,
+		ContentType:   request.ContentType,
 	}
 
 	updatedVideo, err := svc.Update(video.ID, &update)
@@ -381,6 +385,42 @@ func updateVideoMarksByPath(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, updatedVideo)
+}
+
+// updateFolderContentType updates content type for all videos in a folder recursively
+func updateFolderContentType(c *gin.Context) {
+	svc := ensureVideoService()
+
+	var request struct {
+		FolderPath  string `json:"folder_path" binding:"required"`
+		ContentType string `json:"content_type" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+
+	// Validate content type
+	validTypes := map[string]bool{"regular": true, "zoo": true, "3d": true}
+	if !validTypes[request.ContentType] {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid content type", "Must be one of: regular, zoo, 3d"))
+		return
+	}
+
+	// Update all videos in the folder (using LIKE for recursive matching)
+	updated, err := svc.UpdateContentTypeByFolder(request.FolderPath, request.ContentType)
+	if err != nil {
+		log.Printf("Failed to update folder content type: %v", err)
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to update content type", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{
+		"updated":      updated,
+		"folder_path":  request.FolderPath,
+		"content_type": request.ContentType,
+	}, fmt.Sprintf("Updated %d videos to %s", updated, request.ContentType)))
 }
 
 // generateVideoThumbnails generates thumbnails for all videos that don't have them

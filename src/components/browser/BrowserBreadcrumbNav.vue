@@ -50,10 +50,6 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-	showEditList: {
-		type: Boolean,
-		default: false,
-	},
 })
 
 // eslint-disable-next-line no-unused-vars
@@ -61,16 +57,12 @@ const emit = defineEmits(['navigate-to', 'back'])
 
 // Computed properties
 const showFilterAlert = computed(() => {
-	return props.showNotInterested || props.showEditList
+	return props.showNotInterested
 })
 
 const filterAlertMessage = computed(() => {
-	if (props.showNotInterested && props.showEditList) {
-		return 'Showing "Not Interested" and "Edit List" videos'
-	} else if (props.showNotInterested) {
+	if (props.showNotInterested) {
 		return 'Showing "Not Interested" videos'
-	} else if (props.showEditList) {
-		return 'Showing "Edit List" videos'
 	}
 	return ''
 })

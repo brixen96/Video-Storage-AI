@@ -20,11 +20,24 @@ type BrowseItem struct {
 	FrameRate  float64 `json:"frame_rate,omitempty"`
 	Thumbnail  string  `json:"thumbnail,omitempty"`
 	VideoID    *int64  `json:"video_id,omitempty"` // If already in database
+	ID         int64   `json:"id,omitempty"`       // Video ID for convenience
 	InDatabase bool    `json:"in_database"`
 
 	// Marking flags
-	NotInterested bool `json:"not_interested"`
-	InEditList    bool `json:"in_edit_list"`
+	NotInterested bool   `json:"not_interested"`
+	InEditList    bool   `json:"in_edit_list"`
+	ContentType   string `json:"content_type,omitempty"`
+
+	// List membership
+	Lists []BrowseItemList `json:"lists,omitempty"`
+}
+
+// BrowseItemList holds list info for a browse item
+type BrowseItemList struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	Icon  string `json:"icon"`
 }
 
 // BrowseResponse represents the response from browsing a directory

@@ -58,7 +58,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	baseQuery := `
 		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec,
 		       v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.preview_path, v.date, v.rating, v.description,
-		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.created_at, v.updated_at, v.last_played_at, v.play_count
+		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.content_type, v.created_at, v.updated_at, v.last_played_at, v.play_count
 		FROM videos v
 	`
 
@@ -155,6 +155,13 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		joins = append(joins, "INNER JOIN performers p ON vp2.performer_id = p.id")
 		conditions = append(conditions, "p.category = ?")
 		args = append(args, query.Category)
+	}
+
+	// Content type filter (filters by video's content_type field)
+	if query.ContentType != "" {
+		log.Printf("GetAll: Filtering by content_type=%s", query.ContentType)
+		conditions = append(conditions, "v.content_type = ?")
+		args = append(args, query.ContentType)
 	}
 
 	// Add marking filters
@@ -257,11 +264,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		var date sql.NullString
 		var description sql.NullString
 		var previewPath sql.NullString
+		var contentType sql.NullString
 		err := rows.Scan(
 			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath, &previewPath,
 			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
-			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+			&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 		)
 		if err != nil {
 			log.Printf("Failed to scan video row: %v", err)
@@ -279,6 +287,9 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		}
 		if previewPath.Valid {
 			video.PreviewPath = previewPath.String
+		}
+		if contentType.Valid {
+			video.ContentType = contentType.String
 		}
 
 		videos = append(videos, video)
@@ -307,11 +318,12 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	var lastPlayedAt sql.NullTime
 	var date sql.NullString
 	var description sql.NullString
+	var contentType sql.NullString
 
 	query := `
 		SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
 		       bitrate, fps, thumbnail_path, date, rating, description, is_favorite, is_pinned,
-		       not_interested, in_edit_list, created_at, updated_at, last_played_at, play_count
+		       not_interested, in_edit_list, content_type, created_at, updated_at, last_played_at, play_count
 		FROM videos
 		WHERE id = ?
 	`
@@ -320,7 +332,7 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 		&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 		&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
-		&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+		&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 	)
 
 	if err == sql.ErrNoRows {
@@ -339,6 +351,9 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	if description.Valid {
 		video.Description = description.String
 	}
+	if contentType.Valid {
+		video.ContentType = contentType.String
+	}
 
 	// Load relationships
 	if err := s.loadVideoRelationships(&video); err != nil {
@@ -353,7 +368,7 @@ func (s *VideoService) GetByPerformer(performerID int64) ([]models.Video, error)
 	query := `
 		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec, v.resolution,
 		       v.bitrate, v.fps, v.thumbnail_path, v.date, v.rating, v.description, v.is_favorite, v.is_pinned,
-		       v.not_interested, v.in_edit_list, v.created_at, v.updated_at, v.last_played_at, v.play_count
+		       v.not_interested, v.in_edit_list, v.content_type, v.created_at, v.updated_at, v.last_played_at, v.play_count
 		FROM videos v
 		INNER JOIN video_performers vp ON v.id = vp.video_id
 		WHERE vp.performer_id = ?
@@ -370,13 +385,13 @@ func (s *VideoService) GetByPerformer(performerID int64) ([]models.Video, error)
 	for rows.Next() {
 		var video models.Video
 		var lastPlayedAt sql.NullTime
-		var date, description sql.NullString
+		var date, description, contentType sql.NullString
 
 		err := rows.Scan(
 			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
-			&video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+			&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan video: %w", err)
@@ -390,6 +405,9 @@ func (s *VideoService) GetByPerformer(performerID int64) ([]models.Video, error)
 		}
 		if description.Valid {
 			video.Description = description.String
+		}
+		if contentType.Valid {
+			video.ContentType = contentType.String
 		}
 
 		videos = append(videos, video)
@@ -476,18 +494,21 @@ func (s *VideoService) Update(id int64, update *models.VideoUpdate) (*models.Vid
 	if update.InEditList != nil {
 		video.InEditList = *update.InEditList
 	}
+	if update.ContentType != nil {
+		video.ContentType = *update.ContentType
+	}
 
 	video.UpdatedAt = time.Now()
 
 	query := `
 		UPDATE videos
 		SET title = ?, date = ?, rating = ?, description = ?, is_favorite = ?, is_pinned = ?,
-		    play_count = ?, not_interested = ?, in_edit_list = ?, updated_at = ?
+		    play_count = ?, not_interested = ?, in_edit_list = ?, content_type = ?, updated_at = ?
 		WHERE id = ?
 	`
 
 	_, err = s.db.Exec(query, video.Title, video.Date, video.Rating, video.Description,
-		video.IsFavorite, video.IsPinned, video.PlayCount, video.NotInterested, video.InEditList, video.UpdatedAt, id)
+		video.IsFavorite, video.IsPinned, video.PlayCount, video.NotInterested, video.InEditList, video.ContentType, video.UpdatedAt, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update video: %w", err)
 	}
@@ -1518,21 +1539,36 @@ func (s *VideoService) GenerateAllThumbnails() error {
 
 // VideoMarks holds marking information for a video
 type VideoMarks struct {
+	ID            int64
 	NotInterested bool
 	InEditList    bool
+	ContentType   string
+	Lists         []VideoListInfo
 }
 
-// GetVideoMarksByPath retrieves video marks (not_interested, in_edit_list) by file path
+// VideoListInfo holds basic info about a list a video belongs to
+type VideoListInfo struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
+	Icon  string `json:"icon"`
+}
+
+// GetVideoMarksByPath retrieves video marks (not_interested, in_edit_list, content_type) by file path
 func (s *VideoService) GetVideoMarksByPath(filePath string) (*VideoMarks, error) {
 	var marks VideoMarks
-	query := `SELECT not_interested, in_edit_list FROM videos WHERE file_path = ?`
-	err := s.db.QueryRow(query, filePath).Scan(&marks.NotInterested, &marks.InEditList)
+	var contentType sql.NullString
+	query := `SELECT not_interested, in_edit_list, content_type FROM videos WHERE file_path = ?`
+	err := s.db.QueryRow(query, filePath).Scan(&marks.NotInterested, &marks.InEditList, &contentType)
 	if err == sql.ErrNoRows {
 		// Video doesn't exist in database yet, return nil (no marks)
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get video marks: %w", err)
+	}
+	if contentType.Valid {
+		marks.ContentType = contentType.String
 	}
 	return &marks, nil
 }
@@ -1553,7 +1589,7 @@ func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*Video
 	placeholderStr := strings.Join(placeholders, ",")
 
 	query := fmt.Sprintf(`
-		SELECT file_path, not_interested, in_edit_list
+		SELECT id, file_path, not_interested, in_edit_list, content_type
 		FROM videos
 		WHERE file_path IN (%s)
 	`, placeholderStr)
@@ -1565,14 +1601,63 @@ func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*Video
 	defer rows.Close()
 
 	marksMap := make(map[string]*VideoMarks)
+	var videoIDs []int64
+	videoIDToPath := make(map[int64]string)
+
 	for rows.Next() {
 		var filePath string
 		var marks VideoMarks
-		if err := rows.Scan(&filePath, &marks.NotInterested, &marks.InEditList); err != nil {
+		var contentType sql.NullString
+		if err := rows.Scan(&marks.ID, &filePath, &marks.NotInterested, &marks.InEditList, &contentType); err != nil {
 			log.Printf("Warning: Failed to scan video marks: %v", err)
 			continue
 		}
+		if contentType.Valid {
+			marks.ContentType = contentType.String
+		}
 		marksMap[filePath] = &marks
+		videoIDs = append(videoIDs, marks.ID)
+		videoIDToPath[marks.ID] = filePath
+	}
+
+	// Load list membership for all videos in one query
+	if len(videoIDs) > 0 {
+		// Build proper placeholders for video IDs
+		idPlaceholders := make([]string, len(videoIDs))
+		listArgs := make([]interface{}, len(videoIDs))
+		for i, id := range videoIDs {
+			idPlaceholders[i] = "?"
+			listArgs[i] = id
+		}
+		idPlaceholderStr := strings.Join(idPlaceholders, ",")
+
+		listQuery := `
+			SELECT vli.video_id, vl.id, vl.name, vl.color, vl.icon
+			FROM video_list_items vli
+			INNER JOIN video_lists vl ON vli.list_id = vl.id
+			WHERE vli.video_id IN (` + idPlaceholderStr + `)
+			ORDER BY vl.position ASC
+		`
+
+		listRows, err := s.db.Query(listQuery, listArgs...)
+		if err != nil {
+			log.Printf("Warning: Failed to query video list membership: %v", err)
+		} else {
+			defer listRows.Close()
+			for listRows.Next() {
+				var videoID int64
+				var listInfo VideoListInfo
+				if err := listRows.Scan(&videoID, &listInfo.ID, &listInfo.Name, &listInfo.Color, &listInfo.Icon); err != nil {
+					log.Printf("Warning: Failed to scan list info: %v", err)
+					continue
+				}
+				if filePath, ok := videoIDToPath[videoID]; ok {
+					if marks, ok := marksMap[filePath]; ok {
+						marks.Lists = append(marks.Lists, listInfo)
+					}
+				}
+			}
+		}
 	}
 
 	return marksMap, nil
@@ -1581,19 +1666,19 @@ func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*Video
 // GetByFilePath retrieves a video by file path
 func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
 	var video models.Video
-	var date, description sql.NullString
+	var date, description, contentType sql.NullString
 	var lastPlayedAt sql.NullTime
 
 	query := `SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
 	          bitrate, fps, thumbnail_path, date, rating, description, is_favorite, is_pinned,
-	          not_interested, in_edit_list, created_at, updated_at, last_played_at, play_count
+	          not_interested, in_edit_list, content_type, created_at, updated_at, last_played_at, play_count
 	          FROM videos WHERE file_path = ?`
 
 	err := s.db.QueryRow(query, filePath).Scan(
 		&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 		&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned,
-		&video.NotInterested, &video.InEditList, &video.CreatedAt, &video.UpdatedAt,
+		&video.NotInterested, &video.InEditList, &contentType, &video.CreatedAt, &video.UpdatedAt,
 		&lastPlayedAt, &video.PlayCount,
 	)
 
@@ -1613,6 +1698,9 @@ func (s *VideoService) GetByFilePath(filePath string) (*models.Video, error) {
 	}
 	if lastPlayedAt.Valid {
 		video.LastPlayedAt = &lastPlayedAt.Time
+	}
+	if contentType.Valid {
+		video.ContentType = contentType.String
 	}
 
 	// Load related data
@@ -1959,4 +2047,37 @@ func (s *VideoService) CopyMetadata(fromVideoID, toVideoID int64) error {
 	`
 	_, err := s.db.Exec(query, fromVideoID, fromVideoID, fromVideoID, time.Now(), toVideoID)
 	return err
+}
+
+// UpdateContentTypeByFolder updates the content_type for all videos in a folder recursively
+func (s *VideoService) UpdateContentTypeByFolder(folderPath string, contentType string) (int64, error) {
+	// Use LIKE to match all videos whose file_path starts with the folder path
+	// Ensure folder path ends with separator for proper matching
+	searchPath := folderPath
+	if !strings.HasSuffix(searchPath, "\\") && !strings.HasSuffix(searchPath, "/") {
+		searchPath += "\\"
+	}
+
+	log.Printf("UpdateContentTypeByFolder: folderPath=%s, searchPath=%s, pattern=%s", folderPath, searchPath, searchPath+"%")
+
+	query := `
+		UPDATE videos
+		SET content_type = ?, updated_at = ?
+		WHERE file_path LIKE ?
+	`
+
+	result, err := s.db.Exec(query, contentType, time.Now(), searchPath+"%")
+	if err != nil {
+		log.Printf("UpdateContentTypeByFolder: error executing query: %v", err)
+		return 0, fmt.Errorf("failed to update folder content type: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	log.Printf("UpdateContentTypeByFolder: updated %d videos with content_type=%s", rowsAffected, contentType)
+
+	return rowsAffected, nil
 }

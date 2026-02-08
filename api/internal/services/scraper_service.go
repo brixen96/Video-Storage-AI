@@ -280,7 +280,8 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 		}
 
 		// Add session cookie if available
-		if s.sessionCookie != "" {
+		hasCookie := s.sessionCookie != ""
+		if hasCookie {
 			req.Header.Set("Cookie", s.sessionCookie)
 		}
 
@@ -288,10 +289,15 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 		// Fetch the page
+		log.Printf("Making HTTP request to %s (attempt %d/%d, has cookie: %v)", cleanURL, attempt+1, maxRetries+1, hasCookie)
+		requestStart := time.Now()
 		resp, err = s.httpClient.Do(req)
+		requestDuration := time.Since(requestStart)
 		if err != nil {
+			log.Printf("HTTP request failed after %v: %v", requestDuration, err)
 			return nil, fmt.Errorf("failed to fetch thread: %w", err)
 		}
+		log.Printf("HTTP request completed in %v, status: %d", requestDuration, resp.StatusCode)
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			resp.Body.Close()
@@ -328,10 +334,18 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 		}
 
 		// Success - parse HTML
+		finalURL := resp.Request.URL.String()
+		log.Printf("HTTP %d from %s (requested: %s)", resp.StatusCode, finalURL, cleanURL)
+
 		doc, err = goquery.NewDocumentFromReader(resp.Body)
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse HTML: %w", err)
+		}
+
+		// Check for login redirect (URL contains /login)
+		if strings.Contains(finalURL, "/login") {
+			return nil, fmt.Errorf("redirected to login page - session cookie expired or invalid")
 		}
 
 		// Break out of retry loop on success
@@ -350,6 +364,22 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 
 	// Extract title (raw)
 	rawTitle := strings.TrimSpace(doc.Find("h1.p-title-value").First().Text())
+
+	// Validate that we got a valid page (not a login page or error)
+	if rawTitle == "" {
+		// Check if we got redirected to login
+		if doc.Find("form[action*='login']").Length() > 0 || doc.Find(".formRow--input input[name='login']").Length() > 0 {
+			return nil, fmt.Errorf("authentication required - session cookie expired or invalid. Please update your session cookie in Settings")
+		}
+		// Check for other error indicators
+		if doc.Find(".blockMessage--error").Length() > 0 {
+			errorMsg := strings.TrimSpace(doc.Find(".blockMessage--error").First().Text())
+			return nil, fmt.Errorf("page error: %s", errorMsg)
+		}
+		return nil, fmt.Errorf("failed to extract thread title - page may be inaccessible or structure changed")
+	}
+
+	log.Printf("Extracted title (len=%d): %q", len(rawTitle), rawTitle)
 
 	// Extract tags from title BEFORE cleaning
 	extractedTags := s.ExtractTagsFromTitle(rawTitle)
@@ -1227,11 +1257,14 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID
 	}
 
 	// Check if thread needs re-scraping (smart caching)
+	log.Printf("Thread scraped: %q, reply_count=%d. Checking if rescrape needed...", thread.Title, thread.ReplyCount)
 	shouldRescrape, existingThread, err := s.ShouldRescrapeThread(threadURL, thread.ReplyCount)
 	if err != nil {
 		log.Printf("Warning: Failed to check cache status: %v. Proceeding with scrape.", err)
 	} else if !shouldRescrape && existingThread != nil {
 		// Thread exists and has no new posts - skip scraping
+		log.Printf("Thread already up-to-date: %d posts, %d downloads (last scraped %v ago). Skipping.",
+			existingThread.PostCount, existingThread.DownloadCount, time.Since(existingThread.LastScrapedAt).Round(time.Minute))
 		s.activityService.UpdateProgressLog(int64(activityID), 0, fmt.Sprintf("✓ Thread already up-to-date (%d posts, last scraped %v ago)",
 			existingThread.PostCount, time.Since(existingThread.LastScrapedAt).Round(time.Minute)))
 		if shouldComplete {
@@ -1538,6 +1571,131 @@ func (s *ScraperService) GetThreadByID(id int64) (*models.ScrapedThread, error) 
 
 	thread.UnmarshalMetadata()
 	return thread, nil
+}
+
+// ToggleThreadWatch toggles the watch status for a thread
+func (s *ScraperService) ToggleThreadWatch(id int64) (bool, error) {
+	// Get current watch status
+	var currentStatus bool
+	err := s.db.QueryRow("SELECT COALESCE(is_watched, 0) FROM scraped_threads WHERE id = ?", id).Scan(&currentStatus)
+	if err != nil {
+		return false, fmt.Errorf("thread not found: %w", err)
+	}
+
+	// Toggle the status
+	newStatus := !currentStatus
+	_, err = s.db.Exec("UPDATE scraped_threads SET is_watched = ? WHERE id = ?", newStatus, id)
+	if err != nil {
+		return false, err
+	}
+
+	return newStatus, nil
+}
+
+// GetWatchedThreads returns all threads marked as watched
+func (s *ScraperService) GetWatchedThreads() ([]*models.ScrapedThread, error) {
+	rows, err := s.db.Query(`
+		SELECT id, external_id, source, title, url, author, category,
+			   view_count, reply_count, post_count, download_count,
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+		FROM scraped_threads
+		WHERE is_watched = 1
+		ORDER BY last_scraped_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var threads []*models.ScrapedThread
+	for rows.Next() {
+		thread := &models.ScrapedThread{}
+		err := rows.Scan(
+			&thread.ID, &thread.ExternalID, &thread.Source, &thread.Title,
+			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
+			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
+			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		thread.UnmarshalMetadata()
+		threads = append(threads, thread)
+	}
+
+	return threads, nil
+}
+
+// CheckWatchedThreadsForNewPosts checks all watched threads for new posts
+func (s *ScraperService) CheckWatchedThreadsForNewPosts(activityID int) (*models.NewContentResult, error) {
+	watchedThreads, err := s.GetWatchedThreads()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(watchedThreads) == 0 {
+		return &models.NewContentResult{
+			ScraperType:   "simpcity",
+			NewItemsFound: 0,
+			CheckedAt:     time.Now(),
+			Details:       map[string]interface{}{"message": "No watched threads"},
+		}, nil
+	}
+
+	result := &models.NewContentResult{
+		ScraperType: "simpcity",
+		CheckedAt:   time.Now(),
+		Details:     map[string]interface{}{},
+		NewItems:    []models.NewItemInfo{},
+	}
+
+	totalNewPosts := 0
+	threadsWithNewPosts := 0
+
+	for _, thread := range watchedThreads {
+		// Update activity progress
+		if activityID > 0 {
+			s.activityService.UpdateProgressLog(int64(activityID), 0,
+				fmt.Sprintf("Checking thread: %s", thread.Title))
+		}
+
+		// Fetch current thread info to get latest reply count
+		currentThread, err := s.ScrapeThread(thread.URL)
+		if err != nil {
+			log.Printf("Error checking thread %s: %v", thread.Title, err)
+			continue
+		}
+
+		// Compare reply counts
+		if currentThread.ReplyCount > thread.ReplyCount {
+			newPosts := currentThread.ReplyCount - thread.ReplyCount
+			totalNewPosts += newPosts
+			threadsWithNewPosts++
+
+			result.NewItems = append(result.NewItems, models.NewItemInfo{
+				URL:   thread.URL,
+				Title: thread.Title,
+				Type:  "thread",
+			})
+
+			// Auto-scrape the new content
+			log.Printf("Found %d new posts in thread: %s. Auto-scraping...", newPosts, thread.Title)
+			go func(url string, aid int) {
+				s.ScrapeThreadComplete(url, aid)
+			}(thread.URL, activityID)
+		}
+
+		// Small delay between checks to avoid rate limiting
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	result.NewItemsFound = totalNewPosts
+	result.Details["threads_checked"] = len(watchedThreads)
+	result.Details["threads_with_new_posts"] = threadsWithNewPosts
+	result.Details["total_new_posts"] = totalNewPosts
+
+	return result, nil
 }
 
 // SearchThreads searches threads by title or content

@@ -125,6 +125,20 @@ export const filesAPI = {
 	delete: (data) => api.delete('/files/delete', { data }),
 }
 
+export const videoListsAPI = {
+	getAll: () => api.get('/lists'),
+	getById: (id) => api.get(`/lists/${id}`),
+	create: (data) => api.post('/lists', data),
+	update: (id, data) => api.put(`/lists/${id}`, data),
+	delete: (id) => api.delete(`/lists/${id}`),
+	getItems: (id) => api.get(`/lists/${id}/items`),
+	addVideos: (id, data) => api.post(`/lists/${id}/videos`, data),
+	removeVideos: (id, data) => api.delete(`/lists/${id}/videos`, { data }),
+	reorderItems: (id, itemIds) => api.post(`/lists/${id}/reorder`, { item_ids: itemIds }),
+	getListsForVideo: (videoId, isScraped = false) => api.get('/lists/for-video', { params: { video_id: videoId, is_scraped: isScraped } }),
+	exportList: (id) => api.get(`/lists/${id}/export`),
+}
+
 export const activityAPI = {
 	getAll: (params) => api.get('/activity', { params }), // Get all activities with filters (status, task_type, limit)
 	getRecent: (limit = 20) => api.get('/activity/recent', { params: { limit } }),
@@ -239,6 +253,111 @@ export const aiCompanionAPI = {
 			throw error
 		}
 	},
+}
+
+// Dashboard API
+export const dashboardAPI = {
+	getStats: () => api.get('/dashboard/stats'),
+	getFeed: (limit = 20, offset = 0) => api.get('/dashboard/feed', { params: { limit, offset } }),
+	getScrapers: () => api.get('/dashboard/scrapers'),
+	getRunningTasks: () => api.get('/dashboard/running-tasks'),
+	executeQuickAction: (action, data) => api.post(`/dashboard/quick-action/${action}`, data),
+}
+
+// Auto-Update API
+export const autoUpdateAPI = {
+	getConfigs: () => api.get('/auto-update/configs'),
+	getConfig: (type) => api.get(`/auto-update/configs/${type}`),
+	updateConfig: (type, data) => api.put(`/auto-update/configs/${type}`, data),
+	toggle: (type, enabled) => api.post(`/auto-update/configs/${type}/toggle`, { enabled }),
+	checkNow: (type) => api.post(`/auto-update/configs/${type}/check-now`),
+	getStatus: () => api.get('/auto-update/status'),
+}
+
+// Scraper thread watch API
+export const scraperThreadsAPI = {
+	toggleWatch: (id) => api.post(`/scraper/threads/${id}/watch`),
+}
+
+// Sexuria Links API
+export const sexuriaLinksAPI = {
+	getStats: () => api.get('/scraper/sexuria/links/stats'),
+	extractLinks: (videoId, url) => api.post(`/scraper/sexuria/items/${videoId}/extract-links`, { url }),
+	getLinks: (videoId) => api.get(`/scraper/sexuria/items/${videoId}/links`),
+	verifyItemLinks: (videoId) => api.post(`/scraper/sexuria/items/${videoId}/verify-links`),
+	verifyAll: (limit = 100, cutoffDays = 7) => api.post('/scraper/sexuria/links/verify-all', null, { params: { limit, cutoff_days: cutoffDays } }),
+}
+
+// Simpcity Link Verification API
+export const linkVerificationAPI = {
+	getStats: () => api.get('/scraper/links/verification-stats'),
+	getProviderHealth: () => api.get('/scraper/providers/health'),
+	verifyThreadLinks: (threadId) => api.post(`/scraper/threads/${threadId}/verify-links`),
+	getThreadLinkStats: (threadId) => api.get(`/scraper/threads/${threadId}/link-stats`),
+	verifyAllLinks: (limit = 100, cutoffDays = 7) => api.post('/scraper/links/verify-all', null, { params: { limit, cutoff_days: cutoffDays } }),
+}
+
+// JDownloader 2 Integration API
+export const jdownloaderAPI = {
+	// Configuration
+	getConfig: () => api.get('/jdownloader/config'),
+	updateConfig: (config) => api.put('/jdownloader/config', config),
+	testConnection: () => api.post('/jdownloader/test'),
+	isAvailable: () => api.get('/jdownloader/available'),
+
+	// Send links
+	sendLinks: (links) => api.post('/jdownloader/send', { links }),
+	sendLink: (url, packageName = '', videoId = null, autoStart = false) =>
+		api.post('/jdownloader/send', {
+			links: [{ url, packageName, videoId, autoStart }],
+		}),
+	sendThreadLinks: (threadId, options = {}) =>
+		api.post(`/jdownloader/threads/${threadId}/send`, options),
+
+	// History
+	getHistory: (limit = 50, offset = 0) =>
+		api.get('/jdownloader/history', { params: { limit, offset } }),
+	clearHistory: () => api.delete('/jdownloader/history'),
+	getPackageTimestamps: () => api.get('/jdownloader/package-timestamps'),
+
+	// Download control
+	getStatus: () => api.get('/jdownloader/status'),
+	startDownloads: () => api.post('/jdownloader/start'),
+	stopDownloads: () => api.post('/jdownloader/stop'),
+	pauseDownloads: (pause) => api.post('/jdownloader/pause', { pause }),
+
+	// System info & speed
+	getSystemInfo: () => api.get('/jdownloader/system'),
+	getSpeed: () => api.get('/jdownloader/speed'),
+	setSpeedLimit: (bytesPerSecond) => api.post('/jdownloader/speed-limit', { bytesPerSecond }),
+
+	// LinkGrabber
+	getLinkGrabberLinks: () => api.get('/jdownloader/linkgrabber/links'),
+	getLinkGrabberPackages: () => api.get('/jdownloader/linkgrabber/packages'),
+	moveToDownloads: (linkIds = [], packageIds = []) =>
+		api.post('/jdownloader/linkgrabber/move', { linkIds, packageIds }),
+	removeLinkGrabberLinks: (linkIds = [], packageIds = []) =>
+		api.post('/jdownloader/linkgrabber/remove', { linkIds, packageIds }),
+	clearLinkGrabber: () => api.post('/jdownloader/linkgrabber/clear'),
+
+	// Downloads
+	getDownloadLinks: () => api.get('/jdownloader/downloads/links'),
+	getDownloadPackages: () => api.get('/jdownloader/downloads/packages'),
+	removeDownloadLinks: (linkIds = [], packageIds = []) =>
+		api.post('/jdownloader/downloads/remove', { linkIds, packageIds }),
+	forceDownload: (linkIds = [], packageIds = []) =>
+		api.post('/jdownloader/downloads/force', { linkIds, packageIds }),
+	cleanupFinished: () => api.post('/jdownloader/downloads/cleanup'),
+	resetLinks: (linkIds = [], packageIds = []) =>
+		api.post('/jdownloader/downloads/reset', { linkIds, packageIds }),
+
+	// Common operations
+	setLinkEnabled: (enabled, linkIds = [], packageIds = [], isDownload = false) =>
+		api.post('/jdownloader/enable', { enabled, linkIds, packageIds, isDownload }),
+	setLinkPriority: (priority, linkIds = [], packageIds = [], isDownload = false) =>
+		api.post('/jdownloader/priority', { priority, linkIds, packageIds, isDownload }),
+	renamePackage: (packageId, newName, isDownload = false) =>
+		api.post('/jdownloader/rename', { packageId, newName, isDownload }),
 }
 
 // Asset URL helper

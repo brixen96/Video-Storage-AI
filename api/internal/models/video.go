@@ -19,6 +19,7 @@ type Video struct {
 	Date          string     `json:"date" db:"date"`
 	Rating        int        `json:"rating" db:"rating"`
 	Description   string     `json:"description" db:"description"`
+	ContentType   string     `json:"content_type" db:"content_type"` // regular, zoo, 3d
 	IsFavorite    bool       `json:"is_favorite" db:"is_favorite"`
 	IsPinned      bool       `json:"is_pinned" db:"is_pinned"`
 	NotInterested bool       `json:"not_interested" db:"not_interested"`
@@ -61,6 +62,7 @@ type VideoUpdate struct {
 	Date          *string  `json:"date,omitempty"`
 	Rating        *int     `json:"rating,omitempty"`
 	Description   *string  `json:"description,omitempty"`
+	ContentType   *string  `json:"content_type,omitempty"` // regular, zoo, 3d
 	IsFavorite    *bool    `json:"is_favorite,omitempty"`
 	IsPinned      *bool    `json:"is_pinned,omitempty"`
 	PlayCount     *int     `json:"play_count,omitempty"`
@@ -77,8 +79,9 @@ type VideoSearchQuery struct {
 	GroupID       int64   `json:"group_id" form:"group_id"`
 	TagID         int64   `json:"tag_id" form:"tag_id"`
 	TagIDs        []int64 `json:"tag_ids" form:"tag_ids"`
-	Category      string  `json:"category" form:"category"` // 'regular', 'zoo', '3d'
-	Zoo           *bool   `json:"zoo" form:"zoo"`           // DEPRECATED - use Category instead
+	Category      string  `json:"category" form:"category"`           // Performer category: 'regular', 'zoo', '3d'
+	ContentType   string  `json:"content_type" form:"content_type"`   // Video content type: 'regular', 'zoo', '3d'
+	Zoo           *bool   `json:"zoo" form:"zoo"`                     // DEPRECATED - use ContentType instead
 	Resolution    string  `json:"resolution" form:"resolution"`
 	MinDuration   float64 `json:"min_duration" form:"min_duration"`
 	MaxDuration   float64 `json:"max_duration" form:"max_duration"`

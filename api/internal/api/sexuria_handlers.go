@@ -417,15 +417,15 @@ func getSexuriaItemsHandler(c *gin.Context) {
 
 	videoScraperSvc := ensureVideoScraperService()
 
-	// Use paginated query - Sexuria items have site_type "sexuria"
+	// Use paginated query - Sexuria items are identified by source (match both "sexuria" and "sexuria.net")
 	result, err := videoScraperSvc.GetScrapedVideosPaginated(services.ScrapedVideosQuery{
-		SiteType:  "sexuria",
-		Keyword:   host, // File hosts are stored as tags
-		Search:    search,
-		Page:      page,
-		Limit:     limit,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
+		SourceLike: "sexuria%",
+		Keyword:    host, // File hosts are stored as tags
+		Search:     search,
+		Page:       page,
+		Limit:      limit,
+		SortBy:     sortBy,
+		SortOrder:  sortOrder,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(

@@ -4,12 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // PornHubScraperService handles scraping from PornHub
@@ -409,4 +411,106 @@ func (s *PornHubScraperService) GetPornHubKeywords() []string {
 		"hardcore",
 		"interracial",
 	}
+}
+
+// CheckForNewVideos checks for new videos since last checkpoint
+func (s *PornHubScraperService) CheckForNewVideos(keywords []string, maxPages int, activityID int) (*models.NewContentResult, error) {
+	if len(keywords) == 0 {
+		return &models.NewContentResult{
+			ScraperType:   "pornhub",
+			NewItemsFound: 0,
+			CheckedAt:     time.Now(),
+			Details:       map[string]interface{}{"message": "No keywords configured"},
+		}, nil
+	}
+
+	result := &models.NewContentResult{
+		ScraperType: "pornhub",
+		CheckedAt:   time.Now(),
+		Details:     map[string]interface{}{},
+		NewItems:    []models.NewItemInfo{},
+	}
+
+	autoUpdateSvc := NewAutoUpdateService(nil, nil)
+	totalNewVideos := 0
+
+	for _, keyword := range keywords {
+		// Get checkpoint for this keyword
+		checkpoint, _ := autoUpdateSvc.GetCheckpoint("pornhub", "last_video_url", keyword)
+		lastSeenURL := ""
+		if checkpoint != nil {
+			lastSeenURL = checkpoint.CheckpointValue
+		}
+
+		log.Printf("Checking keyword: %s (last seen: %s)", keyword, lastSeenURL)
+
+		newVideosForKeyword := 0
+		firstVideoURL := ""
+
+		// Scrape up to maxPages looking for new videos
+		for page := 1; page <= maxPages; page++ {
+			pageURL := fmt.Sprintf("https://www.pornhub.com/video/search?search=%s&page=%d", url.QueryEscape(keyword), page)
+			videos, err := s.scrapePornHubPage(pageURL)
+			if err != nil {
+				log.Printf("Error scraping page %d for keyword %s: %v", page, keyword, err)
+				break
+			}
+
+			if len(videos) == 0 {
+				break
+			}
+
+			foundCheckpoint := false
+			for _, video := range videos {
+				// Save first video URL as new checkpoint
+				if firstVideoURL == "" {
+					firstVideoURL = video.URL
+				}
+
+				// If we hit the last seen video, stop
+				if video.URL == lastSeenURL {
+					foundCheckpoint = true
+					break
+				}
+
+				// This is a new video - save it
+				if err := s.videoScraperService.saveVideo(video); err == nil {
+					newVideosForKeyword++
+					if len(result.NewItems) < 10 { // Limit to first 10 new items
+						result.NewItems = append(result.NewItems, models.NewItemInfo{
+							URL:       video.URL,
+							Title:     video.Title,
+							Thumbnail: video.ThumbnailURL,
+							Type:      "video",
+						})
+					}
+				}
+			}
+
+			if foundCheckpoint {
+				break
+			}
+
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// Update checkpoint with newest video
+		if firstVideoURL != "" && newVideosForKeyword > 0 {
+			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
+				ScraperType:     "pornhub",
+				CheckpointType:  "last_video_url",
+				CheckpointValue: firstVideoURL,
+				TargetID:        keyword,
+			})
+		}
+
+		totalNewVideos += newVideosForKeyword
+		log.Printf("Found %d new videos for keyword: %s", newVideosForKeyword, keyword)
+	}
+
+	result.NewItemsFound = totalNewVideos
+	result.Details["keywords_checked"] = len(keywords)
+	result.Details["total_new_videos"] = totalNewVideos
+
+	return result, nil
 }

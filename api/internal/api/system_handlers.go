@@ -287,15 +287,12 @@ func checkServiceHealth() gin.H {
 	jdSvc := ensureJDownloaderService()
 	if jdSvc != nil {
 		available := jdSvc.IsAvailable()
-		var version string
-		if available {
-			v, _ := jdSvc.GetVersion()
-			version = v
-		}
+		config, _ := jdSvc.GetConfig()
 		services["jdownloader"] = gin.H{
 			"status":    getServiceStatus(available),
 			"available": available,
-			"version":   version,
+			"host":      config.LocalHost,
+			"port":      config.LocalPort,
 		}
 	} else {
 		services["jdownloader"] = gin.H{
