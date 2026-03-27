@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -287,6 +288,9 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 
 		// Add user agent to mimic browser
 		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+		req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+		req.Header.Set("Accept-Encoding", "identity") // Prevent compressed responses Go can't decode (e.g. Brotli)
 
 		// Fetch the page
 		log.Printf("Making HTTP request to %s (attempt %d/%d, has cookie: %v)", cleanURL, attempt+1, maxRetries+1, hasCookie)
@@ -889,6 +893,10 @@ func (s *ScraperService) extractPost(sel *goquery.Selection, threadID int64, pos
 func (s *ScraperService) extractDownloadLinks(content string, threadID int64, postID int64) []*models.ScrapedDownloadLink {
 	var links []*models.ScrapedDownloadLink
 
+	// First, decode any /redirect/?to=BASE64&m=b64 links in the HTML content
+	// Simpcity wraps external links in redirect URLs with base64-encoded targets
+	expandedContent := s.decodeRedirectLinks(content)
+
 	// Regular expressions for different hosting providers - more flexible patterns
 	providers := map[string]*regexp.Regexp{
 		"gofile":     regexp.MustCompile(`https?://(?:www\.)?gofile\.io/d/[a-zA-Z0-9_-]+`),
@@ -897,10 +905,11 @@ func (s *ScraperService) extractDownloadLinks(content string, threadID int64, po
 		"cyberdrop":  regexp.MustCompile(`https?://(?:www\.)?cyberdrop\.(?:me|to|cc)/a/[a-zA-Z0-9_-]+`),
 		"mediafire":  regexp.MustCompile(`https?://(?:www\.)?mediafire\.com/(?:file|folder)/[a-zA-Z0-9_/-]+`),
 		"mega":       regexp.MustCompile(`https?://(?:www\.)?mega\.nz/(?:file|folder)/[a-zA-Z0-9#_-]+`),
+		"cyberfile":  regexp.MustCompile(`https?://(?:www\.)?cyberfile\.(?:me|su)/[a-zA-Z0-9_.?=&/-]+`),
 	}
 
 	for provider, regex := range providers {
-		matches := regex.FindAllString(content, -1)
+		matches := regex.FindAllString(expandedContent, -1)
 		for _, match := range matches {
 			link := &models.ScrapedDownloadLink{
 				ThreadID:      threadID,
@@ -922,6 +931,50 @@ func (s *ScraperService) extractDownloadLinks(content string, threadID int64, po
 	// The page-level summary in ScrapePosts is sufficient
 
 	return links
+}
+
+// decodeRedirectLinks finds /redirect/?to=BASE64&m=b64 patterns in HTML and appends the decoded URLs
+func (s *ScraperService) decodeRedirectLinks(content string) string {
+	// Match redirect hrefs: /redirect/?to=ENCODED&e=1&m=b64 (or similar query param orders)
+	redirectRegex := regexp.MustCompile(`/redirect/\?[^"']*?to=([A-Za-z0-9+/=]+)[^"']*?m=b64`)
+	matches := redirectRegex.FindAllStringSubmatch(content, -1)
+
+	if len(matches) == 0 {
+		return content
+	}
+
+	// Append decoded URLs to the content so the provider regexes can find them
+	var decoded []string
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		encodedURL := match[1]
+		// Try standard base64 decoding
+		urlBytes, err := base64.StdEncoding.DecodeString(encodedURL)
+		if err != nil {
+			// Try URL-safe base64
+			urlBytes, err = base64.URLEncoding.DecodeString(encodedURL)
+			if err != nil {
+				// Try without padding
+				urlBytes, err = base64.RawStdEncoding.DecodeString(encodedURL)
+				if err != nil {
+					continue
+				}
+			}
+		}
+		decodedURL := string(urlBytes)
+		if strings.HasPrefix(decodedURL, "http") {
+			decoded = append(decoded, decodedURL)
+		}
+	}
+
+	if len(decoded) > 0 {
+		// Append decoded URLs as plain text so provider regexes can match them
+		content += "\n" + strings.Join(decoded, "\n")
+	}
+
+	return content
 }
 
 // extractThreadID extracts the thread ID from URL
@@ -1407,6 +1460,7 @@ func (s *ScraperService) GetStats() (*models.ScraperStats, error) {
 	stats := &models.ScraperStats{
 		SourceBreakdown:   make(map[string]int),
 		ProviderBreakdown: make(map[string]int),
+		CategoryBreakdown: make(map[string]int),
 	}
 
 	// Total threads
@@ -1445,11 +1499,23 @@ func (s *ScraperService) GetStats() (*models.ScraperStats, error) {
 		stats.ProviderBreakdown[provider] = count
 	}
 
+	// Category breakdown
+	catRows, _ := s.db.Query("SELECT COALESCE(category,''), COUNT(*) FROM scraped_threads WHERE category != '' AND category IS NOT NULL GROUP BY category ORDER BY COUNT(*) DESC")
+	defer catRows.Close()
+	for catRows.Next() {
+		var cat string
+		var count int
+		catRows.Scan(&cat, &count)
+		if cat != "" {
+			stats.CategoryBreakdown[cat] = count
+		}
+	}
+
 	return stats, nil
 }
 
 // GetAllThreads retrieves all scraped threads with pagination, sorting, and filtering
-func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filter string) ([]*models.ScrapedThread, int, error) {
+func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filter, author, category string) ([]*models.ScrapedThread, int, error) {
 	// Build WHERE clause for filters
 	whereClause := "WHERE 1=1"
 	var args []interface{}
@@ -1465,6 +1531,22 @@ func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filt
 		whereClause += " AND download_count > 0"
 	} else if filter == "no_downloads" {
 		whereClause += " AND download_count = 0"
+	} else if filter == "watched" {
+		whereClause += " AND COALESCE(is_watched, 0) = 1"
+	} else if filter == "performer_in_db" {
+		whereClause += " AND LOWER(author) IN (SELECT LOWER(name) FROM performers WHERE category = 'regular')"
+	}
+
+	// Author filter
+	if author != "" {
+		whereClause += " AND author LIKE ?"
+		args = append(args, "%"+author+"%")
+	}
+
+	// Category filter
+	if category != "" {
+		whereClause += " AND category = ?"
+		args = append(args, category)
 	}
 
 	// Get total count with filters
@@ -1473,7 +1555,7 @@ func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filt
 	countArgs := args
 	s.db.QueryRow(countQuery, countArgs...).Scan(&total)
 
-	// Build ORDER BY clause (cast numeric fields to ensure proper sorting with NULLS LAST)
+	// Build ORDER BY clause
 	orderClause := "ORDER BY last_scraped_at DESC"
 	switch sortBy {
 	case "date_desc":
@@ -1490,14 +1572,19 @@ func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filt
 		orderClause = "ORDER BY COALESCE(view_count, 0) ASC"
 	case "replies_desc":
 		orderClause = "ORDER BY COALESCE(reply_count, 0) DESC"
+	case "replies_asc":
+		orderClause = "ORDER BY COALESCE(reply_count, 0) ASC"
 	case "downloads_desc":
 		orderClause = "ORDER BY COALESCE(download_count, 0) DESC"
+	case "downloads_asc":
+		orderClause = "ORDER BY COALESCE(download_count, 0) ASC"
 	}
 
 	// Build final query
 	query := "SELECT id, external_id, source, title, url, author, category, " +
 		"view_count, reply_count, post_count, download_count, " +
-		"metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at " +
+		"metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at, " +
+		"COALESCE(is_watched, 0) " +
 		"FROM scraped_threads " + whereClause + " " +
 		orderClause + " " +
 		"LIMIT ? OFFSET ?"
@@ -1522,7 +1609,7 @@ func (s *ScraperService) GetAllThreads(limit, offset int, sortBy, provider, filt
 			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
 			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
 			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
-			&thread.LastUpdatedAt, &thread.CreatedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt, &thread.IsWatched,
 		)
 		if err != nil {
 			log.Printf("Error scanning thread: %v", err)
@@ -1555,7 +1642,8 @@ func (s *ScraperService) GetThreadByID(id int64) (*models.ScrapedThread, error) 
 	err := s.db.QueryRow(`
 		SELECT id, external_id, source, title, url, author, category,
 			   view_count, reply_count, post_count, download_count,
-			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at,
+			   COALESCE(is_watched, 0)
 		FROM scraped_threads
 		WHERE id = ?
 	`, id).Scan(
@@ -1563,7 +1651,7 @@ func (s *ScraperService) GetThreadByID(id int64) (*models.ScrapedThread, error) 
 		&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
 		&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
 		&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
-		&thread.LastUpdatedAt, &thread.CreatedAt,
+		&thread.LastUpdatedAt, &thread.CreatedAt, &thread.IsWatched,
 	)
 	if err != nil {
 		return nil, err
@@ -1597,7 +1685,8 @@ func (s *ScraperService) GetWatchedThreads() ([]*models.ScrapedThread, error) {
 	rows, err := s.db.Query(`
 		SELECT id, external_id, source, title, url, author, category,
 			   view_count, reply_count, post_count, download_count,
-			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
+			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at,
+			   COALESCE(is_watched, 0)
 		FROM scraped_threads
 		WHERE is_watched = 1
 		ORDER BY last_scraped_at DESC
@@ -1615,7 +1704,7 @@ func (s *ScraperService) GetWatchedThreads() ([]*models.ScrapedThread, error) {
 			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
 			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
 			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
-			&thread.LastUpdatedAt, &thread.CreatedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt, &thread.IsWatched,
 		)
 		if err != nil {
 			continue
@@ -1674,6 +1763,7 @@ func (s *ScraperService) CheckWatchedThreadsForNewPosts(activityID int) (*models
 			threadsWithNewPosts++
 
 			result.NewItems = append(result.NewItems, models.NewItemInfo{
+				ID:    thread.ID,
 				URL:   thread.URL,
 				Title: thread.Title,
 				Type:  "thread",
@@ -1698,25 +1788,129 @@ func (s *ScraperService) CheckWatchedThreadsForNewPosts(activityID int) (*models
 	return result, nil
 }
 
-// SearchThreads searches threads by title or content
-func (s *ScraperService) SearchThreads(query string, limit, offset int) ([]*models.ScrapedThread, int, error) {
+// CheckForNewContent checks watched threads AND configured forum URLs for new content
+func (s *ScraperService) CheckForNewContent(urls []string, maxPages int, activityID int) (*models.NewContentResult, error) {
+	// Step 1: Always check watched threads
+	result, err := s.CheckWatchedThreadsForNewPosts(activityID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2: Also check configured forum URLs for new threads
+	if len(urls) > 0 {
+		for _, forumURL := range urls {
+			if activityID > 0 {
+				s.activityService.UpdateProgressLog(int64(activityID), 0,
+					fmt.Sprintf("Checking forum URL: %s", forumURL))
+			}
+
+			threads, err := s.ScrapeForumCategory(forumURL, activityID)
+			if err != nil {
+				log.Printf("Error scraping forum URL %s: %v", forumURL, err)
+				continue
+			}
+
+			// Check each thread - see if it's new or has new posts
+			newFromURL := 0
+			for _, threadInfo := range threads {
+				// Check if thread already exists in DB
+				existing, _ := s.GetThreadByURL(threadInfo.URL, "simpcity")
+				if existing == nil {
+					// New thread found - auto-scrape it
+					newFromURL++
+					result.NewItems = append(result.NewItems, models.NewItemInfo{
+						URL:   threadInfo.URL,
+						Title: threadInfo.Title,
+						Type:  "thread",
+					})
+					go func(url string, aid int) {
+						s.ScrapeThreadComplete(url, aid)
+					}(threadInfo.URL, activityID)
+				}
+			}
+
+			if newFromURL > 0 {
+				result.NewItemsFound += newFromURL
+				log.Printf("Found %d new threads from forum URL: %s", newFromURL, forumURL)
+			}
+
+			time.Sleep(1 * time.Second)
+		}
+
+		result.Details["forum_urls_checked"] = len(urls)
+	}
+
+	return result, nil
+}
+
+// SearchThreads searches threads by title or content with sorting and filtering
+func (s *ScraperService) SearchThreads(query string, limit, offset int, sortBy, provider, filter, author, category string) ([]*models.ScrapedThread, int, error) {
 	searchPattern := "%" + query + "%"
 
-	var total int
-	s.db.QueryRow(`
-		SELECT COUNT(*) FROM scraped_threads
-		WHERE title LIKE ? OR author LIKE ?
-	`, searchPattern, searchPattern).Scan(&total)
+	// Build WHERE clause
+	whereClause := "WHERE (title LIKE ? OR author LIKE ?)"
+	args := []interface{}{searchPattern, searchPattern}
 
-	rows, err := s.db.Query(`
-		SELECT id, external_id, source, title, url, author, category,
-			   view_count, reply_count, post_count, download_count,
-			   metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at
-		FROM scraped_threads
-		WHERE title LIKE ? OR author LIKE ?
-		ORDER BY last_scraped_at DESC
-		LIMIT ? OFFSET ?
-	`, searchPattern, searchPattern, limit, offset)
+	if provider != "" {
+		whereClause += " AND id IN (SELECT DISTINCT thread_id FROM scraped_download_links WHERE provider = ?)"
+		args = append(args, provider)
+	}
+	if filter == "has_downloads" {
+		whereClause += " AND download_count > 0"
+	} else if filter == "no_downloads" {
+		whereClause += " AND download_count = 0"
+	} else if filter == "watched" {
+		whereClause += " AND COALESCE(is_watched, 0) = 1"
+	} else if filter == "performer_in_db" {
+		whereClause += " AND LOWER(author) IN (SELECT LOWER(name) FROM performers WHERE category = 'regular')"
+	}
+	if author != "" {
+		whereClause += " AND author LIKE ?"
+		args = append(args, "%"+author+"%")
+	}
+	if category != "" {
+		whereClause += " AND category = ?"
+		args = append(args, category)
+	}
+
+	var total int
+	countQuery := "SELECT COUNT(*) FROM scraped_threads " + whereClause
+	s.db.QueryRow(countQuery, args...).Scan(&total)
+
+	// Build ORDER BY clause
+	orderClause := "ORDER BY last_scraped_at DESC"
+	switch sortBy {
+	case "date_desc":
+		orderClause = "ORDER BY last_scraped_at DESC"
+	case "date_asc":
+		orderClause = "ORDER BY last_scraped_at ASC"
+	case "title_asc":
+		orderClause = "ORDER BY title COLLATE NOCASE ASC"
+	case "title_desc":
+		orderClause = "ORDER BY title COLLATE NOCASE DESC"
+	case "views_desc":
+		orderClause = "ORDER BY COALESCE(view_count, 0) DESC"
+	case "views_asc":
+		orderClause = "ORDER BY COALESCE(view_count, 0) ASC"
+	case "replies_desc":
+		orderClause = "ORDER BY COALESCE(reply_count, 0) DESC"
+	case "replies_asc":
+		orderClause = "ORDER BY COALESCE(reply_count, 0) ASC"
+	case "downloads_desc":
+		orderClause = "ORDER BY COALESCE(download_count, 0) DESC"
+	case "downloads_asc":
+		orderClause = "ORDER BY COALESCE(download_count, 0) ASC"
+	}
+
+	selectQuery := "SELECT id, external_id, source, title, url, author, category, " +
+		"view_count, reply_count, post_count, download_count, " +
+		"metadata, first_scraped_at, last_scraped_at, last_updated_at, created_at, " +
+		"COALESCE(is_watched, 0) " +
+		"FROM scraped_threads " + whereClause + " " +
+		orderClause + " LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := s.db.Query(selectQuery, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1730,7 +1924,7 @@ func (s *ScraperService) SearchThreads(query string, limit, offset int) ([]*mode
 			&thread.URL, &thread.Author, &thread.Category, &thread.ViewCount,
 			&thread.ReplyCount, &thread.PostCount, &thread.DownloadCount,
 			&thread.Metadata, &thread.FirstScrapedAt, &thread.LastScrapedAt,
-			&thread.LastUpdatedAt, &thread.CreatedAt,
+			&thread.LastUpdatedAt, &thread.CreatedAt, &thread.IsWatched,
 		)
 		if err != nil {
 			continue
@@ -1773,11 +1967,59 @@ func (s *ScraperService) GetPostsByThreadID(threadID int64) ([]*models.ScrapedPo
 	return posts, nil
 }
 
+// GetRecentPostsByThreadID retrieves the most recent posts for a thread, including read status
+func (s *ScraperService) GetRecentPostsByThreadID(threadID int64, limit int) ([]*models.ScrapedPost, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`
+		SELECT id, thread_id, external_id, author, plain_text, metadata, is_read, posted_at, created_at
+		FROM scraped_posts
+		WHERE thread_id = ?
+		ORDER BY posted_at DESC
+		LIMIT ?
+	`, threadID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []*models.ScrapedPost
+	for rows.Next() {
+		post := &models.ScrapedPost{}
+		var metadataStr string
+		err := rows.Scan(
+			&post.ID, &post.ThreadID, &post.ExternalID, &post.Author,
+			&post.PlainText, &metadataStr, &post.IsRead, &post.PostedAt, &post.CreatedAt,
+		)
+		if err != nil {
+			continue
+		}
+		// Parse metadata to expose attachments and extracted links
+		if metadataStr != "" {
+			var meta models.ScrapedPostMetadata
+			if jsonErr := json.Unmarshal([]byte(metadataStr), &meta); jsonErr == nil {
+				post.MetadataObj = &meta
+			}
+		}
+		posts = append(posts, post)
+	}
+
+	return posts, nil
+}
+
+// MarkPostAsRead marks a single post as read
+func (s *ScraperService) MarkPostAsRead(postID int64) error {
+	_, err := s.db.Exec("UPDATE scraped_posts SET is_read = 1 WHERE id = ?", postID)
+	return err
+}
+
 // GetDownloadLinksByThreadID retrieves all download links for a thread
 func (s *ScraperService) GetDownloadLinksByThreadID(threadID int64) ([]*models.ScrapedDownloadLink, error) {
 	rows, err := s.db.Query(`
 		SELECT id, thread_id, post_id, source, provider, url, original_url,
-			   status, metadata, discovered_at, last_checked_at, created_at
+			   filename, file_size, file_type, status, download_status,
+			   metadata, discovered_at, last_checked_at, created_at
 		FROM scraped_download_links
 		WHERE thread_id = ?
 		ORDER BY discovered_at ASC
@@ -1792,7 +2034,9 @@ func (s *ScraperService) GetDownloadLinksByThreadID(threadID int64) ([]*models.S
 		link := &models.ScrapedDownloadLink{}
 		err := rows.Scan(
 			&link.ID, &link.ThreadID, &link.PostID, &link.Source,
-			&link.Provider, &link.URL, &link.OriginalURL, &link.Status,
+			&link.Provider, &link.URL, &link.OriginalURL,
+			&link.Filename, &link.FileSize, &link.FileType,
+			&link.Status, &link.DownloadStatus,
 			&link.Metadata, &link.DiscoveredAt, &link.LastCheckedAt, &link.CreatedAt,
 		)
 		if err != nil {
@@ -2602,7 +2846,7 @@ func (s *ScraperService) CheckAllLinkStatuses() error {
 // AutoLinkThreadsToPerformers automatically links threads to performers based on title matching
 func (s *ScraperService) AutoLinkThreadsToPerformers() error {
 	// Get all threads (using a large limit to get all threads)
-	threads, _, err := s.GetAllThreads(10000, 0, "", "", "")
+	threads, _, err := s.GetAllThreads(10000, 0, "", "", "", "", "")
 	if err != nil {
 		return fmt.Errorf("failed to get threads: %w", err)
 	}

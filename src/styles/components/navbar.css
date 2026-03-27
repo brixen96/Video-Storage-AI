@@ -17,7 +17,6 @@
 .brand-icon {
 	font-size: 1.6rem;
 	color: #00d9ff;
-	animation: pulse 2s ease-in-out infinite;
 }
 
 .brand-text {
@@ -96,7 +95,6 @@
 	background-color: #00d9ff;
 	border-color: #00d9ff;
 	color: #1a1a2e;
-	transform: rotate(90deg);
 }
 
 .widget-container {
@@ -117,36 +115,10 @@
 
 .ws-status-indicator.connected .status-dot {
 	color: #00ff88;
-	animation: pulse-green 2s ease-in-out infinite;
 }
 
 .ws-status-indicator.disconnected .status-dot {
 	color: #ff4444;
-	animation: pulse-red 2s ease-in-out infinite;
-}
-
-@keyframes pulse-green {
-	0%,
-	100% {
-		opacity: 1;
-		filter: drop-shadow(0 0 3px #00ff88);
-	}
-	50% {
-		opacity: 0.6;
-		filter: drop-shadow(0 0 6px #00ff88);
-	}
-}
-
-@keyframes pulse-red {
-	0%,
-	100% {
-		opacity: 1;
-		filter: drop-shadow(0 0 3px #ff4444);
-	}
-	50% {
-		opacity: 0.6;
-		filter: drop-shadow(0 0 6px #ff4444);
-	}
 }
 
 /* Mobile responsiveness */
@@ -158,4 +130,28 @@
 	.search-input {
 		min-width: 150px;
 	}
+}
+
+.nav-search-btn {
+	border-color: rgba(255, 255, 255, 0.2);
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 0.8rem;
+	padding: 0.25rem 0.6rem;
+	transition: all 0.2s;
+}
+
+.nav-search-btn:hover {
+	border-color: rgba(102, 126, 234, 0.6);
+	color: #fff;
+	background: rgba(102, 126, 234, 0.1);
+}
+
+.nav-search-kbd {
+	font-size: 0.65rem;
+	opacity: 0.6;
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.2);
+	border-radius: 3px;
+	padding: 1px 4px;
+	color: inherit;
 }

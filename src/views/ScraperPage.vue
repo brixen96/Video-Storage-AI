@@ -1,19 +1,6 @@
 <template>
 	<div class="scraper-page">
 		<div class="container-fluid py-3">
-			<!-- Page Header -->
-			<div class="page-header mb-3">
-				<div class="d-flex justify-content-between align-items-center">
-					<div>
-						<h1>
-							<font-awesome-icon :icon="['fas', 'spider']" class="me-3" />
-							Web Scraper
-						</h1>
-						<p class="text-muted mb-0">Scrape content from multiple sources</p>
-					</div>
-				</div>
-			</div>
-
 			<!-- Tabs for different scrapers -->
 			<div class="scraper-tabs mb-3">
 				<!-- Simpcity Tab (Always present) -->
@@ -46,15 +33,26 @@
 					Rule34Videos
 				</button>
 
+				<!-- Motherless Tab -->
+				<button class="scraper-tab motherless-tab" :class="{ active: activeTab === 'motherless' }" @click="activeTab = 'motherless'">
+					<font-awesome-icon :icon="['fas', 'film']" class="me-2" />
+					Motherless
+				</button>
+
+				<!-- HQPorner Tab -->
+				<button class="scraper-tab hqporner-tab" :class="{ active: activeTab === 'hqporner' }" @click="activeTab = 'hqporner'">
+					<font-awesome-icon :icon="['fas', 'bolt']" class="me-2" />
+					HQPorner
+				</button>
+
+				<!-- LeakVids Tab -->
+				<button class="scraper-tab leakvids-tab" :class="{ active: activeTab === 'leakvids' }" @click="activeTab = 'leakvids'">
+					<font-awesome-icon :icon="['fas', 'eye-slash']" class="me-2" />
+					LeakVids
+				</button>
+
 				<!-- Dynamic Custom Tabs -->
-				<button
-					v-for="tab in scraperTabs"
-					:key="tab.id"
-					class="scraper-tab"
-					:class="{ active: activeTab === `tab-${tab.id}` }"
-					:style="{ borderColor: tab.color }"
-					@click="selectTab(tab.id)"
-				>
+				<button v-for="tab in scraperTabs" :key="tab.id" class="scraper-tab" :class="{ active: activeTab === `tab-${tab.id}` }" :style="{ borderColor: tab.color }" @click="selectTab(tab.id)">
 					<font-awesome-icon :icon="['fas', tab.icon]" class="me-2" />
 					{{ tab.name }}
 					<button class="btn-close-tab" @click.stop="confirmDeleteTab(tab)" title="Delete tab">
@@ -70,2227 +68,48 @@
 			</div>
 
 			<!-- Simpcity Tab Content -->
-			<div v-if="activeTab === 'simpcity'" class="tab-content">
-				<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections.simpcity }">
-					<!-- Main Content (Left) -->
-					<div class="scraper-main">
-						<!-- Search and Filters -->
-						<div class="filters-section mb-3">
-					<div class="row g-3">
-						<div class="col-md-12">
-							<SearchBox v-model="searchQuery" placeholder="Search threads by title or author..." @input="searchThreads" />
-						</div>
-					</div>
-					<div class="row g-3 mt-2">
-						<div class="col-md-3">
-							<label class="filter-label">Sort By</label>
-							<select v-model="sortBy" @change="handleSortChange" class="form-select">
-								<option value="date_desc">Date (Newest First)</option>
-								<option value="date_asc">Date (Oldest First)</option>
-								<option value="title_asc">Title (A-Z)</option>
-								<option value="title_desc">Title (Z-A)</option>
-								<option value="views_desc">Views (High to Low)</option>
-								<option value="views_asc">Views (Low to High)</option>
-								<option value="replies_desc">Replies (Most First)</option>
-								<option value="downloads_desc">Downloads (Most First)</option>
-							</select>
-						</div>
-						<div class="col-md-3">
-							<label class="filter-label">Provider</label>
-							<select v-model="filterProvider" @change="handleFilterChange" class="form-select">
-								<option value="">All Providers</option>
-								<option v-for="(count, provider) in stats.provider_breakdown" :key="provider" :value="provider">{{ provider }} ({{ count }})</option>
-							</select>
-						</div>
-						<div class="col-md-3">
-							<label class="filter-label">Content</label>
-							<select v-model="filterContent" @change="handleFilterChange" class="form-select">
-								<option value="">All Threads</option>
-								<option value="has_downloads">Has Downloads</option>
-								<option value="no_downloads">No Downloads</option>
-							</select>
-						</div>
-						<div class="col-md-3">
-							<label class="filter-label">View Mode</label>
-							<select v-model="viewMode" class="form-select">
-								<option value="grid">Grid View</option>
-								<option value="list">List View</option>
-								<option value="compact">Compact View</option>
-							</select>
-						</div>
-					</div>
-				</div>
-
-				<!-- Bulk Action Toolbar -->
-				<div v-if="threads.length > 0" class="bulk-actions-toolbar mb-4">
-					<div class="d-flex justify-content-between align-items-center">
-						<div class="d-flex gap-2 align-items-center">
-							<button class="btn btn-sm" :class="selectionMode ? 'btn-primary' : 'btn-outline-primary'" @click="toggleSelectionMode">
-								<font-awesome-icon :icon="['fas', selectionMode ? 'times' : 'check-square']" class="me-2" />
-								{{ selectionMode ? 'Cancel Selection' : 'Select Threads' }}
-							</button>
-							<div v-if="selectionMode" class="d-flex gap-2">
-								<button class="btn btn-sm btn-outline-secondary" @click="allSelectedOnPage ? deselectAllThreads() : selectAllThreads()">
-									<font-awesome-icon :icon="['fas', allSelectedOnPage ? 'square' : 'check-square']" class="me-2" />
-									{{ allSelectedOnPage ? 'Deselect All' : 'Select All' }}
-								</button>
-								<span v-if="selectedCount > 0" class="badge bg-primary align-self-center">{{ selectedCount }} selected</span>
-							</div>
-						</div>
-						<div v-if="selectionMode || threads.length > 0" class="d-flex gap-2">
-							<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-info" @click="bulkVerifyLinks" :disabled="bulkOperationInProgress">
-								<font-awesome-icon :icon="['fas', bulkOperationInProgress ? 'spinner' : 'check-double']" :spin="bulkOperationInProgress" class="me-2" />
-								Verify Selected
-							</button>
-							<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-warning" @click="bulkSendToJDownloader" :disabled="bulkOperationInProgress">
-								<font-awesome-icon :icon="['fas', bulkOperationInProgress ? 'spinner' : 'cloud-download-alt']" :spin="bulkOperationInProgress" class="me-2" />
-								Send to JD
-							</button>
-							<button v-if="selectionMode && selectedCount > 0" class="btn btn-sm btn-danger" @click="deleteSelectedThreads">
-								<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-								Delete Selected
-							</button>
-							<button class="btn btn-sm btn-outline-danger" @click="deleteAllThreads">
-								<font-awesome-icon :icon="['fas', 'trash-alt']" class="me-2" />
-								Delete All
-							</button>
-						</div>
-					</div>
-				</div>
-
-				<!-- Loading State -->
-				<LoadingState v-if="loading" show-text loading-text="Loading scraped threads..." />
-
-				<!-- Empty State -->
-				<EmptyState
-					v-else-if="threads.length === 0 && !loading"
-					:icon="['fas', 'inbox']"
-					icon-size="4x"
-					title="No Threads Found"
-					message="Start scraping to collect thread data"
-				>
-					<template #actions>
-						<button class="btn btn-primary mt-3" @click="showScrapeModal = true">
-							<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-							Start Scraping
-						</button>
-					</template>
-				</EmptyState>
-
-				<!-- Threads Grid View -->
-				<div v-else-if="viewMode === 'grid'" class="threads-grid">
-					<div
-						v-for="thread in threads"
-						:key="thread.id"
-						class="thread-card"
-						:class="{ selected: isThreadSelected(thread.id), watched: thread.is_watched }"
-						@click="openThread(thread)"
-					>
-						<div class="thread-actions-overlay">
-							<button
-								class="watch-btn"
-								:class="{ active: thread.is_watched }"
-								@click.stop="toggleThreadWatch(thread)"
-								:title="thread.is_watched ? 'Stop watching' : 'Watch for updates'"
-							>
-								<font-awesome-icon :icon="['fas', thread.is_watched ? 'bell' : 'bell-slash']" />
-							</button>
-							<button class="verify-btn" @click.stop="verifyThreadLinks(thread)" title="Verify download links">
-								<font-awesome-icon :icon="['fas', 'check-double']" />
-							</button>
-							<div v-if="selectionMode" class="thread-checkbox" @click="toggleThreadSelection(thread.id, $event)">
-								<input type="checkbox" :checked="isThreadSelected(thread.id)" @click.stop />
-							</div>
-						</div>
-						<div v-if="thread.metadata?.thumbnail_url || thread.metadata?.thumbnail_urls?.length" class="thread-thumbnail">
-							<img
-								:src="thread.metadata.thumbnail_url"
-								:data-fallback-urls="JSON.stringify(thread.metadata.thumbnail_urls || [])"
-								alt="Thread thumbnail"
-								@error="handleThumbnailError"
-							/>
-						</div>
-						<div v-else class="thread-thumbnail placeholder">
-							<font-awesome-icon :icon="['fas', 'image']" size="3x" />
-						</div>
-						<div class="thread-content">
-							<h5 class="thread-title">{{ thread.title }}</h5>
-							<div class="thread-meta">
-								<span class="meta-item">
-									<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
-									{{ thread.author }}
-								</span>
-								<span class="meta-item">
-									<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-									{{ thread.category || 'General' }}
-								</span>
-							</div>
-							<div class="thread-stats">
-								<span class="stat-badge">
-									<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-									{{ thread.view_count }}
-								</span>
-								<span class="stat-badge">
-									<font-awesome-icon :icon="['fas', 'comment']" class="me-1" />
-									{{ thread.post_count }}
-								</span>
-								<span class="stat-badge">
-									<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
-									{{ thread.download_count }}
-								</span>
-								<!-- Link Health Badge -->
-								<span
-									v-if="threadLinkStats[thread.id]"
-									class="stat-badge"
-									:class="getThreadLinkHealthClass(threadLinkStats[thread.id])"
-									:title="getThreadLinkHealthTitle(threadLinkStats[thread.id])"
-								>
-									<font-awesome-icon :icon="['fas', 'link']" class="me-1" />
-									{{ threadLinkStats[thread.id].working }}/{{ threadLinkStats[thread.id].total }}
-								</span>
-							</div>
-							<div v-if="thread.metadata?.tags?.length" class="thread-tags">
-								<span v-for="tag in thread.metadata.tags.slice(0, 3)" :key="tag" class="thread-tag">
-									{{ tag }}
-								</span>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Threads List View -->
-				<div v-else-if="viewMode === 'list'" class="threads-list">
-					<div v-for="thread in threads" :key="thread.id" class="thread-list-item" :class="{ watched: thread.is_watched }" @click="openThread(thread)">
-						<div class="thread-list-content">
-							<h5 class="thread-title">
-								<font-awesome-icon v-if="thread.is_watched" :icon="['fas', 'bell']" class="watched-indicator me-2" />
-								{{ thread.title }}
-							</h5>
-							<div class="thread-info">
-								<span class="info-item">
-									<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
-									{{ thread.author }}
-								</span>
-								<span class="info-item">
-									<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-									{{ thread.category }}
-								</span>
-								<span class="info-item">
-									<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-									{{ thread.view_count }} views
-								</span>
-								<span class="info-item">
-									<font-awesome-icon :icon="['fas', 'comment']" class="me-1" />
-									{{ thread.post_count }} posts
-								</span>
-								<span class="info-item">
-									<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
-									{{ thread.download_count }} links
-								</span>
-							</div>
-						</div>
-						<div class="thread-list-actions">
-							<button
-								class="btn btn-sm"
-								:class="thread.is_watched ? 'btn-warning' : 'btn-outline-warning'"
-								@click.stop="toggleThreadWatch(thread)"
-								:title="thread.is_watched ? 'Stop watching' : 'Watch for updates'"
-							>
-								<font-awesome-icon :icon="['fas', thread.is_watched ? 'bell' : 'bell-slash']" />
-							</button>
-							<button class="btn btn-sm btn-outline-primary" @click.stop="rescrapeThread(thread)">
-								<font-awesome-icon :icon="['fas', 'sync']" />
-							</button>
-							<button class="btn btn-sm btn-outline-secondary" @click.stop="openThreadURL(thread.url)">
-								<font-awesome-icon :icon="['fas', 'external-link-alt']" />
-							</button>
-						</div>
-					</div>
-				</div>
-
-				<!-- Pagination -->
-				<div v-if="totalPages > 1" class="pagination-container">
-					<nav>
-						<ul class="pagination justify-content-center">
-							<li class="page-item" :class="{ disabled: currentPage === 1 }">
-								<button class="page-link" @click="goToPage(currentPage - 1)">Previous</button>
-							</li>
-							<li v-for="page in visiblePages" :key="page" class="page-item" :class="{ active: page === currentPage }">
-								<button class="page-link" @click="goToPage(page)">{{ page }}</button>
-							</li>
-							<li class="page-item" :class="{ disabled: currentPage === totalPages }">
-								<button class="page-link" @click="goToPage(currentPage + 1)">Next</button>
-							</li>
-						</ul>
-					</nav>
-				</div>
-					</div>
-					<!-- End Main Content -->
-
-					<!-- Sidebar (Right) -->
-					<div class="scraper-sidebar" :class="{ collapsed: collapsedSections.simpcity }">
-						<button class="collapse-toggle-btn mb-3 w-100" @click="toggleCollapse('simpcity')">
-							<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-							Hide Panel
-						</button>
-
-						<!-- Auto-Update Panel -->
-						<AutoUpdatePanel scraper-type="simpcity" />
-
-						<!-- Statistics -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-									Statistics
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="sidebar-stats-grid">
-									<StatCard :value="stats.total_threads || 0" label="Threads" :icon="['fas', 'comments']" icon-class="threads" />
-									<StatCard :value="stats.total_posts || 0" label="Posts" :icon="['fas', 'comment-dots']" icon-class="posts" />
-									<StatCard :value="stats.total_download_links || 0" label="Links" :icon="['fas', 'link']" icon-class="links" />
-									<StatCard :value="stats.active_links || 0" label="Active" :icon="['fas', 'check-circle']" icon-class="active" />
-								</div>
-							</div>
-						</div>
-
-						<!-- Quick Actions -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'bolt']" class="me-2" />
-									Quick Actions
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="d-grid gap-2">
-									<button class="btn btn-sm btn-outline-light" @click="showAuthModal = true">
-										<font-awesome-icon :icon="['fas', 'key']" class="me-2" />
-										{{ sessionCookieSet ? 'Auth: Active' : 'Set Auth' }}
-									</button>
-									<button class="btn btn-sm btn-success" @click="showForumScrapeModal = true">
-										<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
-										Scrape Forum
-									</button>
-									<button class="btn btn-sm btn-primary" @click="showScrapeModal = true">
-										<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-										Single Thread
-									</button>
-									<button class="btn btn-sm btn-warning" @click="autoLinkPerformers">
-										<font-awesome-icon :icon="['fas', 'link']" class="me-2" />
-										Auto-Link
-									</button>
-									<button class="btn btn-sm btn-info" @click="checkLinkStatuses">
-										<font-awesome-icon :icon="['fas', 'check-circle']" class="me-2" />
-										Check Links
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Provider Breakdown -->
-						<div v-if="stats.provider_breakdown" class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-pie']" class="me-2" />
-									Providers
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="provider-tags">
-									<span v-for="(count, provider) in stats.provider_breakdown" :key="provider" class="provider-tag small">
-										{{ provider }}: <strong>{{ count }}</strong>
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Auto-update info -->
-						<div class="alert alert-info small mb-0">
-							<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
-							Auto-update checks <strong>watched threads</strong> only.
-						</div>
-					</div>
-					<!-- End Sidebar -->
-				</div>
-				<!-- End scraper-layout -->
-
-				<!-- Sidebar Toggle Button (shown when collapsed) -->
-				<button
-					v-if="collapsedSections.simpcity"
-					class="sidebar-toggle"
-					@click="toggleCollapse('simpcity')"
-					title="Show Controls Panel"
-				>
-					<font-awesome-icon :icon="['fas', 'cog']" />
-				</button>
-			</div>
-
-			<!-- Authentication Modal -->
-			<div v-if="showAuthModal" class="modal-overlay" @click="showAuthModal = false">
-				<div class="modal-dialog modal-lg" @click.stop>
-					<div class="modal-content">
-						<div class="modal-header">
-							<h5 class="modal-title">
-								<font-awesome-icon :icon="['fas', 'key']" class="me-2" />
-								Simpcity Authentication
-							</h5>
-							<button type="button" class="btn-close" @click="showAuthModal = false"></button>
-						</div>
-						<div class="modal-body">
-							<!-- Login Helper Section -->
-							<div class="card bg-dark mb-3">
-								<div class="card-body">
-									<h6 class="card-title mb-3">
-										<font-awesome-icon :icon="['fas', 'magic']" class="me-2 text-primary" />
-										Easy Login (Recommended)
-									</h6>
-									<p class="text-muted small mb-3">
-										Click the button below to open Simpcity in Firefox. Log in, then follow the instructions to copy your cookies.
-									</p>
-									<button type="button" class="btn btn-primary btn-lg w-100 mb-3" @click="openLoginHelper" :disabled="loginHelperLoading">
-										<font-awesome-icon :icon="loginHelperLoading ? ['fas', 'spinner'] : ['fas', 'external-link-alt']" :spin="loginHelperLoading" class="me-2" />
-										{{ loginHelperLoading ? 'Opening Browser...' : 'Open Simpcity Login (Firefox)' }}
-									</button>
-									<div v-if="loginHelperInstructions.length > 0" class="alert alert-info small mb-0">
-										<strong>After logging in:</strong>
-										<ol class="mb-0 mt-2 ps-3">
-											<li v-for="(instruction, idx) in loginHelperInstructions" :key="idx">{{ instruction }}</li>
-										</ol>
-									</div>
-								</div>
-							</div>
-
-							<!-- Divider -->
-							<div class="text-center text-muted my-3">
-								<span class="px-3 bg-dark">or paste cookies manually</span>
-							</div>
-
-							<!-- Manual Cookie Entry -->
-							<div class="mb-3">
-								<label class="form-label">Session Cookie</label>
-								<textarea
-									v-model="authCookie"
-									class="form-control"
-									rows="4"
-									placeholder="Paste cookie table from DevTools (Ctrl+A in cookie list) or cookie header string..."
-								></textarea>
-								<small class="form-text text-muted">
-									Paste the cookie table directly from DevTools (F12 → Application → Cookies → simpcity.is → Ctrl+A → Ctrl+C)
-								</small>
-							</div>
-							<div class="alert alert-info small">
-								<font-awesome-icon :icon="['fas', 'lightbulb']" class="me-2" />
-								<strong>Tip:</strong> In Chrome DevTools, click on any cookie, press Ctrl+A to select all, then Ctrl+C to copy. The app will automatically parse the
-								table format.
-							</div>
-							<div v-if="sessionCookieSet" class="alert alert-success">
-								<font-awesome-icon :icon="['fas', 'check-circle']" class="me-2" />
-								Authentication is currently <strong>active</strong>
-								<span v-if="verifiedUsername">
-									(logged in as <strong>{{ verifiedUsername }}</strong
-									>)</span
-								>
-							</div>
-						</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-secondary" @click="showAuthModal = false">Cancel</button>
-							<button type="button" class="btn btn-primary" @click="setAuthCookie" :disabled="!authCookie">
-								<font-awesome-icon :icon="['fas', 'save']" class="me-2" />
-								Save Cookie
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- Scrape Modal -->
-			<div v-if="showScrapeModal" class="modal-overlay" @click="showScrapeModal = false">
-				<div class="modal-dialog" @click.stop>
-					<div class="modal-content">
-						<div class="modal-header">
-							<h5 class="modal-title">
-								<font-awesome-icon :icon="['fas', 'spider']" class="me-2" />
-								New Scrape Job
-							</h5>
-							<button type="button" class="btn-close" @click="showScrapeModal = false"></button>
-						</div>
-						<div class="modal-body">
-							<div class="mb-3">
-								<label class="form-label">Thread URL</label>
-								<input v-model="scrapeURL" type="text" class="form-control" placeholder="https://simpcity.is/threads/thread-name.123456/" />
-								<small class="form-text text-muted">Enter the full URL of the thread you want to scrape</small>
-							</div>
-							<div class="alert alert-info">
-								<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
-								Scraping will run in the background. Check the Tasks page to monitor progress.
-							</div>
-						</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-secondary" @click="showScrapeModal = false">Cancel</button>
-							<button type="button" class="btn btn-primary" @click="startScrape" :disabled="!scrapeURL">
-								<font-awesome-icon :icon="['fas', 'play']" class="me-2" />
-								Start Scraping
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- Thread Detail Modal -->
-			<div v-if="selectedThread" class="modal-overlay" @click="selectedThread = null">
-				<div class="modal-dialog modal-lg" @click.stop>
-					<div class="modal-content">
-						<div class="modal-header">
-							<h5 class="modal-title">{{ selectedThread.title }}</h5>
-							<button type="button" class="btn-close" @click="selectedThread = null"></button>
-						</div>
-						<div class="modal-body">
-							<div class="thread-detail">
-								<div class="detail-row"><strong>Author:</strong> {{ selectedThread.author }}</div>
-								<div class="detail-row"><strong>Category:</strong> {{ selectedThread.category }}</div>
-								<div class="detail-row">
-									<strong>URL:</strong>
-									<a :href="selectedThread.url" target="_blank">{{ selectedThread.url }}</a>
-								</div>
-								<div class="detail-row">
-									<strong>Statistics:</strong>
-									<div class="stats-inline">
-										<span>{{ selectedThread.view_count }} views</span>
-										<span>{{ selectedThread.post_count }} posts</span>
-										<span>{{ selectedThread.download_count }} download links</span>
-									</div>
-								</div>
-								<!-- Link Health Status -->
-								<div v-if="threadLinkStats[selectedThread.id]" class="detail-row">
-									<strong>Link Health:</strong>
-									<div class="d-flex gap-3 mt-1">
-										<span class="badge bg-success">
-											<font-awesome-icon :icon="['fas', 'check']" class="me-1" />
-											{{ threadLinkStats[selectedThread.id].working }} Working
-										</span>
-										<span class="badge bg-danger">
-											<font-awesome-icon :icon="['fas', 'times']" class="me-1" />
-											{{ threadLinkStats[selectedThread.id].dead }} Dead
-										</span>
-										<span class="badge bg-secondary">
-											<font-awesome-icon :icon="['fas', 'question']" class="me-1" />
-											{{ threadLinkStats[selectedThread.id].unknown }} Unknown
-										</span>
-									</div>
-								</div>
-								<div v-if="selectedThread.metadata?.performer_names?.length" class="detail-row">
-									<strong>Detected Performers:</strong>
-									<div class="tags-container">
-										<span v-for="performer in selectedThread.metadata.performer_names" :key="performer" class="tag-badge">
-											{{ performer }}
-										</span>
-									</div>
-								</div>
-								<div v-if="selectedThread.metadata?.studio_names?.length" class="detail-row">
-									<strong>Detected Studios:</strong>
-									<div class="tags-container">
-										<span v-for="studio in selectedThread.metadata.studio_names" :key="studio" class="tag-badge">
-											{{ studio }}
-										</span>
-									</div>
-								</div>
-								<div v-if="selectedThread.metadata?.tags?.length" class="detail-row">
-									<strong>Tags:</strong>
-									<div class="tags-container">
-										<span v-for="tag in selectedThread.metadata.tags" :key="tag" class="tag-badge">
-											{{ tag }}
-										</span>
-									</div>
-								</div>
-								<div class="detail-row"><strong>Last Scraped:</strong> {{ formatDate(selectedThread.last_scraped_at) }}</div>
-							</div>
-						</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-secondary" @click="openThreadURL(selectedThread.url)">
-								<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-2" />
-								Open in Browser
-							</button>
-							<button type="button" class="btn btn-info" @click="verifyThreadLinks(selectedThread)">
-								<font-awesome-icon :icon="['fas', 'check-double']" class="me-2" />
-								Verify Links
-							</button>
-							<button type="button" class="btn btn-primary" @click="rescrapeThread(selectedThread)">
-								<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
-								Rescrape
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<!-- Forum Scrape Modal -->
-			<div v-if="showForumScrapeModal" class="modal-overlay" @click="showForumScrapeModal = false">
-				<div class="modal-dialog" @click.stop>
-					<div class="modal-content">
-						<div class="modal-header">
-							<h5 class="modal-title">
-								<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
-								Scrape Entire Forum
-							</h5>
-							<button type="button" class="btn-close" @click="showForumScrapeModal = false"></button>
-						</div>
-						<div class="modal-body">
-							<!-- Predefined Forum Categories -->
-							<div class="mb-4">
-								<label class="form-label">Quick Select Forum</label>
-								<div class="keyword-tags">
-									<button
-										v-for="forum in simpcityForums"
-										:key="forum.url"
-										class="keyword-tag"
-										:class="{ active: forumURL === forum.url }"
-										@click="forumURL = forum.url"
-									>
-										{{ forum.name }}
-									</button>
-								</div>
-							</div>
-
-							<div class="mb-3">
-								<label class="form-label">Forum Category URL</label>
-								<input v-model="forumURL" type="text" class="form-control" placeholder="https://simpcity.is/forums/xxx-porn.50/" />
-								<small class="form-text text-muted"> Or enter a custom forum category URL </small>
-							</div>
-							<div class="alert alert-warning">
-								<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-2" />
-								<strong>Warning:</strong> This will scrape ALL threads in the forum category. This may take several hours and consume significant bandwidth. The
-								scraper will run in the background.
-							</div>
-							<div class="alert alert-info">
-								<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
-								<ul class="mb-0">
-									<li>The scraper will automatically handle pagination</li>
-									<li>Each thread will be fully scraped with all posts and download links</li>
-									<li>Performer names will be extracted from thread titles</li>
-									<li>You can monitor progress in the server logs</li>
-								</ul>
-							</div>
-						</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-secondary" @click="showForumScrapeModal = false">Cancel</button>
-							<button type="button" class="btn btn-success" @click="startForumScrape" :disabled="!forumURL">
-								<font-awesome-icon :icon="['fas', 'play']" class="me-2" />
-								Start Forum Scraping
-							</button>
-						</div>
-					</div>
-				</div>
+			<div v-if="activeTab === 'simpcity'">
+				<SimpcityTab />
 			</div>
 			<!-- End Simpcity Tab Content (modals are shared between tabs) -->
 
 			<!-- PornHub Tab Content -->
 			<div v-if="activeTab === 'pornhub'" class="tab-content">
-				<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections.pornhub }">
-					<!-- Main Content (Left) -->
-					<div class="scraper-main">
-						<!-- Search and Filters (Always Visible) -->
-						<div class="filter-bar mb-3">
-							<div class="row g-2 align-items-end">
-								<div class="col-md-4">
-									<input v-model="pornHubVideoSearch" type="text" class="form-control form-control-sm" placeholder="Search videos..." />
-								</div>
-								<div class="col-md-3">
-									<select v-model="pornHubVideoSort" class="form-select form-select-sm">
-										<option value="newest">Newest First</option>
-										<option value="oldest">Oldest First</option>
-										<option value="views-desc">Most Views</option>
-										<option value="duration-desc">Longest</option>
-									</select>
-								</div>
-								<div class="col-md-3">
-									<select v-model="pornHubKeywordFilter" class="form-select form-select-sm">
-										<option value="">All Keywords</option>
-										<option v-for="kw in Object.keys(pornHubStats.keyword_counts || {})" :key="kw" :value="kw">
-											{{ kw }} ({{ pornHubStats.keyword_counts[kw] }})
-										</option>
-									</select>
-								</div>
-								<div class="col-md-2">
-									<button
-										class="btn btn-sm w-100"
-										:class="pornHubSelectionMode ? 'btn-primary' : 'btn-outline-secondary'"
-										@click="togglePornHubSelectionMode"
-									>
-										<font-awesome-icon :icon="['fas', pornHubSelectionMode ? 'times' : 'check-square']" class="me-1" />
-										Select
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Bulk Actions (when selecting) -->
-						<div v-if="pornHubSelectionMode && pornHubSelectedVideos.size > 0" class="bulk-actions-toolbar mb-3">
-							<div class="d-flex justify-content-between align-items-center">
-								<span class="badge bg-primary">{{ pornHubSelectedVideos.size }} selected</span>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-secondary" @click="selectAllPornHubVideos">Select All</button>
-									<button class="btn btn-sm btn-outline-danger" @click="deleteSelectedPornHubVideos">
-										<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />Delete
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Loading State -->
-						<LoadingState v-if="pornHubLoading" show-text loading-text="Loading PornHub videos..." />
-
-						<!-- PornHub Videos Grid -->
-						<div v-else-if="pornHubVideos.length > 0">
-							<div class="d-flex justify-content-between align-items-center mb-2">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
-									PornHub Videos ({{ filteredPornHubVideos.length }} / {{ pornHubVideos.length }})
-								</h6>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-info" @click="loadPornHubVideos" title="Refresh" :disabled="pornHubLoading">
-										<font-awesome-icon :icon="['fas', pornHubLoading ? 'spinner' : 'sync-alt']" :spin="pornHubLoading" />
-									</button>
-									<button class="btn btn-sm btn-outline-danger" @click="clearPornHubVideos" title="Clear all">
-										<font-awesome-icon :icon="['fas', 'trash-alt']" />
-									</button>
-								</div>
-							</div>
-						<div class="video-grid">
-							<div
-								v-for="video in paginatedPornHubVideos"
-								:key="video.id"
-								class="video-card"
-								:class="{ selected: pornHubSelectedVideos.has(video.id) }"
-								@mouseenter="startThumbnailPreview(video)"
-								@mouseleave="stopThumbnailPreview(video)"
-								@click="pornHubSelectionMode && togglePornHubVideoSelection(video.id)"
-							>
-								<!-- Selection Checkbox -->
-								<div v-if="pornHubSelectionMode" class="video-checkbox" @click.stop="togglePornHubVideoSelection(video.id)">
-									<input type="checkbox" :checked="pornHubSelectedVideos.has(video.id)" @change.stop />
-								</div>
-								<!-- Thumbnail -->
-								<div class="video-thumbnail">
-									<img
-										v-if="video.thumbnail_url"
-										:src="getCurrentThumbnail(video)"
-										:alt="video.title"
-										@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
-									/>
-									<div v-else class="no-thumbnail">
-										<font-awesome-icon :icon="['fas', 'video']" size="3x" />
-									</div>
-									<span v-if="video.duration" class="duration-badge">
-										{{ formatDuration(video.duration) }}
-									</span>
-								</div>
-
-								<!-- Video Info -->
-								<div class="video-info">
-									<h6 class="video-title" :title="video.title">{{ video.title }}</h6>
-									<div class="video-meta">
-										<span v-if="video.uploader" class="text-muted small d-block mb-1">
-											<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
-											{{ video.uploader }}
-										</span>
-										<div class="d-flex flex-wrap gap-2 mt-1">
-											<span v-if="video.view_count > 0" class="text-muted small">
-												<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-												{{ formatNumber(video.view_count) }}
-											</span>
-											<span v-if="video.rating > 0" class="text-success small">
-												<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
-												{{ video.rating }}%
-											</span>
-										</div>
-										<!-- Tags (keywords) -->
-										<div v-if="video.tags && video.tags.length" class="mt-1">
-											<span v-for="tag in video.tags.slice(0, 3)" :key="tag" class="badge bg-secondary me-1 small">
-												{{ tag }}
-											</span>
-										</div>
-									</div>
-
-									<!-- Actions -->
-									<div class="video-actions mt-2">
-										<button @click="playScrapedVideo(video)" class="btn btn-sm btn-primary">
-											<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
-											Open
-										</button>
-										<button
-											v-if="jdAvailable && video.source_url"
-											@click="sendToJDownloader(video)"
-											class="btn btn-sm btn-warning"
-											:disabled="jdSending[video.id]"
-											title="Send to JDownloader"
-										>
-											<font-awesome-icon :icon="['fas', jdSending[video.id] ? 'spinner' : 'download']" :spin="jdSending[video.id]" />
-										</button>
-									</div>
-								</div>
-							</div>
-						</div>
-
-							<!-- Pagination -->
-							<div v-if="filteredPornHubVideos.length > videosPerPage" class="pagination-controls p-3">
-								<div class="d-flex justify-content-center align-items-center flex-column gap-2">
-									<div class="btn-group">
-										<button class="btn btn-sm btn-outline-secondary" :disabled="pornHubVideoPage === 1" @click="pornHubVideoPage--; window.scrollTo({ top: 0, behavior: 'smooth' })">
-											<font-awesome-icon :icon="['fas', 'chevron-left']" />
-										</button>
-										<button class="btn btn-sm btn-outline-secondary disabled">
-											Page {{ pornHubVideoPage }} / {{ Math.ceil(filteredPornHubVideos.length / videosPerPage) }}
-										</button>
-										<button
-											class="btn btn-sm btn-outline-secondary"
-											:disabled="pornHubVideoPage >= Math.ceil(filteredPornHubVideos.length / videosPerPage)"
-											@click="pornHubVideoPage++; window.scrollTo({ top: 0, behavior: 'smooth' })"
-										>
-											<font-awesome-icon :icon="['fas', 'chevron-right']" />
-										</button>
-									</div>
-									<span class="text-muted small">
-										Showing {{ (pornHubVideoPage - 1) * videosPerPage + 1 }} -
-										{{ Math.min(pornHubVideoPage * videosPerPage, filteredPornHubVideos.length) }}
-										of {{ filteredPornHubVideos.length }} videos
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Empty State -->
-						<EmptyState
-							v-else-if="!pornHubScraping"
-							:icon="['fas', 'fire']"
-							icon-size="4x"
-							title="No PornHub Videos Yet"
-							message="Start a keyword search to scrape videos from PornHub"
-						/>
-					</div>
-					<!-- End Main Content -->
-
-					<!-- Sidebar (Right) -->
-					<div class="scraper-sidebar" :class="{ collapsed: collapsedSections.pornhub }">
-						<button class="collapse-toggle-btn mb-3 w-100" @click="toggleCollapse('pornhub')">
-							<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-							Hide Panel
-						</button>
-
-						<!-- Auto-Update Panel -->
-						<AutoUpdatePanel scraper-type="pornhub" endpoint-type="keywords" />
-
-						<!-- Statistics -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-									Statistics
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="sidebar-stats-grid">
-									<StatCard :value="pornHubStats.total_videos || 0" label="Videos" :icon="['fas', 'video']" icon-class="videos" />
-									<StatCard :value="Object.keys(pornHubStats.keyword_counts || {}).length" label="Keywords" :icon="['fas', 'tags']" icon-class="keywords" />
-									<StatCard :value="pornHubActiveJob ? 1 : 0" label="Active" :icon="['fas', 'spinner']" icon-class="active" />
-									<StatCard :value="pornHubActiveJob?.videosFound || 0" label="Found" :icon="['fas', 'search']" icon-class="found" />
-								</div>
-							</div>
-						</div>
-
-						<!-- Scraper Controls -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'fire']" class="me-2 text-warning" />
-									Keyword Scraper
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="mb-2">
-									<label class="form-label small">Search Keyword</label>
-									<input v-model="pornHubKeyword" type="text" class="form-control form-control-sm" placeholder="Enter keyword..." @keyup.enter="startPornHubScrape" />
-								</div>
-								<div class="mb-2">
-									<label class="form-label small">Max Pages</label>
-									<input v-model.number="pornHubMaxPages" type="number" class="form-control form-control-sm" min="1" max="9999" placeholder="0 = unlimited" />
-								</div>
-								<button class="btn btn-primary btn-sm w-100" @click="startPornHubScrape" :disabled="!pornHubKeyword || pornHubScraping">
-									<font-awesome-icon :icon="['fas', pornHubScraping ? 'spinner' : 'search']" :spin="pornHubScraping" class="me-2" />
-									{{ pornHubScraping ? 'Scraping...' : 'Start Scrape' }}
-								</button>
-							</div>
-						</div>
-
-						<!-- Suggested Keywords -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'lightbulb']" class="me-2" />
-									Quick Keywords
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="keyword-tags">
-									<button
-										v-for="keyword in pornHubSuggestedKeywords"
-										:key="keyword"
-										class="keyword-tag"
-										:class="{ active: pornHubKeyword === keyword }"
-										@click="pornHubKeyword = keyword"
-									>
-										{{ keyword }}
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Active Job Progress -->
-						<div v-if="pornHubActiveJob" class="card bg-dark">
-							<div class="card-body">
-								<h6 class="mb-2 small">
-									<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-									"{{ pornHubActiveJob.keyword }}"
-								</h6>
-								<div class="d-flex flex-wrap gap-2 small">
-									<span><strong>{{ pornHubActiveJob.pagesCompleted }}</strong> pages</span>
-									<span><strong>{{ pornHubActiveJob.videosFound }}</strong> found</span>
-									<span><strong>{{ pornHubActiveJob.videosSaved }}</strong> saved</span>
-								</div>
-							</div>
-						</div>
-					</div>
-					<!-- End Sidebar -->
-				</div>
-				<!-- End scraper-layout -->
-
-				<!-- Sidebar Toggle Button (shown when collapsed) -->
-				<button
-					v-if="collapsedSections.pornhub"
-					class="sidebar-toggle"
-					@click="toggleCollapse('pornhub')"
-					title="Show Controls Panel"
-				>
-					<font-awesome-icon :icon="['fas', 'cog']" />
-				</button>
+				<PornHubTab />
 			</div>
 			<!-- End PornHub Tab Content -->
 
 			<!-- LuxureTV Tab Content -->
 			<div v-if="activeTab === 'luxuretv'" class="tab-content">
-				<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections.luxuretv }">
-					<!-- Main Content (Left) -->
-					<div class="scraper-main">
-						<!-- Search and Filters (Always Visible) -->
-						<div class="filter-bar mb-3">
-							<div class="row g-2 align-items-end">
-								<div class="col-md-4">
-									<input v-model="luxureTVVideoSearch" type="text" class="form-control form-control-sm" placeholder="Search videos..." />
-								</div>
-								<div class="col-md-3">
-									<select v-model="luxureTVVideoSort" class="form-select form-select-sm">
-										<option value="newest">Newest First</option>
-										<option value="oldest">Oldest First</option>
-										<option value="views-desc">Most Views</option>
-										<option value="rating-desc">Highest Rated</option>
-										<option value="duration-desc">Longest</option>
-									</select>
-								</div>
-								<div class="col-md-3">
-									<button
-										class="btn btn-sm w-100"
-										:class="luxureTVSelectionMode ? 'btn-primary' : 'btn-outline-secondary'"
-										@click="toggleLuxureTVSelectionMode"
-									>
-										<font-awesome-icon :icon="['fas', luxureTVSelectionMode ? 'times' : 'check-square']" class="me-1" />
-										Select
-									</button>
-								</div>
-								<div class="col-md-2">
-									<button class="btn btn-sm btn-outline-info w-100" @click="loadLuxureTVVideos" :disabled="luxureTVLoading">
-										<font-awesome-icon :icon="['fas', luxureTVLoading ? 'spinner' : 'sync-alt']" :spin="luxureTVLoading" />
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Bulk Actions (when selecting) -->
-						<div v-if="luxureTVSelectionMode && luxureTVSelectedVideos.size > 0" class="bulk-actions-toolbar mb-3">
-							<div class="d-flex justify-content-between align-items-center">
-								<span class="badge bg-primary">{{ luxureTVSelectedVideos.size }} selected</span>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-secondary" @click="selectAllLuxureTVVideos">Select All</button>
-									<button class="btn btn-sm btn-outline-danger" @click="deleteSelectedLuxureTVVideos">
-										<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />Delete
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Active Job Progress -->
-						<div v-if="luxureTVActiveJob" class="card bg-dark mb-3">
-							<div class="card-body py-2">
-								<div class="d-flex justify-content-between align-items-center">
-									<span class="small">
-										<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-										Scraping...
-									</span>
-									<span class="small">
-										<strong>{{ luxureTVActiveJob.pagesCompleted }}</strong> pages |
-										<strong>{{ luxureTVActiveJob.videosFound }}</strong> found |
-										<strong>{{ luxureTVActiveJob.videosSaved }}</strong> saved
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Loading State -->
-						<LoadingState v-if="luxureTVLoading" show-text loading-text="Loading LuxureTV videos..." />
-
-						<!-- LuxureTV Videos Grid -->
-						<div v-else-if="luxureTVVideos.length > 0">
-							<div class="d-flex justify-content-between align-items-center mb-2">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
-									LuxureTV Videos ({{ filteredLuxureTVVideos.length }} / {{ luxureTVVideos.length }})
-								</h6>
-								<button class="btn btn-sm btn-outline-danger" @click="clearLuxureTVVideos" title="Clear all">
-									<font-awesome-icon :icon="['fas', 'trash-alt']" />
-								</button>
-							</div>
-						<div class="video-grid">
-							<div
-								v-for="video in paginatedLuxureTVVideos"
-								:key="video.id"
-								class="video-card"
-								:class="{ selected: luxureTVSelectedVideos.has(video.id) }"
-								@mouseenter="startThumbnailPreview(video)"
-								@mouseleave="stopThumbnailPreview(video)"
-								@click="luxureTVSelectionMode && toggleLuxureTVVideoSelection(video.id)"
-							>
-								<!-- Selection Checkbox -->
-								<div v-if="luxureTVSelectionMode" class="video-checkbox" @click.stop="toggleLuxureTVVideoSelection(video.id)">
-									<input type="checkbox" :checked="luxureTVSelectedVideos.has(video.id)" @change.stop />
-								</div>
-								<!-- Thumbnail -->
-								<div class="video-thumbnail">
-									<img
-										v-if="video.thumbnail_url"
-										:src="getCurrentThumbnail(video)"
-										:alt="video.title"
-										@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
-									/>
-									<div v-else class="no-thumbnail">
-										<font-awesome-icon :icon="['fas', 'video']" size="3x" />
-									</div>
-									<span v-if="video.duration" class="duration-badge">
-										{{ formatDuration(video.duration) }}
-									</span>
-								</div>
-
-								<!-- Video Info -->
-								<div class="video-info">
-									<h6 class="video-title" :title="video.title">{{ video.title }}</h6>
-									<div class="video-meta">
-										<div class="d-flex flex-wrap gap-2 mt-1">
-											<span v-if="video.view_count > 0" class="text-muted small">
-												<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-												{{ formatNumber(video.view_count) }}
-											</span>
-											<span v-if="video.rating > 0" class="text-success small">
-												<font-awesome-icon :icon="['fas', 'star']" class="me-1" />
-												{{ video.rating }}%
-											</span>
-										</div>
-										<!-- Tags -->
-										<div v-if="video.tags && video.tags.length" class="mt-1">
-											<span v-for="tag in video.tags.slice(0, 3)" :key="tag" class="badge bg-secondary me-1 small">
-												{{ tag }}
-											</span>
-										</div>
-									</div>
-
-									<!-- Actions -->
-									<div class="video-actions mt-2">
-										<button v-if="getEmbedUrl(video)" @click="playEmbeddedVideo(video)" class="btn btn-sm btn-success me-1" title="Play video in app">
-											<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
-											Play
-										</button>
-										<button @click="playScrapedVideo(video)" class="btn btn-sm btn-primary">
-											<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
-											Open
-										</button>
-										<button
-											v-if="jdAvailable && video.source_url"
-											@click="sendToJDownloader(video)"
-											class="btn btn-sm btn-warning"
-											:disabled="jdSending[video.id]"
-											title="Send to JDownloader"
-										>
-											<font-awesome-icon :icon="['fas', jdSending[video.id] ? 'spinner' : 'download']" :spin="jdSending[video.id]" />
-										</button>
-									</div>
-								</div>
-							</div>
-						</div>
-
-							<!-- Pagination -->
-							<div v-if="filteredLuxureTVVideos.length > videosPerPage" class="pagination-controls p-3">
-								<div class="d-flex justify-content-center align-items-center flex-column gap-2">
-									<div class="btn-group">
-										<button class="btn btn-sm btn-outline-secondary" :disabled="luxureTVVideoPage === 1" @click="luxureTVVideoPage--; window.scrollTo({ top: 0, behavior: 'smooth' })">
-											<font-awesome-icon :icon="['fas', 'chevron-left']" />
-										</button>
-										<button class="btn btn-sm btn-outline-secondary disabled">
-											Page {{ luxureTVVideoPage }} / {{ Math.ceil(filteredLuxureTVVideos.length / videosPerPage) }}
-										</button>
-										<button
-											class="btn btn-sm btn-outline-secondary"
-											:disabled="luxureTVVideoPage >= Math.ceil(filteredLuxureTVVideos.length / videosPerPage)"
-											@click="luxureTVVideoPage++; window.scrollTo({ top: 0, behavior: 'smooth' })"
-										>
-											<font-awesome-icon :icon="['fas', 'chevron-right']" />
-										</button>
-									</div>
-									<span class="text-muted small">
-										Showing {{ (luxureTVVideoPage - 1) * videosPerPage + 1 }} -
-										{{ Math.min(luxureTVVideoPage * videosPerPage, filteredLuxureTVVideos.length) }}
-										of {{ filteredLuxureTVVideos.length }} videos
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Empty State -->
-						<EmptyState
-							v-else-if="!luxureTVScraping"
-							:icon="['fas', 'paw']"
-							icon-size="4x"
-							title="No LuxureTV Videos Yet"
-							message="Use the sidebar controls to start scraping"
-						/>
-					</div>
-					<!-- End Main Content -->
-
-					<!-- Sidebar (Right) -->
-					<div class="scraper-sidebar" :class="{ collapsed: collapsedSections.luxuretv }">
-						<button class="collapse-toggle-btn mb-3 w-100" @click="toggleCollapse('luxuretv')">
-							<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-							Hide Panel
-						</button>
-
-						<!-- Auto-Update Panel -->
-						<AutoUpdatePanel scraper-type="luxuretv" endpoint-type="categories" />
-
-						<!-- Statistics -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-									Statistics
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="sidebar-stats-grid">
-									<StatCard :value="luxureTVVideos.length" label="Videos" :icon="['fas', 'video']" icon-class="videos" />
-									<StatCard :value="luxureTVActiveJob ? 1 : 0" label="Active" :icon="['fas', 'spinner']" icon-class="active" />
-									<StatCard :value="luxureTVActiveJob?.videosFound || 0" label="Found" :icon="['fas', 'search']" icon-class="found" />
-									<StatCard :value="luxureTVActiveJob?.videosSaved || 0" label="Saved" :icon="['fas', 'save']" icon-class="links" />
-								</div>
-							</div>
-						</div>
-
-						<!-- Scraper Controls -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'paw']" class="me-2 text-info" />
-									Scraper
-								</h6>
-							</div>
-							<div class="card-body">
-								<button
-									class="btn btn-success btn-sm w-100 mb-2"
-									:disabled="luxureTVScraping"
-									@click="startLuxureTVScrapeCategory(luxureTVCategories[0])"
-								>
-									<font-awesome-icon :icon="['fas', luxureTVScraping ? 'spinner' : 'play']" :spin="luxureTVScraping" class="me-1" />
-									{{ luxureTVScraping ? 'Scraping...' : 'Start Scrape' }}
-								</button>
-								<button
-									class="btn btn-outline-info btn-sm w-100"
-									@click="fetchLuxureTVEmbedIDs"
-									:disabled="luxureTVFetchingEmbeds"
-								>
-									<font-awesome-icon :icon="['fas', luxureTVFetchingEmbeds ? 'spinner' : 'code']" :spin="luxureTVFetchingEmbeds" class="me-1" />
-									{{ luxureTVFetchingEmbeds ? 'Fetching...' : 'Fetch Embeds' }}
-								</button>
-							</div>
-						</div>
-					</div>
-					<!-- End Sidebar -->
-				</div>
-				<!-- End scraper-layout -->
-
-				<!-- Sidebar Toggle Button (shown when collapsed) -->
-				<button
-					v-if="collapsedSections.luxuretv"
-					class="sidebar-toggle"
-					@click="toggleCollapse('luxuretv')"
-					title="Show Controls Panel"
-				>
-					<font-awesome-icon :icon="['fas', 'cog']" />
-				</button>
+				<LuxureTVTab />
 			</div>
 			<!-- End LuxureTV Tab Content -->
 
 			<!-- Sexuria Tab Content -->
 			<div v-if="activeTab === 'sexuria'" class="tab-content">
-				<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections.sexuria }">
-					<!-- Main Content (Left) -->
-					<div class="scraper-main">
-						<!-- Search and Filters (Always Visible) -->
-						<div class="filter-bar mb-3">
-							<div class="row g-2 align-items-end">
-								<div class="col-md-3">
-									<input v-model="sexuriaItemSearch" type="text" class="form-control form-control-sm" placeholder="Search items..." />
-								</div>
-								<div class="col-md-2">
-									<select v-model="sexuriaHostFilter" class="form-select form-select-sm">
-										<option value="">All Hosts</option>
-										<option v-for="(count, host) in sexuriaStats.host_counts" :key="host" :value="host">{{ host }} ({{ count }})</option>
-									</select>
-								</div>
-								<div class="col-md-2">
-									<select v-model="sexuriaItemSort" class="form-select form-select-sm">
-										<option value="newest">Newest First</option>
-										<option value="oldest">Oldest First</option>
-										<option value="title-asc">Title A-Z</option>
-										<option value="title-desc">Title Z-A</option>
-									</select>
-								</div>
-								<div class="col-md-2">
-									<button
-										class="btn btn-sm w-100"
-										:class="sexuriaSelectionMode ? 'btn-primary' : 'btn-outline-secondary'"
-										@click="toggleSexuriaSelectionMode"
-									>
-										<font-awesome-icon :icon="['fas', sexuriaSelectionMode ? 'times' : 'check-square']" class="me-1" />
-										Select
-									</button>
-								</div>
-								<div class="col-md-3">
-									<!-- Tags/Pornstars dropdowns -->
-									<div class="d-flex gap-1">
-										<div class="dropdown flex-grow-1" v-if="availableSexuriaTags.length > 0">
-											<button class="btn btn-sm btn-outline-secondary w-100 dropdown-toggle" type="button" @click="showSexuriaTagDropdown = !showSexuriaTagDropdown">
-												Tags {{ sexuriaTagFilter.length > 0 ? `(${sexuriaTagFilter.length})` : '' }}
-											</button>
-											<div class="dropdown-menu multi-select-dropdown" :class="{ show: showSexuriaTagDropdown }">
-												<div class="dropdown-header d-flex justify-content-between align-items-center">
-													<span>Tags</span>
-													<button class="btn btn-sm btn-link p-0" @click="sexuriaTagFilter = []">Clear</button>
-												</div>
-												<div class="dropdown-items-container">
-													<label v-for="tag in availableSexuriaTags" :key="tag" class="dropdown-item" @click.stop>
-														<input type="checkbox" :checked="sexuriaTagFilter.includes(tag)" @change="toggleSexuriaTagFilter(tag)" class="me-2" />
-														{{ tag }}
-													</label>
-												</div>
-											</div>
-										</div>
-										<div class="dropdown flex-grow-1" v-if="availableSexuriaPornstars.length > 0">
-											<button class="btn btn-sm btn-outline-secondary w-100 dropdown-toggle" type="button" @click="showSexuriaPornstarDropdown = !showSexuriaPornstarDropdown">
-												Stars {{ sexuriaPornstarFilter.length > 0 ? `(${sexuriaPornstarFilter.length})` : '' }}
-											</button>
-											<div class="dropdown-menu multi-select-dropdown" :class="{ show: showSexuriaPornstarDropdown }">
-												<div class="dropdown-header d-flex justify-content-between align-items-center">
-													<span>Pornstars</span>
-													<button class="btn btn-sm btn-link p-0" @click="sexuriaPornstarFilter = []">Clear</button>
-												</div>
-												<div class="dropdown-items-container">
-													<label v-for="star in availableSexuriaPornstars" :key="star" class="dropdown-item" @click.stop>
-														<input type="checkbox" :checked="sexuriaPornstarFilter.includes(star)" @change="toggleSexuriaPornstarFilter(star)" class="me-2" />
-														{{ star }}
-													</label>
-												</div>
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<!-- Bulk Actions (when selecting) -->
-						<div v-if="sexuriaSelectionMode && sexuriaSelectedItems.size > 0" class="bulk-actions-toolbar mb-3">
-							<div class="d-flex justify-content-between align-items-center">
-								<span class="badge bg-primary">{{ sexuriaSelectedItems.size }} selected</span>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-secondary" @click="selectAllSexuriaItems">Select All</button>
-									<button class="btn btn-sm btn-outline-danger" @click="deleteSelectedSexuriaItems">
-										<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />Delete
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Active Job Progress -->
-						<div v-if="sexuriaActiveJob" class="card bg-dark mb-3">
-							<div class="card-body py-2">
-								<div class="d-flex justify-content-between align-items-center">
-									<span class="small">
-										<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-										Scraping Sexuria...
-									</span>
-									<span class="small">
-										<strong>{{ sexuriaActiveJob.pagesCompleted }}</strong> pages |
-										<strong>{{ sexuriaActiveJob.itemsFound }}</strong> found |
-										<strong>{{ sexuriaActiveJob.itemsSaved }}</strong> saved
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Scraper Config Card (Collapsible in main area) -->
-						<div class="card mb-3">
-					<div class="card-header d-flex justify-content-between align-items-center">
-						<h5 class="mb-0">
-							<font-awesome-icon :icon="['fas', 'download']" class="me-2 text-info" />
-							Sexuria Download Links Scraper
-						</h5>
-						<!-- Mode Toggle -->
-						<div class="btn-group btn-group-sm">
-							<button class="btn" :class="sexuriaAdvancedMode ? 'btn-outline-primary' : 'btn-primary'" @click="sexuriaAdvancedMode = false">
-								<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-								Category
-							</button>
-							<button class="btn" :class="sexuriaAdvancedMode ? 'btn-primary' : 'btn-outline-primary'" @click="sexuriaAdvancedMode = true">
-								<font-awesome-icon :icon="['fas', 'sliders-h']" class="me-1" />
-								Advanced Search
-							</button>
-						</div>
-					</div>
-					<div class="card-body">
-						<p class="text-muted mb-4">
-							Scrape download links from Sexuria.net. This site shares links to file hosting services like FastFile.cc, Rapidgator.net, Keep2share, etc.
-						</p>
-
-						<!-- Simple Category Mode -->
-						<div v-if="!sexuriaAdvancedMode">
-							<!-- Category URL Input -->
-							<div class="row g-3 mb-4">
-								<div class="col-md-6">
-									<label class="form-label">Category URL</label>
-									<input
-										v-model="sexuriaCategoryURL"
-										type="text"
-										class="form-control"
-										placeholder="https://sexuria.net/movies/"
-										@keyup.enter="startSexuriaScrape"
-									/>
-									<small class="text-muted">Paste the category page URL from Sexuria</small>
-								</div>
-								<div class="col-md-3">
-									<label class="form-label">Max Pages</label>
-									<input v-model.number="sexuriaMaxPages" type="number" class="form-control" min="1" max="9999" placeholder="0 = unlimited" />
-									<small class="text-muted">Leave at 0 for unlimited pages</small>
-								</div>
-								<div class="col-md-3 d-flex align-items-end">
-									<button class="btn btn-primary w-100" @click="startSexuriaScrape" :disabled="!sexuriaCategoryURL || sexuriaScraping">
-										<font-awesome-icon :icon="['fas', sexuriaScraping ? 'spinner' : 'search']" :spin="sexuriaScraping" class="me-2" />
-										{{ sexuriaScraping ? 'Scraping...' : 'Start Scrape' }}
-									</button>
-								</div>
-							</div>
-
-							<!-- Available Categories -->
-							<div class="mb-4">
-								<label class="form-label">Available Categories</label>
-								<div class="keyword-tags">
-									<button
-										v-for="cat in sexuriaCategories"
-										:key="cat.url"
-										class="keyword-tag"
-										:class="{ active: sexuriaCategoryURL === cat.url }"
-										@click="sexuriaCategoryURL = cat.url"
-									>
-										{{ cat.name }}
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Advanced Search Mode -->
-						<div v-else>
-							<!-- Search Categories -->
-							<div class="mb-4">
-								<label class="form-label">
-									<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-									Categories
-								</label>
-								<div class="keyword-tags">
-									<button
-										v-for="cat in sexuriaSearchOptions.categories"
-										:key="cat.id"
-										class="keyword-tag"
-										:class="{ active: sexuriaAdvancedSearch.categories.includes(cat.id) }"
-										@click="toggleSexuriaSearchCategory(cat.id)"
-									>
-										{{ cat.name }}
-									</button>
-								</div>
-								<small class="text-muted">Select one or more categories to search in</small>
-							</div>
-
-							<!-- Text Search Fields -->
-							<div class="row g-3 mb-4">
-								<div class="col-md-6">
-									<label class="form-label">
-										<font-awesome-icon :icon="['fas', 'heading']" class="me-1" />
-										Title
-									</label>
-									<input v-model="sexuriaAdvancedSearch.title" type="text" class="form-control" placeholder="Search by title..." />
-								</div>
-								<div class="col-md-6">
-									<label class="form-label">
-										<font-awesome-icon :icon="['fas', 'align-left']" class="me-1" />
-										Description
-									</label>
-									<input v-model="sexuriaAdvancedSearch.description" type="text" class="form-control" placeholder="Search in description..." />
-								</div>
-							</div>
-
-							<div class="row g-3 mb-4">
-								<div class="col-md-4">
-									<label class="form-label">
-										<font-awesome-icon :icon="['fas', 'star']" class="me-1" />
-										Pornstars
-									</label>
-									<input v-model="sexuriaAdvancedSearch.pornstars" type="text" class="form-control" placeholder="e.g. Angela White" />
-									<small class="text-muted">Search by performer name</small>
-								</div>
-								<div class="col-md-4">
-									<label class="form-label">
-										<font-awesome-icon :icon="['fas', 'building']" class="me-1" />
-										Production / Studio
-									</label>
-									<input v-model="sexuriaAdvancedSearch.production" type="text" class="form-control" placeholder="e.g. Brazzers" />
-									<small class="text-muted">Search by production company</small>
-								</div>
-								<div class="col-md-4">
-									<label class="form-label">
-										<font-awesome-icon :icon="['fas', 'tags']" class="me-1" />
-										Tags
-									</label>
-									<input v-model="sexuriaAdvancedSearch.tags" type="text" class="form-control" placeholder="e.g. anal, threesome" />
-									<small class="text-muted">Comma-separated tags</small>
-								</div>
-							</div>
-
-							<!-- Resolutions -->
-							<div class="mb-4">
-								<label class="form-label">
-									<font-awesome-icon :icon="['fas', 'tv']" class="me-1" />
-									Resolutions
-								</label>
-								<div class="keyword-tags">
-									<button
-										v-for="res in sexuriaSearchOptions.resolutions"
-										:key="res"
-										class="keyword-tag"
-										:class="{ active: sexuriaAdvancedSearch.resolutions.includes(res) }"
-										@click="toggleSexuriaSearchResolution(res)"
-									>
-										{{ res }}
-									</button>
-								</div>
-							</div>
-
-							<!-- File Hosts -->
-							<div class="mb-4">
-								<label class="form-label">
-									<font-awesome-icon :icon="['fas', 'server']" class="me-1" />
-									File Hosts
-								</label>
-								<div class="keyword-tags">
-									<button
-										v-for="host in sexuriaSearchOptions.fileHosts"
-										:key="host.id"
-										class="keyword-tag"
-										:class="{ active: sexuriaAdvancedSearch.fileHosts.includes(host.id) }"
-										@click="toggleSexuriaSearchFileHost(host.id)"
-									>
-										{{ host.name }}
-									</button>
-								</div>
-								<small class="text-muted">Filter by file hosting services</small>
-							</div>
-
-							<!-- Max Pages & Actions -->
-							<div class="row g-3 mb-4">
-								<div class="col-md-3">
-									<label class="form-label">Max Pages</label>
-									<input v-model.number="sexuriaAdvancedSearch.maxPages" type="number" class="form-control" min="0" max="9999" placeholder="0 = unlimited" />
-									<small class="text-muted">Leave at 0 for unlimited pages</small>
-								</div>
-								<div class="col-md-9 d-flex align-items-end gap-2">
-									<button class="btn btn-outline-secondary" @click="resetSexuriaAdvancedSearch" :disabled="sexuriaScraping">
-										<font-awesome-icon :icon="['fas', 'undo']" class="me-1" />
-										Reset
-									</button>
-									<button class="btn btn-primary flex-grow-1" @click="startSexuriaAdvancedSearch" :disabled="sexuriaScraping">
-										<font-awesome-icon :icon="['fas', sexuriaScraping ? 'spinner' : 'search']" :spin="sexuriaScraping" class="me-2" />
-										{{ sexuriaScraping ? 'Searching...' : 'Start Advanced Search' }}
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Host Stats (shown in both modes) -->
-						<div v-if="sexuriaStats.host_counts && Object.keys(sexuriaStats.host_counts).length > 0" class="mb-4">
-							<label class="form-label">File Hosts Distribution</label>
-							<div class="provider-tags">
-								<span v-for="(count, host) in sexuriaStats.host_counts" :key="host" class="provider-tag">
-									<font-awesome-icon :icon="['fas', 'server']" class="me-1" />
-									{{ host }}: <strong>{{ count }}</strong>
-								</span>
-							</div>
-						</div>
-
-					</div>
-				</div>
-
-						<!-- Loading State -->
-						<LoadingState v-if="sexuriaLoading" show-text loading-text="Loading Sexuria items..." />
-
-						<!-- Sexuria Items Grid -->
-						<div v-else-if="sexuriaItems.length > 0">
-							<div class="d-flex justify-content-between align-items-center mb-2">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'file-video']" class="me-2" />
-									Sexuria Items ({{ filteredSexuriaItems.length }} / {{ sexuriaItems.length }})
-								</h6>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-info" @click="loadSexuriaItems" :disabled="sexuriaLoading">
-										<font-awesome-icon :icon="['fas', sexuriaLoading ? 'spinner' : 'sync-alt']" :spin="sexuriaLoading" />
-									</button>
-									<button class="btn btn-sm btn-outline-danger" @click="clearSexuriaItems" title="Clear all">
-										<font-awesome-icon :icon="['fas', 'trash-alt']" />
-									</button>
-								</div>
-							</div>
-
-							<div class="video-grid">
-							<div
-								v-for="item in paginatedSexuriaItems"
-								:key="item.id"
-								class="video-card sexuria-card"
-								:class="{ selected: sexuriaSelectedItems.has(item.id) }"
-								@mouseenter="handleSexuriaItemHover(item, $event)"
-								@mouseleave="hideSexuriaDetails"
-								@click="sexuriaSelectionMode && toggleSexuriaItemSelection(item.id)"
-							>
-								<!-- Selection Checkbox -->
-								<div v-if="sexuriaSelectionMode" class="video-checkbox" @click.stop="toggleSexuriaItemSelection(item.id)">
-									<input type="checkbox" :checked="sexuriaSelectedItems.has(item.id)" @change.stop />
-								</div>
-								<!-- Thumbnail -->
-								<div class="video-thumbnail">
-									<img
-										v-if="item.thumbnail_url"
-										:src="item.thumbnail_url"
-										:alt="item.title"
-										@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
-									/>
-									<div v-else class="no-thumbnail">
-										<font-awesome-icon :icon="['fas', 'file-video']" size="3x" />
-									</div>
-								</div>
-
-								<!-- Item Info -->
-								<div class="video-info">
-									<h6 class="video-title" :title="item.title">{{ item.title }}</h6>
-									<div class="video-meta">
-										<!-- File Size -->
-										<div v-if="getSexuriaFileSize(item)" class="text-muted small">
-											<font-awesome-icon :icon="['fas', 'hdd']" class="me-1" />
-											{{ getSexuriaFileSize(item) }}
-										</div>
-										<!-- Author -->
-										<div v-if="item.uploader" class="text-muted small">
-											<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
-											{{ item.uploader }}
-										</div>
-										<!-- File Hosts (from tags) -->
-										<div v-if="item.tags && item.tags.length" class="mt-1">
-											<span v-for="host in item.tags.slice(0, 4)" :key="host" class="badge bg-info me-1 small">
-												{{ host }}
-											</span>
-											<span v-if="item.tags.length > 4" class="badge bg-secondary small"> +{{ item.tags.length - 4 }} </span>
-										</div>
-										<!-- Link Health Indicator -->
-										<div v-if="item.links_extracted" class="mt-1">
-											<span
-												v-if="sexuriaLinkStats[item.id]"
-												class="badge small"
-												:class="getLinkHealthBadgeClass(sexuriaLinkStats[item.id])"
-												:title="getLinkHealthTitle(sexuriaLinkStats[item.id])"
-											>
-												<font-awesome-icon :icon="['fas', 'link']" class="me-1" />
-												{{ sexuriaLinkStats[item.id].total }} links
-											</span>
-											<span v-else class="badge bg-secondary small">
-												<font-awesome-icon :icon="['fas', 'link']" class="me-1" />
-												Links extracted
-											</span>
-										</div>
-									</div>
-
-									<!-- Actions -->
-									<div class="video-actions mt-2">
-										<button @click="openSexuriaItem(item)" class="btn btn-sm btn-primary">
-											<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
-											Open
-										</button>
-										<button
-											v-if="!item.links_extracted"
-											@click.stop="extractSexuriaItemLinks(item)"
-											class="btn btn-sm btn-outline-info"
-											:disabled="extractingLinks[item.id]"
-											title="Extract download links from this item"
-										>
-											<font-awesome-icon :icon="extractingLinks[item.id] ? ['fas', 'spinner'] : ['fas', 'download']" :spin="extractingLinks[item.id]" />
-										</button>
-										<button v-else @click.stop="showSexuriaItemLinks(item)" class="btn btn-sm btn-outline-success" title="View download links">
-											<font-awesome-icon :icon="['fas', 'link']" />
-										</button>
-									</div>
-								</div>
-							</div>
-						</div>
-
-						<!-- Sexuria Details Hover Card -->
-						<Teleport to="body">
-							<div
-								v-if="sexuriaHoverDetails.visible"
-								class="sexuria-details-card"
-								:style="sexuriaHoverDetails.style"
-								@mouseenter="keepSexuriaDetailsVisible"
-								@mouseleave="hideSexuriaDetails"
-							>
-								<div class="details-header">
-									<h6>{{ sexuriaHoverDetails.item?.title }}</h6>
-									<button class="btn-close-details" @click="hideSexuriaDetails">
-										<font-awesome-icon :icon="['fas', 'times']" />
-									</button>
-								</div>
-
-								<!-- Loading State -->
-								<div v-if="sexuriaHoverDetails.loading" class="details-loading">
-									<font-awesome-icon :icon="['fas', 'spinner']" spin size="2x" />
-									<p>Loading details...</p>
-								</div>
-
-								<!-- Details Content -->
-								<div v-else-if="sexuriaHoverDetails.data" class="details-content">
-									<!-- Screenshots -->
-									<div v-if="sexuriaHoverDetails.data.screenshots?.length" class="details-section">
-										<h6 class="section-title">
-											<font-awesome-icon :icon="['fas', 'images']" class="me-2" />
-											Screenshots ({{ sexuriaHoverDetails.data.screenshots.length }})
-										</h6>
-
-										<div class="screenshots-grid">
-											<img
-												v-for="(screenshot, idx) in sexuriaHoverDetails.data.screenshots.slice(0, 6)"
-												:key="idx"
-												:src="screenshot"
-												:alt="`Screenshot ${idx + 1}`"
-												class="screenshot-thumb"
-												:class="{ active: sexuriaHoveredScreenshot === screenshot }"
-												@mouseenter="sexuriaHoveredScreenshot = screenshot"
-												@mouseleave="sexuriaHoveredScreenshot = null"
-												@click="openScreenshot(screenshot)"
-												@error="$event.target.style.display = 'none'"
-											/>
-										</div>
-										<small v-if="sexuriaHoverDetails.data.screenshots.length > 6" class="text-muted">
-											+{{ sexuriaHoverDetails.data.screenshots.length - 6 }} more
-										</small>
-									</div>
-
-									<!-- Tags -->
-									<div v-if="sexuriaHoverDetails.data.tags?.length" class="details-section">
-										<h6 class="section-title">
-											<font-awesome-icon :icon="['fas', 'tags']" class="me-2" />
-											Tags
-										</h6>
-										<div class="tags-list">
-											<span v-for="tag in sexuriaHoverDetails.data.tags" :key="tag" class="detail-tag">
-												{{ tag }}
-											</span>
-										</div>
-									</div>
-
-									<!-- Porn Stars -->
-									<div v-if="sexuriaHoverDetails.data.porn_stars?.length" class="details-section">
-										<h6 class="section-title">
-											<font-awesome-icon :icon="['fas', 'star']" class="me-2" />
-											Porn Stars ({{ sexuriaHoverDetails.data.porn_stars.length }})
-										</h6>
-										<div class="stars-list">
-											<span v-for="star in sexuriaHoverDetails.data.porn_stars.slice(0, 10)" :key="star" class="star-tag">
-												{{ star }}
-											</span>
-											<span v-if="sexuriaHoverDetails.data.porn_stars.length > 10" class="star-tag more">
-												+{{ sexuriaHoverDetails.data.porn_stars.length - 10 }} more
-											</span>
-										</div>
-									</div>
-
-									<!-- No Details -->
-									<div
-										v-if="
-											!sexuriaHoverDetails.data.screenshots?.length && !sexuriaHoverDetails.data.tags?.length && !sexuriaHoverDetails.data.porn_stars?.length
-										"
-										class="no-details"
-									>
-										<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
-										No additional details available
-									</div>
-								</div>
-
-								<!-- Error State -->
-								<div v-else-if="sexuriaHoverDetails.error" class="details-error">
-									<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-2" />
-									{{ sexuriaHoverDetails.error }}
-								</div>
-							</div>
-						</Teleport>
-
-						<!-- Sexuria Screenshot Modal -->
-						<Teleport to="body">
-							<div v-if="sexuriaScreenshotModal.visible" class="screenshot-modal-backdrop" @click="closeSexuriaScreenshotModal"></div>
-							<div v-if="sexuriaScreenshotModal.visible" class="screenshot-modal" @click.self="closeSexuriaScreenshotModal">
-								<button class="screenshot-modal-close" @click="closeSexuriaScreenshotModal">
-									<font-awesome-icon :icon="['fas', 'times']" />
-								</button>
-
-								<!-- Navigation arrows -->
-								<button v-if="sexuriaScreenshotModal.screenshots.length > 1" class="screenshot-modal-nav screenshot-modal-prev" @click.stop="prevSexuriaScreenshot">
-									<font-awesome-icon :icon="['fas', 'chevron-left']" />
-								</button>
-								<button v-if="sexuriaScreenshotModal.screenshots.length > 1" class="screenshot-modal-nav screenshot-modal-next" @click.stop="nextSexuriaScreenshot">
-									<font-awesome-icon :icon="['fas', 'chevron-right']" />
-								</button>
-
-								<!-- Screenshot image -->
-								<img v-if="currentSexuriaScreenshot" :src="currentSexuriaScreenshot" alt="Screenshot" class="screenshot-modal-image" @click.stop />
-
-								<!-- Counter -->
-								<div v-if="sexuriaScreenshotModal.screenshots.length > 1" class="screenshot-modal-counter">
-									{{ sexuriaScreenshotModal.currentIndex + 1 }} / {{ sexuriaScreenshotModal.screenshots.length }}
-								</div>
-							</div>
-						</Teleport>
-
-						<!-- Sexuria Links Modal -->
-						<Teleport to="body">
-							<div v-if="sexuriaLinksModal.visible" class="modal-backdrop fade show" @click="closeSexuriaLinksModal"></div>
-							<div v-if="sexuriaLinksModal.visible" class="modal fade show d-block" tabindex="-1">
-								<div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-									<div class="modal-content bg-dark">
-										<div class="modal-header border-secondary">
-											<h5 class="modal-title">
-												<font-awesome-icon :icon="['fas', 'link']" class="me-2" />
-												Download Links
-											</h5>
-											<button type="button" class="btn-close btn-close-white" @click="closeSexuriaLinksModal"></button>
-										</div>
-										<div class="modal-body">
-											<!-- Item Title -->
-											<div v-if="sexuriaLinksModal.item" class="mb-3">
-												<h6 class="text-truncate" :title="sexuriaLinksModal.item.title">
-													{{ sexuriaLinksModal.item.title }}
-												</h6>
-											</div>
-
-											<!-- Loading -->
-											<div v-if="sexuriaLinksModal.loading" class="text-center py-4">
-												<font-awesome-icon :icon="['fas', 'spinner']" spin size="2x" class="text-primary" />
-												<p class="mt-2 text-muted">Loading links...</p>
-											</div>
-
-											<!-- Links List -->
-											<div v-else-if="sexuriaLinksModal.links.length > 0" class="links-list">
-												<div
-													v-for="link in sexuriaLinksModal.links"
-													:key="link.id"
-													class="link-item d-flex align-items-center p-2 mb-2 rounded"
-													:class="{
-														'bg-success bg-opacity-10 border-success': link.status === 'working',
-														'bg-danger bg-opacity-10 border-danger': link.status === 'dead',
-														'bg-secondary bg-opacity-10': link.status === 'unknown',
-													}"
-												>
-													<!-- Provider Badge -->
-													<span class="badge bg-info me-2" style="min-width: 80px">{{ link.provider }}</span>
-
-													<!-- Status Badge -->
-													<span class="badge me-2" :class="getLinkStatusBadgeClass(link.status)" style="min-width: 60px">
-														{{ link.status }}
-													</span>
-
-													<!-- URL (truncated) -->
-													<a :href="link.url" target="_blank" class="text-decoration-none text-light flex-grow-1 text-truncate" :title="link.url">
-														{{ link.url }}
-													</a>
-
-													<!-- Copy Button -->
-													<button class="btn btn-sm btn-outline-secondary ms-2" @click="copyLinkToClipboard(link.url)" title="Copy link">
-														<font-awesome-icon :icon="['fas', 'copy']" />
-													</button>
-												</div>
-
-												<!-- Summary -->
-												<div class="mt-3 p-2 bg-dark rounded border border-secondary">
-													<div class="d-flex justify-content-around text-center">
-														<div>
-															<div class="text-success fw-bold">{{ sexuriaLinksModal.links.filter((l) => l.status === 'working').length }}</div>
-															<small class="text-muted">Working</small>
-														</div>
-														<div>
-															<div class="text-danger fw-bold">{{ sexuriaLinksModal.links.filter((l) => l.status === 'dead').length }}</div>
-															<small class="text-muted">Dead</small>
-														</div>
-														<div>
-															<div class="text-secondary fw-bold">{{ sexuriaLinksModal.links.filter((l) => l.status === 'unknown').length }}</div>
-															<small class="text-muted">Unknown</small>
-														</div>
-													</div>
-												</div>
-											</div>
-
-											<!-- No Links -->
-											<div v-else class="text-center py-4 text-muted">
-												<font-awesome-icon :icon="['fas', 'link-slash']" size="2x" />
-												<p class="mt-2">No download links found</p>
-											</div>
-										</div>
-										<div class="modal-footer border-secondary">
-											<button
-												class="btn btn-primary"
-												@click="verifySexuriaItemLinks"
-												:disabled="sexuriaLinksModal.verifying || sexuriaLinksModal.links.length === 0"
-											>
-												<font-awesome-icon
-													:icon="sexuriaLinksModal.verifying ? ['fas', 'spinner'] : ['fas', 'check-double']"
-													:spin="sexuriaLinksModal.verifying"
-													class="me-1"
-												/>
-												{{ sexuriaLinksModal.verifying ? 'Verifying...' : 'Verify All Links' }}
-											</button>
-											<button class="btn btn-secondary" @click="closeSexuriaLinksModal">Close</button>
-										</div>
-									</div>
-								</div>
-							</div>
-						</Teleport>
-
-							<!-- Pagination -->
-							<div v-if="filteredSexuriaItems.length > itemsPerPage" class="pagination-controls p-3">
-								<div class="d-flex justify-content-center align-items-center flex-column gap-2">
-									<div class="btn-group">
-										<button class="btn btn-sm btn-outline-secondary" :disabled="sexuriaItemPage === 1" @click="sexuriaItemPage--; window.scrollTo({ top: 0, behavior: 'smooth' })">
-											<font-awesome-icon :icon="['fas', 'chevron-left']" />
-										</button>
-										<button class="btn btn-sm btn-outline-secondary disabled">
-											Page {{ sexuriaItemPage }} / {{ Math.ceil(filteredSexuriaItems.length / itemsPerPage) }}
-										</button>
-										<button
-											class="btn btn-sm btn-outline-secondary"
-											:disabled="sexuriaItemPage >= Math.ceil(filteredSexuriaItems.length / itemsPerPage)"
-											@click="sexuriaItemPage++; window.scrollTo({ top: 0, behavior: 'smooth' })"
-										>
-											<font-awesome-icon :icon="['fas', 'chevron-right']" />
-										</button>
-									</div>
-									<span class="text-muted small">
-										Showing {{ (sexuriaItemPage - 1) * itemsPerPage + 1 }} -
-										{{ Math.min(sexuriaItemPage * itemsPerPage, filteredSexuriaItems.length) }}
-										of {{ filteredSexuriaItems.length }} items
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Empty State -->
-						<EmptyState
-							v-else-if="!sexuriaScraping"
-							:icon="['fas', 'download']"
-							icon-size="4x"
-							title="No Sexuria Items Yet"
-							message="Use the sidebar controls to start scraping"
-						/>
-					</div>
-					<!-- End Main Content -->
-
-					<!-- Sidebar (Right) -->
-					<div class="scraper-sidebar" :class="{ collapsed: collapsedSections.sexuria }">
-						<button class="collapse-toggle-btn mb-3 w-100" @click="toggleCollapse('sexuria')">
-							<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-							Hide Panel
-						</button>
-
-						<!-- Auto-Update Panel -->
-						<AutoUpdatePanel scraper-type="sexuria" endpoint-type="categories" />
-
-						<!-- Statistics -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-									Statistics
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="sidebar-stats-grid">
-									<StatCard :value="sexuriaStats.total_items || 0" label="Items" :icon="['fas', 'file-video']" icon-class="videos" />
-									<StatCard :value="Object.keys(sexuriaStats.host_counts || {}).length" label="Hosts" :icon="['fas', 'server']" icon-class="posts" />
-									<StatCard :value="sexuriaActiveJob ? 1 : 0" label="Active" :icon="['fas', 'spinner']" icon-class="active" />
-									<StatCard :value="sexuriaItems.length" label="Loaded" :icon="['fas', 'database']" icon-class="links" />
-								</div>
-							</div>
-						</div>
-
-						<!-- Quick Scrape -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'bolt']" class="me-2" />
-									Quick Scrape
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="keyword-tags mb-2">
-									<button
-										v-for="cat in sexuriaCategories.slice(0, 6)"
-										:key="cat.url"
-										class="keyword-tag"
-										:class="{ active: sexuriaCategoryURL === cat.url }"
-										@click="sexuriaCategoryURL = cat.url"
-									>
-										{{ cat.name }}
-									</button>
-								</div>
-								<button class="btn btn-primary btn-sm w-100" @click="startSexuriaScrape" :disabled="!sexuriaCategoryURL || sexuriaScraping">
-									<font-awesome-icon :icon="['fas', sexuriaScraping ? 'spinner' : 'search']" :spin="sexuriaScraping" class="me-2" />
-									{{ sexuriaScraping ? 'Scraping...' : 'Start Scrape' }}
-								</button>
-							</div>
-						</div>
-
-						<!-- Host Distribution -->
-						<div v-if="sexuriaStats.host_counts && Object.keys(sexuriaStats.host_counts).length > 0" class="card">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'server']" class="me-2" />
-									File Hosts
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="d-flex flex-wrap gap-1">
-									<span v-for="(count, host) in sexuriaStats.host_counts" :key="host" class="badge bg-info">
-										{{ host }}: {{ count }}
-									</span>
-								</div>
-							</div>
-						</div>
-					</div>
-					<!-- End Sidebar -->
-				</div>
-				<!-- End scraper-layout -->
-
-				<!-- Sidebar Toggle Button (shown when collapsed) -->
-				<button
-					v-if="collapsedSections.sexuria"
-					class="sidebar-toggle"
-					@click="toggleCollapse('sexuria')"
-					title="Show Controls Panel"
-				>
-					<font-awesome-icon :icon="['fas', 'cog']" />
-				</button>
+				<SexuriaTab />
 			</div>
 			<!-- End Sexuria Tab Content -->
 
 			<!-- Rule34Video Tab Content -->
 			<div v-if="activeTab === 'rule34video'" class="tab-content">
-				<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections.rule34video }">
-					<!-- Main Content (Left) -->
-					<div class="scraper-main">
-						<!-- Search and Filters (Always Visible) -->
-						<div class="filter-bar mb-3">
-							<div class="row g-2 align-items-end">
-								<div class="col-md-4">
-									<input v-model="rule34VideoVideoSearch" type="text" class="form-control form-control-sm" placeholder="Search videos..." />
-								</div>
-								<div class="col-md-3">
-									<select v-model="rule34VideoVideoSort" class="form-select form-select-sm">
-										<option value="newest">Newest First</option>
-										<option value="oldest">Oldest First</option>
-										<option value="views-desc">Most Views</option>
-										<option value="rating-desc">Top Rated</option>
-										<option value="duration-desc">Longest</option>
-									</select>
-								</div>
-								<div class="col-md-3">
-									<button
-										class="btn btn-sm w-100"
-										:class="rule34VideoSelectionMode ? 'btn-primary' : 'btn-outline-secondary'"
-										@click="toggleRule34VideoSelectionMode"
-									>
-										<font-awesome-icon :icon="['fas', rule34VideoSelectionMode ? 'times' : 'check-square']" class="me-1" />
-										Select
-									</button>
-								</div>
-								<div class="col-md-2">
-									<button class="btn btn-sm btn-outline-info w-100" @click="loadRule34VideoVideos" :disabled="rule34VideoLoading">
-										<font-awesome-icon :icon="['fas', rule34VideoLoading ? 'spinner' : 'sync-alt']" :spin="rule34VideoLoading" />
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Bulk Actions (when selecting) -->
-						<div v-if="rule34VideoSelectionMode && rule34VideoSelectedVideos.size > 0" class="bulk-actions-toolbar mb-3">
-							<div class="d-flex justify-content-between align-items-center">
-								<span class="badge bg-primary">{{ rule34VideoSelectedVideos.size }} selected</span>
-								<div class="d-flex gap-2">
-									<button class="btn btn-sm btn-outline-secondary" @click="selectAllRule34VideoVideos">Select All</button>
-									<button class="btn btn-sm btn-outline-danger" @click="deleteSelectedRule34VideoVideos">
-										<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />Delete
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Active Job Progress -->
-						<div v-if="rule34VideoActiveJob" class="card bg-dark mb-3">
-							<div class="card-body py-2">
-								<div class="d-flex justify-content-between align-items-center">
-									<span class="small">
-										<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-										Scraping Rule34Video...
-									</span>
-									<span class="small">
-										<strong>{{ rule34VideoActiveJob.pagesCompleted }}</strong> pages |
-										<strong>{{ rule34VideoActiveJob.videosFound }}</strong> found |
-										<strong>{{ rule34VideoActiveJob.videosSaved }}</strong> saved
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Loading State -->
-						<LoadingState v-if="rule34VideoLoading" show-text loading-text="Loading Rule34Video videos..." />
-
-						<!-- Rule34Video Videos Grid -->
-						<div v-else-if="rule34VideoVideos.length > 0">
-							<div class="d-flex justify-content-between align-items-center mb-2">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'cube']" class="me-2" />
-									Rule34Videos ({{ filteredRule34VideoVideos.length }} / {{ rule34VideoVideos.length }})
-								</h6>
-								<button class="btn btn-sm btn-outline-danger" @click="clearRule34VideoVideos" title="Clear all">
-									<font-awesome-icon :icon="['fas', 'trash-alt']" />
-								</button>
-							</div>
-						<div class="video-grid">
-							<div
-								v-for="video in paginatedRule34VideoVideos"
-								:key="video.id"
-								class="video-card"
-								:class="{ selected: rule34VideoSelectedVideos.has(video.id) }"
-								@mouseenter="startThumbnailPreview(video)"
-								@mouseleave="stopThumbnailPreview(video)"
-								@click="rule34VideoSelectionMode && toggleRule34VideoVideoSelection(video.id)"
-							>
-								<!-- Selection Checkbox -->
-								<div v-if="rule34VideoSelectionMode" class="video-checkbox" @click.stop="toggleRule34VideoVideoSelection(video.id)">
-									<input type="checkbox" :checked="rule34VideoSelectedVideos.has(video.id)" @change.stop />
-								</div>
-								<!-- Thumbnail -->
-								<div class="video-thumbnail">
-									<img
-										v-if="video.thumbnail_url"
-										:src="getCurrentThumbnail(video)"
-										:alt="video.title"
-										@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
-									/>
-									<div v-else class="no-thumbnail">
-										<font-awesome-icon :icon="['fas', 'cube']" size="3x" />
-									</div>
-									<span v-if="video.duration" class="duration-badge">
-										{{ formatDuration(video.duration) }}
-									</span>
-								</div>
-
-								<!-- Video Info -->
-								<div class="video-info">
-									<h6 class="video-title" :title="video.title">{{ video.title }}</h6>
-									<div class="video-meta">
-										<div class="d-flex flex-wrap gap-2 mt-1">
-											<span v-if="video.view_count > 0" class="text-muted small">
-												<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-												{{ formatNumber(video.view_count) }}
-											</span>
-											<span v-if="video.rating > 0" class="text-success small">
-												<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
-												{{ video.rating }}%
-											</span>
-										</div>
-										<!-- Tags -->
-										<div v-if="video.tags && video.tags.length" class="mt-1">
-											<span v-for="tag in video.tags.slice(0, 3)" :key="tag" class="badge bg-info me-1 small">
-												{{ tag }}
-											</span>
-										</div>
-									</div>
-
-									<!-- Actions -->
-									<div class="video-actions mt-2">
-										<button @click="playScrapedVideo(video)" class="btn btn-sm btn-primary">
-											<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
-											Open
-										</button>
-										<button
-											v-if="jdAvailable && video.source_url"
-											@click="sendToJDownloader(video)"
-											class="btn btn-sm btn-warning"
-											:disabled="jdSending[video.id]"
-											title="Send to JDownloader"
-										>
-											<font-awesome-icon :icon="['fas', jdSending[video.id] ? 'spinner' : 'download']" :spin="jdSending[video.id]" />
-										</button>
-									</div>
-								</div>
-							</div>
-						</div>
-
-							<!-- Pagination -->
-							<div v-if="filteredRule34VideoVideos.length > videosPerPage" class="pagination-controls p-3">
-								<div class="d-flex justify-content-center align-items-center flex-column gap-2">
-									<div class="btn-group">
-										<button class="btn btn-sm btn-outline-secondary" :disabled="rule34VideoVideoPage === 1" @click="rule34VideoVideoPage--; window.scrollTo({ top: 0, behavior: 'smooth' })">
-											<font-awesome-icon :icon="['fas', 'chevron-left']" />
-										</button>
-										<button class="btn btn-sm btn-outline-secondary disabled">
-											Page {{ rule34VideoVideoPage }} / {{ Math.ceil(filteredRule34VideoVideos.length / videosPerPage) }}
-										</button>
-										<button
-											class="btn btn-sm btn-outline-secondary"
-											:disabled="rule34VideoVideoPage >= Math.ceil(filteredRule34VideoVideos.length / videosPerPage)"
-											@click="rule34VideoVideoPage++; window.scrollTo({ top: 0, behavior: 'smooth' })"
-										>
-											<font-awesome-icon :icon="['fas', 'chevron-right']" />
-										</button>
-									</div>
-									<span class="text-muted small">
-										Showing {{ (rule34VideoVideoPage - 1) * videosPerPage + 1 }} -
-										{{ Math.min(rule34VideoVideoPage * videosPerPage, filteredRule34VideoVideos.length) }}
-										of {{ filteredRule34VideoVideos.length }} videos
-									</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Empty State -->
-						<EmptyState
-							v-else-if="!rule34VideoScraping"
-							:icon="['fas', 'cube']"
-							icon-size="4x"
-							title="No Rule34Videos Yet"
-							message="Use the sidebar controls to start scraping"
-						/>
-					</div>
-					<!-- End Main Content -->
-
-					<!-- Sidebar (Right) -->
-					<div class="scraper-sidebar" :class="{ collapsed: collapsedSections.rule34video }">
-						<button class="collapse-toggle-btn mb-3 w-100" @click="toggleCollapse('rule34video')">
-							<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-							Hide Panel
-						</button>
-
-						<!-- Auto-Update Panel -->
-						<AutoUpdatePanel scraper-type="rule34video" />
-
-						<!-- Statistics -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-2" />
-									Statistics
-								</h6>
-							</div>
-							<div class="card-body p-2">
-								<div class="sidebar-stats-grid">
-									<StatCard :value="rule34VideoStats.total_videos || 0" label="Videos" :icon="['fas', 'video']" icon-class="videos" />
-									<StatCard :value="rule34VideoStats.avg_rating || 0" label="Avg Rating" :icon="['fas', 'star']" icon-class="keywords" />
-									<StatCard :value="rule34VideoActiveJob ? 1 : 0" label="Active" :icon="['fas', 'spinner']" icon-class="active" />
-									<StatCard :value="rule34VideoActiveJob?.videosFound || 0" label="Found" :icon="['fas', 'search']" icon-class="found" />
-								</div>
-							</div>
-						</div>
-
-						<!-- Scraper Controls -->
-						<div class="card mb-3">
-							<div class="card-header">
-								<h6 class="mb-0">
-									<font-awesome-icon :icon="['fas', 'cube']" class="me-2 text-info" />
-									Scraper
-								</h6>
-							</div>
-							<div class="card-body">
-								<div class="mb-2">
-									<label class="form-label small">Sort By</label>
-									<select v-model="rule34VideoSortBy" class="form-select form-select-sm">
-										<option v-for="opt in rule34VideoSortOptions" :key="opt.value" :value="opt.value">
-											{{ opt.label }}
-										</option>
-									</select>
-								</div>
-								<div class="mb-2">
-									<label class="form-label small">Max Pages</label>
-									<input v-model.number="rule34VideoMaxPages" type="number" class="form-control form-control-sm" min="1" max="9999" placeholder="0 = unlimited" />
-								</div>
-								<button class="btn btn-primary btn-sm w-100" @click="startRule34VideoScrape" :disabled="rule34VideoScraping">
-									<font-awesome-icon :icon="['fas', rule34VideoScraping ? 'spinner' : 'search']" :spin="rule34VideoScraping" class="me-2" />
-									{{ rule34VideoScraping ? 'Scraping...' : 'Start Scrape' }}
-								</button>
-								<div class="alert alert-info mt-2 mb-0 py-1 px-2 small">
-									<font-awesome-icon :icon="['fas', 'filter']" class="me-1" />
-									Filter: Straight 3D content
-								</div>
-							</div>
-						</div>
-					</div>
-					<!-- End Sidebar -->
-				</div>
-				<!-- End scraper-layout -->
-
-				<!-- Sidebar Toggle Button (shown when collapsed) -->
-				<button
-					v-if="collapsedSections.rule34video"
-					class="sidebar-toggle"
-					@click="toggleCollapse('rule34video')"
-					title="Show Controls Panel"
-				>
-					<font-awesome-icon :icon="['fas', 'cog']" />
-				</button>
+				<Rule34VideoTab />
 			</div>
 			<!-- End Rule34Video Tab Content -->
+			<!-- Motherless Tab Content -->
+			<div v-if="activeTab === 'motherless'" class="tab-content">
+				<MotherlessTab />
+			</div>
+
+			<!-- HQPorner Tab Content -->
+			<div v-if="activeTab === 'hqporner'" class="tab-content">
+				<HQPornerTab />
+			</div>
+
+			<!-- LeakVids Tab Content -->
+			<div v-if="activeTab === 'leakvids'" class="tab-content">
+				<LeakVidsTab />
+			</div>
 
 			<!-- Videos Tab Content -->
 			<div v-if="activeTab === 'videos'" class="tab-content">
@@ -2347,13 +166,7 @@
 						</div>
 
 						<!-- Empty State -->
-						<EmptyState
-							v-else
-							:icon="['fas', 'video']"
-							icon-size="4x"
-							title="No Videos Scraped Yet"
-							message="Use the sidebar controls to scrape videos from any site"
-						/>
+						<EmptyState v-else :icon="['fas', 'video']" icon-size="4x" title="No Videos Scraped Yet" message="Use the sidebar controls to scrape videos from any site" />
 					</div>
 					<!-- End Main Content -->
 
@@ -2511,9 +324,7 @@
 											{{ customTabJobs[tab.id].status }}
 										</span>
 										<span class="small">
-											<strong>{{ customTabJobs[tab.id].pagesCompleted }}</strong> pages |
-											<strong>{{ customTabJobs[tab.id].videosFound }}</strong> found |
-											<strong>{{ customTabJobs[tab.id].videosSaved }}</strong> saved
+											<strong>{{ customTabJobs[tab.id].pagesCompleted }}</strong> pages | <strong>{{ customTabJobs[tab.id].videosFound }}</strong> found | <strong>{{ customTabJobs[tab.id].videosSaved }}</strong> saved
 										</span>
 									</div>
 								</div>
@@ -2532,115 +343,49 @@
 								</div>
 
 								<div class="video-grid">
-									<div
-										v-for="video in paginatedTabVideos(tab.id)"
-										:key="video.id"
-										class="video-card"
-										@mouseenter="startThumbnailPreview(video)"
-										@mouseleave="stopThumbnailPreview(video)"
-									>
-										<!-- Thumbnail -->
-										<div class="video-thumbnail">
-											<img
-												v-if="video.thumbnail_url"
-												:src="getCurrentThumbnail(video)"
-												:alt="video.title"
-												@error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'"
-											/>
-											<div v-else class="no-thumbnail">
-												<font-awesome-icon :icon="['fas', 'video']" size="3x" />
-											</div>
-											<span v-if="video.duration" class="duration-badge">
-												{{ formatDuration(video.duration) }}
-											</span>
-											<span v-if="getVideoResolution(video)" class="resolution-badge">
-												{{ getVideoResolution(video) }}
-											</span>
-										</div>
-
-										<!-- Video Info -->
-										<div class="video-info">
-											<h6 class="video-title" :title="video.title">{{ video.title }}</h6>
-											<div class="video-meta">
-												<span v-if="video.uploader || video.author" class="text-muted small d-block mb-1">
-													<font-awesome-icon :icon="['fas', 'user']" class="me-1" />
-													{{ video.uploader || video.author }}
-												</span>
-												<div class="d-flex flex-wrap gap-2 mt-1">
-													<span v-if="video.view_count > 0" class="text-muted small">
-														<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
-														{{ formatNumber(video.view_count) }}
-													</span>
-													<span v-if="video.rating > 0" class="text-success small">
-														<font-awesome-icon :icon="['fas', 'thumbs-up']" class="me-1" />
-														{{ video.rating }}%
-													</span>
-													<span v-if="video.like_count > 0" class="text-muted small">
-														<font-awesome-icon :icon="['fas', 'heart']" class="me-1" />
-														{{ formatNumber(video.like_count) }}
-													</span>
-													<span v-if="video.file_size > 0" class="text-muted small">
-														<font-awesome-icon :icon="['fas', 'hdd']" class="me-1" />
-														{{ formatFileSize(video.file_size) }}
-													</span>
-												</div>
-											</div>
-
-											<!-- Actions -->
-											<div class="video-actions mt-2">
-												<button @click="playScrapedVideo(video)" class="btn btn-sm btn-primary">
-													<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
-													Play
-												</button>
-												<button
-													v-if="jdAvailable && video.source_url"
-													@click="sendToJDownloader(video)"
-													class="btn btn-sm btn-warning"
-													:disabled="jdSending[video.id]"
-													title="Send to JDownloader"
-												>
-													<font-awesome-icon :icon="['fas', jdSending[video.id] ? 'spinner' : 'download']" :spin="jdSending[video.id]" />
-												</button>
-											</div>
-										</div>
-									</div>
+									<ScrapedVideoCard v-for="video in paginatedTabVideos(tab.id)" :key="video.id" :video="video">
+										<template #actions="{ video: v }">
+											<button @click="playScrapedVideo(v, tab)" class="btn btn-sm btn-primary">
+												<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
+												Play
+											</button>
+											<button v-if="jdAvailable && (v.source_url || v.embed_url)" @click="sendToJDownloader(v, tab)" class="btn btn-sm btn-warning" :disabled="jdSending[v.id]" title="Send to JDownloader">
+												<font-awesome-icon :icon="['fas', jdSending[v.id] ? 'spinner' : 'cloud-download-alt']" :spin="jdSending[v.id]" />
+											</button>
+										</template>
+									</ScrapedVideoCard>
 								</div>
 
 								<!-- Pagination -->
-								<div v-if="filteredTabVideos(tab.id).length > videosPerPage" class="pagination-controls mt-3">
-									<div class="d-flex justify-content-center align-items-center flex-column gap-2">
-										<div class="btn-group">
-											<button class="btn btn-sm btn-outline-secondary" :disabled="(videoPage[tab.id] || 1) === 1" @click="changeVideoPage(tab.id, -1)">
-												<font-awesome-icon :icon="['fas', 'chevron-left']" />
-											</button>
-											<button class="btn btn-sm btn-outline-secondary disabled">
-												Page {{ videoPage[tab.id] || 1 }} / {{ Math.ceil(filteredTabVideos(tab.id).length / videosPerPage) }}
-											</button>
-											<button
-												class="btn btn-sm btn-outline-secondary"
-												:disabled="(videoPage[tab.id] || 1) >= Math.ceil(filteredTabVideos(tab.id).length / videosPerPage)"
-												@click="changeVideoPage(tab.id, 1)"
-											>
-												<font-awesome-icon :icon="['fas', 'chevron-right']" />
-											</button>
-										</div>
-										<span class="text-muted small">
-											Showing {{ ((videoPage[tab.id] || 1) - 1) * videosPerPage + 1 }} -
-											{{ Math.min((videoPage[tab.id] || 1) * videosPerPage, filteredTabVideos(tab.id).length) }}
-											of {{ filteredTabVideos(tab.id).length }} videos
-										</span>
+								<div class="d-flex align-items-center justify-content-between mt-3">
+									<!-- Left: count + per-page selector -->
+									<div class="d-flex align-items-center gap-2">
+										<span class="text-muted small"> Showing {{ ((videoPage[tab.id] || 1) - 1) * videosPerPage + 1 }}–{{ Math.min((videoPage[tab.id] || 1) * videosPerPage, filteredTabVideos(tab.id).length) }} of {{ filteredTabVideos(tab.id).length }} </span>
+										<select class="form-select form-select-sm" style="width: auto" @change="changeVideosPerPage($event.target.value)">
+											<option :value="12" :selected="videosPerPage === 12">12/page</option>
+											<option :value="24" :selected="videosPerPage === 24">24/page</option>
+											<option :value="48" :selected="videosPerPage === 48">48/page</option>
+											<option :value="96" :selected="videosPerPage === 96">96/page</option>
+										</select>
 									</div>
+									<!-- Center: nav buttons -->
+									<div v-if="filteredTabVideos(tab.id).length > videosPerPage" class="btn-group">
+										<button class="btn btn-sm btn-outline-secondary" :disabled="(videoPage[tab.id] || 1) === 1" @click="changeVideoPage(tab.id, -1)">
+											<font-awesome-icon :icon="['fas', 'chevron-left']" />
+										</button>
+										<button class="btn btn-sm btn-outline-secondary disabled">Page {{ videoPage[tab.id] || 1 }} / {{ Math.ceil(filteredTabVideos(tab.id).length / videosPerPage) }}</button>
+										<button class="btn btn-sm btn-outline-secondary" :disabled="(videoPage[tab.id] || 1) >= Math.ceil(filteredTabVideos(tab.id).length / videosPerPage)" @click="changeVideoPage(tab.id, 1)">
+											<font-awesome-icon :icon="['fas', 'chevron-right']" />
+										</button>
+									</div>
+									<div v-else></div>
+									<!-- Right spacer -->
+									<div style="min-width: 120px"></div>
 								</div>
 							</div>
 
 							<!-- Empty State -->
-							<EmptyState
-								v-else
-								:icon="['fas', 'video']"
-								icon-size="4x"
-								:title="`No ${tab.name} Videos Yet`"
-								message="Use the sidebar to configure and start scraping"
-							/>
+							<EmptyState v-else :icon="['fas', 'video']" icon-size="4x" :title="`No ${tab.name} Videos Yet`" message="Use the sidebar to configure and start scraping" />
 						</div>
 						<!-- End Main Content -->
 
@@ -2690,7 +435,7 @@
 											<font-awesome-icon :icon="['fas', customTabJobs[tab.id] ? 'spinner' : 'play']" :spin="customTabJobs[tab.id]" class="me-2" />
 											{{ customTabJobs[tab.id] ? 'Scraping...' : 'Start Scrape' }}
 										</button>
-										<button class="btn btn-outline-secondary btn-sm w-100" @click="openEditTabModal(tab)">
+										<button class="btn btn-outline-secondary btn-sm w-100" @click="editScraperTab(tab)">
 											<font-awesome-icon :icon="['fas', 'edit']" class="me-2" />
 											Edit Tab
 										</button>
@@ -2703,12 +448,7 @@
 					<!-- End scraper-layout -->
 
 					<!-- Sidebar Toggle Button (shown when collapsed) -->
-					<button
-						v-if="collapsedSections[`tab-${tab.id}`]"
-						class="sidebar-toggle"
-						@click="toggleCollapse(`tab-${tab.id}`)"
-						title="Show Controls Panel"
-					>
+					<button v-if="collapsedSections[`tab-${tab.id}`]" class="sidebar-toggle" @click="toggleCollapse(`tab-${tab.id}`)" title="Show Controls Panel">
 						<font-awesome-icon :icon="['fas', 'cog']" />
 					</button>
 				</div>
@@ -2798,41 +538,34 @@
 			</div>
 
 			<!-- Delete Selected Confirmation Modal -->
-			<DeleteConfirmationModal
-				:visible="showDeleteConfirmModal"
-				title="Confirm Deletion"
-				message="Are you sure you want to delete"
-				:itemName="`${selectedCount} selected thread(s)`"
-				warningMessage="This action cannot be undone. All posts and download links associated with these threads will also be deleted."
-				:confirmText="`Delete ${selectedCount} Thread(s)`"
-				:icon="['fas', 'trash']"
-				@confirm="confirmDeleteSelected"
-				@cancel="showDeleteConfirmModal = false"
-			/>
+			<DeleteConfirmationModal :visible="showDeleteConfirmModal" title="Confirm Deletion" message="Are you sure you want to delete" :itemName="`${selectedCount} selected thread(s)`" warningMessage="This action cannot be undone. All posts and download links associated with these threads will also be deleted." :confirmText="`Delete ${selectedCount} Thread(s)`" :icon="['fas', 'trash']" @confirm="confirmDeleteSelected" @cancel="showDeleteConfirmModal = false" />
 
 			<!-- Delete All Confirmation Modal -->
-			<DeleteConfirmationModal
-				:visible="showDeleteAllConfirmModal"
-				title="Confirm Delete All"
-				message="Are you sure you want to delete"
-				:itemName="`ALL ${totalThreads} scraped threads`"
-				warningMessage="DANGER: This will permanently delete ALL scraped threads, posts, and download links from the database. This action cannot be undone!"
-				confirmText="Yes, Delete Everything"
-				:icon="['fas', 'trash-alt']"
-				@confirm="confirmDeleteAll"
-				@cancel="showDeleteAllConfirmModal = false"
-			/>
+			<DeleteConfirmationModal :visible="showDeleteAllConfirmModal" title="Confirm Delete All" message="Are you sure you want to delete" :itemName="`ALL ${totalThreads} scraped threads`" warningMessage="DANGER: This will permanently delete ALL scraped threads, posts, and download links from the database. This action cannot be undone!" confirmText="Yes, Delete Everything" :icon="['fas', 'trash-alt']" @confirm="confirmDeleteAll" @cancel="showDeleteAllConfirmModal = false" />
 		</div>
 	</div>
+
+	<ScrapedVideoModal :video="modalVideo" :tab="modalTab" @close=";(modalVideo = null), (modalTab = null)" @downloaded="onVideoDownloaded" @unmarked="onVideoUnmarked" />
 </template>
 
 <script setup>
+/* eslint-disable no-unused-vars */
 import { ref, shallowRef, onMounted, onBeforeUnmount, computed, getCurrentInstance, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { DeleteConfirmationModal, LoadingState, EmptyState, StatCard, SearchBox } from '@/components/shared'
 import AutoUpdatePanel from '@/components/scraper/AutoUpdatePanel.vue'
+import ScrapedVideoCard from '@/components/scraper/ScrapedVideoCard.vue'
+import ScrapedVideoModal from '@/components/scraper/ScrapedVideoModal.vue'
+import SimpcityTab from '@/components/scraper/tabs/SimpcityTab.vue'
+import LuxureTVTab from '@/components/scraper/tabs/LuxureTVTab.vue'
+import PornHubTab from '@/components/scraper/tabs/PornHubTab.vue'
+import SexuriaTab from '@/components/scraper/tabs/SexuriaTab.vue'
+import Rule34VideoTab from '@/components/scraper/tabs/Rule34VideoTab.vue'
+import MotherlessTab from '@/components/scraper/tabs/MotherlessTab.vue'
+import HQPornerTab from '@/components/scraper/tabs/HQPornerTab.vue'
+import LeakVidsTab from '@/components/scraper/tabs/LeakVidsTab.vue'
 import { useFormatters } from '@/composables/useFormatters'
-import { jdownloaderAPI } from '@/services/api'
+import { jdownloaderAPI, scrapersAPI } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -2852,23 +585,38 @@ const checkJDownloaderStatus = async () => {
 	}
 }
 
-const sendToJDownloader = async (video, packageName = '') => {
+const sendToJDownloader = async (video, tab = null) => {
 	if (!video?.source_url && !video?.embed_url) {
 		toast.warning('No URL available for this video')
 		return
 	}
 
-	const url = video.source_url || video.embed_url
-	const key = video.id || url
+	const key = video.id || video.source_url
 	jdSending.value[key] = true
 
 	try {
-		const result = await jdownloaderAPI.sendLink(
-			url,
-			packageName || video.title || '',
-			video.id ? parseInt(video.id) : null,
-			false
-		)
+		let url = video.source_url || video.embed_url
+		const videoTitle = video.title || ''
+		const scraperName = tab?.name || video.source || 'Scraper'
+
+		// Try to extract direct video URL (MP4/etc) from the page
+		try {
+			const extracted = await scrapersAPI.extractVideoUrl(url)
+			if (extracted?.direct_url) {
+				url = extracted.direct_url
+			}
+		} catch {
+			// Fall back to source URL if extraction fails
+		}
+
+		const result = await jdownloaderAPI.sendLinks([
+			{
+				url,
+				packageName: videoTitle,
+				downloadPath: `/output/${scraperName}`,
+				videoId: video?.id ?? null,
+			},
+		])
 
 		if (result?.successCount > 0) {
 			toast.success('Link sent to JDownloader')
@@ -2885,7 +633,9 @@ const sendToJDownloader = async (video, packageName = '') => {
 	}
 }
 
-// State
+// Scraped video modal
+const modalVideo = ref(null)
+const modalTab = ref(null)
 const loading = ref(false)
 const stats = ref({})
 const threads = ref([])
@@ -2990,7 +740,7 @@ const videoResolutionFilter = ref({}) // { tabId: resolution }
 const videoDurationFilter = ref({}) // { tabId: durationRange }
 const videoThumbnailFilter = ref({}) // { tabId: 'yes'|'no'|'' }
 const showVideoFilters = ref({}) // { tabId: boolean }
-const videosPerPage = 24
+const videosPerPage = ref(parseInt(localStorage.getItem('scraper-page-size') || '24'))
 
 // Timeout tracking for cleanup
 const activeTimeouts = ref([])
@@ -3215,8 +965,8 @@ const filteredPornHubVideos = computed(() => {
 })
 
 const paginatedPornHubVideos = computed(() => {
-	const start = (pornHubVideoPage.value - 1) * videosPerPage
-	const end = start + videosPerPage
+	const start = (pornHubVideoPage.value - 1) * videosPerPage.value
+	const end = start + videosPerPage.value
 	return filteredPornHubVideos.value.slice(start, end)
 })
 
@@ -3253,8 +1003,8 @@ const filteredLuxureTVVideos = computed(() => {
 })
 
 const paginatedLuxureTVVideos = computed(() => {
-	const start = (luxureTVVideoPage.value - 1) * videosPerPage
-	const end = start + videosPerPage
+	const start = (luxureTVVideoPage.value - 1) * videosPerPage.value
+	const end = start + videosPerPage.value
 	return filteredLuxureTVVideos.value.slice(start, end)
 })
 
@@ -3374,8 +1124,8 @@ const filteredRule34VideoVideos = computed(() => {
 })
 
 const paginatedRule34VideoVideos = computed(() => {
-	const start = (rule34VideoVideoPage.value - 1) * videosPerPage
-	const end = start + videosPerPage
+	const start = (rule34VideoVideoPage.value - 1) * videosPerPage.value
+	const end = start + videosPerPage.value
 	return filteredRule34VideoVideos.value.slice(start, end)
 })
 
@@ -3491,13 +1241,7 @@ const openLoginHelper = async () => {
 		if (data.success) {
 			toast.success('Login page opened in Firefox')
 			// Show instructions after successful browser open
-			loginHelperInstructions.value = [
-				'Log in to your Simpcity account',
-				'Press F12 to open Developer Tools',
-				'Go to Application tab → Cookies → simpcity.is',
-				'Select all cookies (Ctrl+A) and copy their values',
-				'Paste them in the text area below',
-			]
+			loginHelperInstructions.value = ['Log in to your Simpcity account', 'Press F12 to open Developer Tools', 'Go to Application tab → Cookies → simpcity.is', 'Select all cookies (Ctrl+A) and copy their values', 'Paste them in the text area below']
 		} else {
 			toast.error(data.message || 'Failed to open browser')
 		}
@@ -3524,9 +1268,7 @@ const loadStats = async () => {
 const loadThreads = async () => {
 	loading.value = true
 	try {
-		let url = searchQuery.value
-			? `http://localhost:8080/api/v1/scraper/threads/search?q=${encodeURIComponent(searchQuery.value)}&`
-			: `http://localhost:8080/api/v1/scraper/threads?`
+		let url = searchQuery.value ? `http://localhost:8080/api/v1/scraper/threads/search?q=${encodeURIComponent(searchQuery.value)}&` : `http://localhost:8080/api/v1/scraper/threads?`
 
 		// Add pagination
 		url += `page=${currentPage.value}&limit=${limit}`
@@ -4382,15 +2124,7 @@ const loadSexuriaSearchOptions = async () => {
 const startSexuriaAdvancedSearch = async () => {
 	// Validate that at least one search criterion is provided
 	const search = sexuriaAdvancedSearch.value
-	const hasSearchCriteria =
-		search.categories.length > 0 ||
-		search.title.trim() ||
-		search.description.trim() ||
-		search.pornstars.trim() ||
-		search.production.trim() ||
-		search.tags.trim() ||
-		search.resolutions.length > 0 ||
-		search.fileHosts.length > 0
+	const hasSearchCriteria = search.categories.length > 0 || search.title.trim() || search.description.trim() || search.pornstars.trim() || search.production.trim() || search.tags.trim() || search.resolutions.length > 0 || search.fileHosts.length > 0
 
 	if (!hasSearchCriteria) {
 		toast.warning('Please provide at least one search criterion')
@@ -5524,6 +3258,11 @@ const loadScraperTabs = async () => {
 				if (!videoSearch.value[tab.id]) {
 					videoSearch.value[tab.id] = ''
 				}
+				// Start collapsed by default (same as built-in scrapers)
+				const key = `tab-${tab.id}`
+				if (collapsedSections.value[key] === undefined) {
+					collapsedSections.value[key] = true
+				}
 			})
 		}
 	} catch (error) {
@@ -5817,9 +3556,7 @@ const filteredTabVideos = (tabId) => {
 
 	// Filter by search
 	if (searchTerm) {
-		videos = videos.filter(
-			(v) => v.title.toLowerCase().includes(searchTerm) || (v.uploader || '').toLowerCase().includes(searchTerm) || (v.author || '').toLowerCase().includes(searchTerm)
-		)
+		videos = videos.filter((v) => v.title.toLowerCase().includes(searchTerm) || (v.uploader || '').toLowerCase().includes(searchTerm) || (v.author || '').toLowerCase().includes(searchTerm))
 	}
 
 	// Filter by status
@@ -5899,15 +3636,15 @@ const filteredTabVideos = (tabId) => {
 const paginatedTabVideos = (tabId) => {
 	const filtered = filteredTabVideos(tabId)
 	const page = videoPage.value[tabId] || 1
-	const start = (page - 1) * videosPerPage
-	const end = start + videosPerPage
+	const start = (page - 1) * videosPerPage.value
+	const end = start + videosPerPage.value
 	return filtered.slice(start, end)
 }
 
 const changeVideoPage = (tabId, direction) => {
 	const currentPage = videoPage.value[tabId] || 1
 	const newPage = currentPage + direction
-	const maxPage = Math.ceil(filteredTabVideos(tabId).length / videosPerPage)
+	const maxPage = Math.ceil(filteredTabVideos(tabId).length / videosPerPage.value)
 
 	if (newPage >= 1 && newPage <= maxPage) {
 		videoPage.value[tabId] = newPage
@@ -5915,17 +3652,44 @@ const changeVideoPage = (tabId, direction) => {
 	}
 }
 
-const playScrapedVideo = (video) => {
-	const videoUrl = video.url || video.source_url
-	// Sites that block iframe embedding completely - open in new tab
-	// Note: PornHub now supports embedding via /embed/{viewkey}
-	if (videoUrl && (videoUrl.includes('xvideos.com') || videoUrl.includes('xhamster.com'))) {
-		window.open(videoUrl, '_blank')
-		return
+const changeVideosPerPage = (newSize) => {
+	videosPerPage.value = parseInt(newSize) || 24
+	localStorage.setItem('scraper-page-size', String(videosPerPage.value))
+	videoPage.value = {}
+}
+
+const playScrapedVideo = (video, tab = null) => {
+	modalVideo.value = video
+	modalTab.value = tab
+}
+
+const onVideoDownloaded = (videoId) => {
+	// Mark the video as downloaded in all local lists so the badge appears immediately
+	const now = new Date().toISOString()
+	const markInList = (list) => {
+		if (!list) return
+		const v = list.find((v) => v.id === videoId)
+		if (v) v.downloaded_at = now
 	}
-	// Navigate to video player page with scraped video ID
-	// PornHub and LuxureTV videos will use their embed URLs in the player
-	router.push(`/watch/scraped/${video.id}`)
+	markInList(customTabVideos.value)
+	markInList(pornHubVideos.value)
+	markInList(luxureTVVideos.value)
+	markInList(rule34VideoVideos.value)
+	markInList(sexuriaItems.value)
+}
+
+const onVideoUnmarked = (videoId) => {
+	// Clear downloaded_at from all local lists
+	const clearInList = (list) => {
+		if (!list) return
+		const v = list.find((v) => v.id === videoId)
+		if (v) v.downloaded_at = null
+	}
+	clearInList(customTabVideos.value)
+	clearInList(pornHubVideos.value)
+	clearInList(luxureTVVideos.value)
+	clearInList(rule34VideoVideos.value)
+	clearInList(sexuriaItems.value)
 }
 
 const formatDuration = (seconds) => {
@@ -5948,13 +3712,6 @@ const formatNumber = (num) => {
 		return (num / 1000).toFixed(1) + 'K'
 	}
 	return num.toString()
-}
-
-const formatFileSize = (bytes) => {
-	if (!bytes || bytes === 0) return ''
-	const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
-	const i = Math.floor(Math.log(bytes) / Math.log(1024))
-	return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i]
 }
 
 const getVideoResolution = (video) => {
@@ -6104,4 +3861,4 @@ onBeforeUnmount(() => {
 })
 </script>
 
-<style scoped src="@/styles/pages/scraper_page.css"></style>
+<style src="@/styles/pages/scraper_page.css"></style>

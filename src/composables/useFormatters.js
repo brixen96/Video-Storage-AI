@@ -115,6 +115,32 @@ export function useFormatters() {
 		return `${percentage.toFixed(decimals)}%`
 	}
 
+	/**
+	 * Format a number with compact K/M suffixes (for view counts, stats, etc.)
+	 * @param {number} num
+	 * @returns {string} e.g. 1234 → "1.2K", 1500000 → "1.5M"
+	 */
+	const formatCompactNumber = (num) => {
+		if (num === null || num === undefined || num === 0) return '0'
+		if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
+		if (num >= 1_000)     return (num / 1_000).toFixed(1) + 'K'
+		return num.toString()
+	}
+
+	/**
+	 * Return a human-readable "time ago" string for a date value.
+	 * @param {string|Date} dateStr
+	 * @returns {string|null} e.g. "3h ago", "just now", or null if no date
+	 */
+	const timeAgo = (dateStr) => {
+		if (!dateStr) return null
+		const diff = Math.floor((Date.now() - new Date(dateStr)) / 1000)
+		if (diff < 60)    return 'just now'
+		if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
+		if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+		return `${Math.floor(diff / 86400)}d ago`
+	}
+
 	return {
 		formatDuration,
 		formatFileSize,
@@ -122,6 +148,8 @@ export function useFormatters() {
 		formatDateTime,
 		formatTotalDuration,
 		formatNumber,
+		formatCompactNumber,
 		formatPercentage,
+		timeAgo,
 	}
 }

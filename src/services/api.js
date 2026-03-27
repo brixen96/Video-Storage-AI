@@ -206,8 +206,10 @@ export const aiAPI = {
 	// Thumbnail quality
 	analyzeThumbnailQuality: (data) => api.post('/ai/analyze-thumbnail-quality', data),
 
-	// Chat (placeholder)
+	// Chat (uses LLM with rule-based fallback)
 	chat: (data) => api.post('/ai/chat', data),
+	getChatHistory: (limit = 100) => api.get('/ai/chat/history', { params: { limit } }),
+	clearChatHistory: () => api.delete('/ai/chat/history'),
 
 	// Memory management
 	saveMemory: (data) => api.post('/ai/memories', data),
@@ -215,6 +217,14 @@ export const aiAPI = {
 	searchMemories: (query) => api.get('/ai/memories/search', { params: { query } }),
 	deleteMemory: (id) => api.delete(`/ai/memories/${id}`),
 	updateMemory: (id, data) => api.put(`/ai/memories/${id}`, data),
+
+	// Companion status
+	getStatus: () => api.get('/ai/status'),
+
+	// LM Studio config
+	getConfig: () => api.get('/ai/config'),
+	updateConfig: (data) => api.put('/ai/config', data),
+	testConnection: () => api.post('/ai/test-connection'),
 }
 
 // LM Studio AI Companion API
@@ -258,10 +268,15 @@ export const aiCompanionAPI = {
 // Dashboard API
 export const dashboardAPI = {
 	getStats: () => api.get('/dashboard/stats'),
-	getFeed: (limit = 20, offset = 0) => api.get('/dashboard/feed', { params: { limit, offset } }),
+	getFeed: (limit = 20, offset = 0, scraperType = '') => {
+		const params = { limit, offset }
+		if (scraperType) params.scraper_type = scraperType
+		return api.get('/dashboard/feed', { params })
+	},
 	getScrapers: () => api.get('/dashboard/scrapers'),
 	getRunningTasks: () => api.get('/dashboard/running-tasks'),
 	executeQuickAction: (action, data) => api.post(`/dashboard/quick-action/${action}`, data),
+	clearFeed: () => api.delete('/dashboard/feed'),
 }
 
 // Auto-Update API
@@ -277,7 +292,29 @@ export const autoUpdateAPI = {
 // Scraper thread watch API
 export const scraperThreadsAPI = {
 	toggleWatch: (id) => api.post(`/scraper/threads/${id}/watch`),
+	getWatched: () => api.get('/scraper/threads/watched'),
+	getRecentPosts: (threadId, limit = 20) => api.get(`/scraper/threads/${threadId}/recent-posts`, { params: { limit } }),
+	markPostAsRead: (postId) => api.post(`/scraper/posts/${postId}/mark-read`),
 }
+
+// Open a URL in Firefox via the backend
+export const openInFirefox = (url) => api.post('/system/open-url', { url })
+
+// Detect pagination pattern and site type from two page URLs
+export const detectPagination = (page1Url, page2Url) =>
+	api.post('/scraper/detect-pagination', { page1_url: page1Url, page2_url: page2Url })
+
+// Test-scrape a listing page URL without saving (returns videos_found count)
+export const testScrapePage = (url) =>
+	api.get('/scraper/video/test', { params: { url } })
+
+// Delete all scraped videos from a specific source hostname (e.g. "hqporner.com")
+export const deleteVideosBySource = (source) =>
+	api.delete(`/scraper/videos/source/${encodeURIComponent(source)}`)
+
+// Bulk delete scraped videos by ID array
+export const bulkDeleteVideos = (ids) =>
+	api.post('/scraper/videos/bulk-delete', { ids })
 
 // Sexuria Links API
 export const sexuriaLinksAPI = {
@@ -360,9 +397,131 @@ export const jdownloaderAPI = {
 		api.post('/jdownloader/rename', { packageId, newName, isDownload }),
 }
 
+// Scraper API — covers all endpoints used by ScraperPage.vue
+export const scrapersAPI = {
+	// ── General ──────────────────────────────────────────────────────────────
+	getStats:           ()       => api.get('/scraper/stats'),
+	getSession:         ()       => api.get('/scraper/session'),
+	setSession:         (data)   => api.post('/scraper/session', data),
+	openLoginHelper:    (site)   => api.post('/system/open-login-helper', { site }),
+	openURL:            (url)    => api.post('/system/open-url', { url }),
+	scrapeForumAll:     (data)   => api.post('/scraper/forum/scrape-all', data),
+	autoLinkPerformers: ()       => api.post('/scraper/performers/auto-link'),
+	checkLinkStatuses:  ()       => api.post('/scraper/links/check-status'),
+
+	// ── Scraped videos (generic) ───────────────────────────────────────────
+	getVideos:       (params)   => api.get('/scraper/videos', { params }),
+	clearAllVideos:  ()         => api.delete('/scraper/videos'),
+	clearSiteVideos: (site)     => api.delete(`/scraper/videos/site/${site}`),
+	bulkDelete:      (ids)      => api.post('/scraper/videos/bulk-delete', { ids }),
+	scrapeVideoUrl:   (data)     => api.post('/scraper/video', data),
+	testScrapePage:   (url)      => api.get('/scraper/video/test', { params: { url } }),
+	extractVideoUrl:       (url) => api.get('/scraper/extract-video-url', { params: { url } }),
+	markVideoDownloaded:   (id)  => api.post(`/scraper/videos/${id}/mark-downloaded`),
+	unmarkVideoDownloaded: (id)  => api.delete(`/scraper/videos/${id}/mark-downloaded`),
+
+	// ── Threads ───────────────────────────────────────────────────────────
+	getThreads:         (params) => api.get('/scraper/threads', { params }),
+	startScrape:        (data)   => api.post('/scraper/threads/scrape', data),
+	deleteThreads:      (data)   => api.delete('/scraper/threads', { data }),
+	deleteAllThreads:   ()       => api.delete('/scraper/threads/all'),
+	rescrapeThread:     (id)     => api.post(`/scraper/threads/${id}/rescrape`),
+	watchThread:        (id)     => api.post(`/scraper/threads/${id}/watch`),
+	verifyThreadLinks:  (id)     => api.post(`/scraper/threads/${id}/verify-links`),
+	getThreadLinkStats: (id)     => api.get(`/scraper/threads/${id}/link-stats`),
+
+	// ── Tabs & Jobs ───────────────────────────────────────────────────────
+	getTabs:    ()       => api.get('/scraper/tabs'),
+	deleteTab:  (id)     => api.delete(`/scraper/tabs/${id}`),
+	startJob:   (data)   => api.post('/scraper/jobs/start', data),
+	getJobs:    (tabId)  => api.get('/scraper/jobs', { params: { tabId } }),
+	getJob:     (id)     => api.get(`/scraper/jobs/${id}`),
+	cancelJob:  (id)     => api.post(`/scraper/jobs/${id}/cancel`),
+
+	// ── PornHub ───────────────────────────────────────────────────────────
+	pornhub: {
+		getStats:    ()       => api.get('/scraper/pornhub/stats'),
+		getKeywords: ()       => api.get('/scraper/pornhub/keywords'),
+		getVideos:   (params) => api.get('/scraper/pornhub/videos', { params }),
+		scrape:      (data)   => api.post('/scraper/pornhub/scrape', data),
+		clearVideos: ()       => api.delete('/scraper/videos/site/pornhub'),
+	},
+
+	// ── LuxureTV ──────────────────────────────────────────────────────────
+	luxuretv: {
+		getStats:      ()       => api.get('/scraper/luxuretv/stats'),
+		getCategories: ()       => api.get('/scraper/luxuretv/categories'),
+		getVideos:     (params) => api.get('/scraper/luxuretv/videos', { params }),
+		getPerformers: ()       => api.get('/scraper/luxuretv/performers'),
+		getTags:       ()       => api.get('/scraper/luxuretv/tags'),
+		scrape:        (data)   => api.post('/scraper/luxuretv/scrape', data),
+		fetchEmbeds:   ()       => api.post('/scraper/luxuretv/fetch-embeds'),
+		clearVideos:   ()       => api.delete('/scraper/videos/site/luxuretv'),
+	},
+
+	// ── Sexuria ───────────────────────────────────────────────────────────
+	sexuria: {
+		getStats:         ()         => api.get('/scraper/sexuria/stats'),
+		getCategories:    ()         => api.get('/scraper/sexuria/categories'),
+		getItems:         (params)   => api.get('/scraper/sexuria/items', { params }),
+		getSearchOptions: ()         => api.get('/scraper/sexuria/search-options'),
+		scrape:           (data)     => api.post('/scraper/sexuria/scrape', data),
+		advancedSearch:   (data)     => api.post('/scraper/sexuria/advanced-search', data),
+		getItemDetails:   (data)     => api.post('/scraper/sexuria/item-details', data),
+		extractItemLinks: (id, url)  => api.post(`/scraper/sexuria/items/${id}/extract-links`, { url }),
+		getItemLinks:     (id)       => api.get(`/scraper/sexuria/items/${id}/links`),
+		verifyItemLinks:  (id)       => api.post(`/scraper/sexuria/items/${id}/verify-links`),
+		clearItems:       ()         => api.delete('/scraper/videos/site/sexuria'),
+	},
+
+	// ── Rule34Video ───────────────────────────────────────────────────────
+	rule34video: {
+		getStats:            ()        => api.get('/scraper/rule34video/stats'),
+		getVideos:           (params)  => api.get('/scraper/rule34video/videos', { params }),
+		scrape:              (data)    => api.post('/scraper/rule34video/scrape', data),
+		clearVideos:         ()        => api.delete('/scraper/videos/site/rule34video'),
+		getFilterOptions:    ()        => api.get('/scraper/rule34video/filter-options'),
+		getCategories:       ()        => api.get('/scraper/rule34video/categories'),
+		getLocalCategories:  ()        => api.get('/scraper/rule34video/local-categories'),
+		getModels:           ()        => api.get('/scraper/rule34video/models'),
+		getVideoDetails:     (url)     => api.get('/scraper/rule34video/video-details', { params: { url } }),
+		getDownloadURL:      (url)     => api.get('/scraper/rule34video/download-url', { params: { url } }),
+	},
+
+	// ── Motherless ────────────────────────────────────────────────────────
+	motherless: {
+		getStats:    ()       => api.get('/scraper/motherless/stats'),
+		getVideos:   (params) => api.get('/scraper/motherless/videos', { params }),
+		scrape:      (data)   => api.post('/scraper/motherless/scrape', data),
+		clearVideos: ()       => api.delete('/scraper/videos/site/motherless'),
+	},
+
+	// ── LeakVids ──────────────────────────────────────────────────────────
+	leakvids: {
+		getStats:    ()       => api.get('/scraper/leakvids/stats'),
+		getVideos:   (params) => api.get('/scraper/leakvids/videos', { params }),
+		scrape:      (data)   => api.post('/scraper/leakvids/scrape', data),
+		clearVideos: ()       => api.delete('/scraper/videos/site/leakvids'),
+	},
+
+	// ── HQPorner ──────────────────────────────────────────────────────────
+	hqporner: {
+		getStats:      ()       => api.get('/scraper/hqporner/stats'),
+		getPerformers: ()       => api.get('/scraper/hqporner/performers'),
+		getTags:       ()       => api.get('/scraper/hqporner/tags'),
+		getVideos:     (params) => api.get('/scraper/hqporner/videos', { params }),
+		scrape:        (data)   => api.post('/scraper/hqporner/scrape', data),
+		clearVideos:   ()       => api.delete('/scraper/videos/site/hqporner'),
+	},
+}
+
 // Asset URL helper
 export const getAssetURL = (path) => {
 	if (!path) return ''
+	// Pass through external URLs as-is
+	if (path.startsWith('http://') || path.startsWith('https://')) {
+		return path
+	}
 	// Handle absolute paths on Windows
 	if (path.includes(':\\')) {
 		// Convert Windows path to web path
@@ -376,6 +535,17 @@ export const getAssetURL = (path) => {
 		return `http://localhost:8080${path}`
 	}
 	return `http://localhost:8080/assets/${path}`
+}
+
+// Proxy a CDN image through the backend so the correct Referer header is sent
+// (needed for hotlink-protected CDNs like HQPorner, Motherless, LeakVids, etc.)
+export const getProxiedImageURL = (url) => {
+	if (!url) return ''
+	return `http://localhost:8080/api/v1/scraper/proxy-image?url=${encodeURIComponent(url)}`
+}
+
+export const siteHealthAPI = {
+	check: (url) => api.get('/sites/status', { params: { url } }),
 }
 
 export default api

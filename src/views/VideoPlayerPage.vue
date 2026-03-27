@@ -6,9 +6,26 @@
 				<div class="col-lg-9">
 					<!-- Video Player -->
 					<div class="player-container">
-						<!-- Scraped Video Embed -->
+						<!-- Scraped Video: native player when direct URL extracted (e.g. FapZoo, generic CDN sites) -->
+						<video
+							v-if="video && isScrapedVideo && directVideoUrl"
+							class="main-video-player"
+							controls
+							autoplay
+						>
+							<source :src="directVideoUrl" type="video/mp4" />
+							Your browser does not support the video tag.
+						</video>
+
+						<!-- Scraped Video: extracting video URL spinner -->
+						<div v-else-if="video && isScrapedVideo && extractingVideoUrl" class="loading-overlay">
+							<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" />
+							<p>Extracting video URL...</p>
+						</div>
+
+						<!-- Scraped Video: embed iframe (PornHub, Rule34Video, or fallback) -->
 						<iframe
-							v-if="video && isScrapedVideo"
+							v-else-if="video && isScrapedVideo"
 							:src="embedUrl"
 							frameborder="0"
 							border="0"
@@ -47,6 +64,31 @@
 							<p>Loading video...</p>
 						</div>
 					</div>
+
+					<!-- Auto-play next countdown overlay -->
+					<Transition name="autoplay-fade">
+						<div v-if="autoPlayCountdown > 0 && relatedVideos.length > 0" class="autoplay-overlay">
+							<div class="autoplay-card">
+								<div class="autoplay-label">Playing next in</div>
+								<div class="autoplay-countdown">{{ autoPlayCountdown }}</div>
+								<div class="autoplay-next-title">{{ relatedVideos[0].title }}</div>
+								<div class="autoplay-actions">
+									<button class="btn btn-sm btn-primary" @click="goToVideo(relatedVideos[0].id)">
+										<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
+										Play Now
+									</button>
+									<button class="btn btn-sm btn-outline-secondary" @click="cancelAutoPlay">Cancel</button>
+								</div>
+							</div>
+						</div>
+					</Transition>
+
+					<!-- Keyboard shortcut hint -->
+					<Transition name="hint-fade">
+						<div v-if="showKeyboardHint && !isScrapedVideo" class="keyboard-hint">
+							<span>Space/K pause · J/← -10s · L/→ +10s · M mute · F fullscreen</span>
+						</div>
+					</Transition>
 
 					<!-- Video Info -->
 					<div v-if="video" class="video-info-section">
@@ -110,10 +152,20 @@
 								<font-awesome-icon :icon="['fas', video.in_edit_list ? 'check' : 'list-check']" />
 								{{ video.in_edit_list ? 'In Edit List' : 'Add to Edit List' }}
 							</button>
-							<button v-if="video.rating" class="btn btn-outline-warning">
-								<font-awesome-icon :icon="['fas', 'star']" />
-								{{ video.rating }}/5
-							</button>
+							<!-- Star rating -->
+							<div class="star-rating" title="Rate this video">
+								<font-awesome-icon
+									v-for="star in 5"
+									:key="star"
+									:icon="[star <= (hoverRating || video.rating || 0) ? 'fas' : 'far', 'star']"
+									class="star-icon"
+									:class="{ filled: star <= (hoverRating || video.rating || 0), hovered: hoverRating > 0 && star <= hoverRating }"
+									@mouseenter="hoverRating = star"
+									@mouseleave="hoverRating = 0"
+									@click.stop="setRating(star)"
+								/>
+								<span v-if="video.rating" class="star-label">{{ video.rating }}/5</span>
+							</div>
 						</div>
 
 						<!-- Scraped Video Actions -->
@@ -131,6 +183,15 @@
 							>
 								<font-awesome-icon :icon="['fas', downloadLoading ? 'spinner' : 'download']" :spin="downloadLoading" class="me-1" />
 								{{ downloadLoading ? 'Fetching...' : 'Download (Best Quality)' }}
+							</button>
+							<!-- Download button when a direct video URL was extracted -->
+							<button
+								v-if="directVideoUrl"
+								class="btn btn-outline-success"
+								@click="downloadDirectVideo"
+							>
+								<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
+								Download
 							</button>
 						</div>
 
@@ -194,8 +255,8 @@
 									<div v-for="performer in video.performers" :key="performer.id" class="performer-chip" @click="goToPerformer(performer.id)">
 										<div class="performer-avatar">
 											<img
-												v-if="performer.metadata_obj?.image_url"
-												:src="performer.metadata_obj.image_url"
+												v-if="getPerformerThumbURL(performer)"
+												:src="getPerformerThumbURL(performer)"
 												:alt="performer.name"
 											/>
 											<div v-else class="avatar-placeholder">
@@ -258,7 +319,12 @@
 					<div class="sidebar">
 						<!-- Related Videos -->
 						<div class="related-section">
-							<h3>Related Videos</h3>
+							<h3>
+								<template v-if="video && video.performers && video.performers.length > 0">
+									More from {{ video.performers[0].name }}
+								</template>
+								<template v-else>Related Videos</template>
+							</h3>
 							<div v-if="relatedVideos.length === 0" class="text-muted text-center py-4">
 								<p>No related videos found</p>
 							</div>
@@ -304,7 +370,7 @@
 </template>
 
 <script>
-import { videosAPI } from '@/services/api'
+import { videosAPI, openInFirefox, scrapersAPI, jdownloaderAPI } from '@/services/api'
 import { getAssetURL } from '@/services/api'
 import { useFormatters } from '@/composables/useFormatters'
 
@@ -321,6 +387,13 @@ export default {
 			showMetadataModal: false,
 			showTagModal: false,
 			downloadLoading: false,
+			directVideoUrl: null,
+			extractingVideoUrl: false,
+			autoPlayCountdown: 0,
+			autoPlayTimer: null,
+			showKeyboardHint: false,
+			keyboardHintTimer: null,
+			hoverRating: 0,
 		}
 	},
 	computed: {
@@ -400,6 +473,11 @@ export default {
 		this.formatDate = formatters.formatDate
 	},
 	async mounted() {
+		window.addEventListener('keydown', this.handleKeyboard)
+		this.keyboardHintTimer = setTimeout(() => {
+			this.showKeyboardHint = true
+			setTimeout(() => { this.showKeyboardHint = false }, 3000)
+		}, 1500)
 		const videoId = this.$route.params.id
 		// Detect video type from route name
 		const videoType = this.$route.name === 'ScrapedVideoPlayer' ? 'scraped' : 'local'
@@ -431,6 +509,11 @@ export default {
 				if (this.video && this.video.id && type === 'local') {
 					await this.incrementPlayCount()
 				}
+
+				// For scraped videos, try to extract direct video URL in background
+				if (this.video && type === 'scraped') {
+					this.fetchDirectVideoUrl()
+				}
 			} catch (error) {
 				console.error('Failed to load video:', error)
 				this.$toast.error('Error', 'Failed to load video')
@@ -443,100 +526,61 @@ export default {
 			if (!this.video) return
 
 			try {
-				// Get directory path from current video
-				const currentPath = this.video.file_path
-				if (!currentPath) {
-					this.relatedVideos = []
-					return
+				// 1. Performer-based related videos (most semantically relevant)
+				if (this.video.performers && this.video.performers.length > 0) {
+					const seen = new Set([this.video.id])
+					const results = []
+
+					// Fetch from up to 2 performers in parallel
+					const performerFetches = this.video.performers.slice(0, 2).map((p) =>
+						videosAPI.getAll({ performer_id: p.id, per_page: 12 }).catch(() => null)
+					)
+					const responses = await Promise.all(performerFetches)
+
+					for (const res of responses) {
+						const videos = Array.isArray(res) ? res : res?.data
+						if (!Array.isArray(videos)) continue
+						for (const v of videos) {
+							if (!seen.has(v.id)) {
+								seen.add(v.id)
+								results.push(v)
+							}
+						}
+					}
+
+					if (results.length > 0) {
+						this.relatedVideos = results.slice(0, 12)
+						return
+					}
 				}
 
-				// Extract directory (everything before the last slash/backslash)
+				// 2. Folder-based fallback for local videos with no performer data
+				const currentPath = this.video.file_path
+				if (!currentPath) return
+
 				const separator = currentPath.includes('\\') ? '\\' : '/'
 				const directoryPath = currentPath.substring(0, currentPath.lastIndexOf(separator))
-
-				// Try to search by directory path using the search endpoint
-				// Extract the last folder name from the path for searching
 				const folderName = directoryPath.substring(directoryPath.lastIndexOf(separator) + 1)
 
-				console.log('Directory path:', directoryPath)
-				console.log('Folder name for search:', folderName)
+				if (!folderName || folderName.length <= 2) return
 
-				// Try search first if folder name is meaningful
-				let allVideos = []
-				if (folderName && folderName.length > 2) {
-					try {
-						const searchParams = {
-							query: folderName,
-							library_id: this.video.library_id,
-							per_page: 100
-						}
-						const searchResponse = await videosAPI.search(searchParams)
+				const searchResponse = await videosAPI.search({
+					query: folderName,
+					library_id: this.video.library_id,
+					per_page: 50,
+				}).catch(() => null)
 
-						if (Array.isArray(searchResponse)) {
-							allVideos = searchResponse
-						} else if (searchResponse?.data && Array.isArray(searchResponse.data)) {
-							allVideos = searchResponse.data
-						}
+				const candidates = Array.isArray(searchResponse)
+					? searchResponse
+					: searchResponse?.data ?? []
 
-						console.log('Search returned videos:', allVideos.length)
-					} catch (searchError) {
-						console.log('Search failed, falling back to pagination:', searchError)
-					}
-				}
-
-				// If search didn't work or returned nothing, fall back to pagination
-				if (allVideos.length === 0) {
-					const maxPages = 5 // Reduced from 10 for better performance
-					for (let page = 1; page <= maxPages; page++) {
-						const params = {
-							library_id: this.video.library_id,
-							per_page: 100,
-							page: page
-						}
-						const response = await videosAPI.getAll(params)
-
-						let pageVideos = []
-						if (Array.isArray(response)) {
-							pageVideos = response
-						} else if (response?.data && Array.isArray(response.data)) {
-							pageVideos = response.data
-						}
-
-						allVideos.push(...pageVideos)
-
-						if (pageVideos.length < 100) {
-							break
-						}
-
-						// Stop if we already found enough related videos
-						const relatedCount = allVideos.filter(v => {
-							if (v.id === this.video.id) return false
-							if (!v.file_path) return false
-							const vSeparator = v.file_path.includes('\\') ? '\\' : '/'
-							const videoDir = v.file_path.substring(0, v.file_path.lastIndexOf(vSeparator))
-							return videoDir === directoryPath
-						}).length
-
-						if (relatedCount >= 10) {
-							break
-						}
-					}
-					console.log('Pagination returned videos:', allVideos.length)
-				}
-
-				// Filter videos from the same directory, exclude current video
-				this.relatedVideos = allVideos
-					.filter(v => {
-						if (v.id === this.video.id) return false
-						if (!v.file_path) return false
-
-						const vSeparator = v.file_path.includes('\\') ? '\\' : '/'
-						const videoDir = v.file_path.substring(0, v.file_path.lastIndexOf(vSeparator))
-						return videoDir === directoryPath
+				this.relatedVideos = candidates
+					.filter((v) => {
+						if (v.id === this.video.id || !v.file_path) return false
+						const sep = v.file_path.includes('\\') ? '\\' : '/'
+						return v.file_path.substring(0, v.file_path.lastIndexOf(sep)) === directoryPath
 					})
-					.slice(0, 10)
-
-				console.log('Related videos found:', this.relatedVideos.length)
+					.slice(0, 12)
 			} catch (error) {
 				console.error('Failed to load related videos:', error)
 			}
@@ -546,6 +590,19 @@ export default {
 				await videosAPI.update(this.video.id, { play_count: (this.video.play_count || 0) + 1 })
 			} catch (error) {
 				console.error('Failed to increment play count:', error)
+			}
+		},
+		async setRating(star) {
+			// Toggle off if same star clicked
+			const newRating = star === this.video.rating ? 0 : star
+			try {
+				await videosAPI.update(this.video.id, { rating: newRating })
+				this.video.rating = newRating
+				this.hoverRating = 0
+				this.$toast.success('Success', newRating ? `Rated ${newRating}/5` : 'Rating cleared')
+			} catch (error) {
+				console.error('Failed to set rating:', error)
+				this.$toast.error('Error', 'Failed to update rating')
 			}
 		},
 		async toggleFavorite() {
@@ -568,6 +625,44 @@ export default {
 				this.$toast.error('Error', 'Failed to update edit list')
 			}
 		},
+		async fetchDirectVideoUrl() {
+			if (!this.video?.url || !this.isScrapedVideo) return
+			// PornHub and Rule34Video have working embed iframes — skip extraction
+			const url = this.video.url
+			if (url.includes('pornhub.com') || url.includes('rule34video.com')) return
+
+			this.extractingVideoUrl = true
+			try {
+				const response = await scrapersAPI.extractVideoUrl(url)
+				if (response?.direct_url) {
+					this.directVideoUrl = response.direct_url
+				}
+			} catch (error) {
+				console.error('Failed to extract video URL:', error)
+			} finally {
+				this.extractingVideoUrl = false
+			}
+		},
+		async downloadDirectVideo() {
+			if (!this.directVideoUrl) return
+			const title = this.video?.title || 'Scraped Video'
+			const scraperName = this.video?.source || 'Scraper'
+			try {
+				const result = await jdownloaderAPI.sendLinks([{
+					url: this.directVideoUrl,
+					packageName: title,
+					downloadPath: `/output/${scraperName}`,
+					autoStart: true,
+				}])
+				if (result?.successCount > 0) {
+					this.$toast.success('Sent to JDownloader')
+				} else {
+					this.$toast.error('Failed to send to JDownloader')
+				}
+			} catch {
+				this.$toast.error('JDownloader is not available')
+			}
+		},
 		async fetchAndDownload() {
 			if (!this.video || !this.video.url) return
 
@@ -577,8 +672,7 @@ export default {
 				const data = await response.json()
 
 				if (data.success && data.data && data.data.download_url) {
-					// Open download URL in new tab
-					window.open(data.data.download_url, '_blank')
+					openInFirefox(data.data.download_url)
 					this.$toast.success('Download started')
 				} else {
 					throw new Error(data.message || 'Failed to get download URL')
@@ -607,7 +701,46 @@ export default {
 			}
 		},
 		onEnded() {
-			console.log('Video ended')
+			if (!this.isScrapedVideo && this.relatedVideos.length > 0) {
+				this.autoPlayCountdown = 5
+				this.autoPlayTimer = setInterval(() => {
+					this.autoPlayCountdown--
+					if (this.autoPlayCountdown <= 0) {
+						const nextId = this.relatedVideos[0].id
+						this.cancelAutoPlay()
+						this.goToVideo(nextId)
+					}
+				}, 1000)
+			}
+		},
+		cancelAutoPlay() {
+			if (this.autoPlayTimer) { clearInterval(this.autoPlayTimer); this.autoPlayTimer = null }
+			this.autoPlayCountdown = 0
+		},
+		handleKeyboard(e) {
+			if (this.isScrapedVideo) return
+			const v = this.$refs.videoElement
+			if (!v) return
+			const tag = e.target?.tagName
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+			switch (e.key) {
+				case ' ': case 'k': case 'K':
+					e.preventDefault(); v.paused ? v.play() : v.pause(); break
+				case 'ArrowLeft': case 'j': case 'J':
+					e.preventDefault(); v.currentTime = Math.max(0, v.currentTime - 10); break
+				case 'ArrowRight': case 'l': case 'L':
+					e.preventDefault(); v.currentTime = Math.min(v.duration, v.currentTime + 10); break
+				case 'ArrowUp':
+					e.preventDefault(); v.volume = Math.min(1, v.volume + 0.1); break
+				case 'ArrowDown':
+					e.preventDefault(); v.volume = Math.max(0, v.volume - 0.1); break
+				case 'm': case 'M':
+					e.preventDefault(); v.muted = !v.muted; break
+				case 'f': case 'F':
+					e.preventDefault()
+					document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen()
+					break
+			}
 		},
 		onVideoError(event) {
 			console.error('Video playback error:', event)
@@ -630,6 +763,13 @@ export default {
 				return getAssetURL(video.thumbnail_path)
 			}
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
+		},
+		getPerformerThumbURL(performer) {
+			if (performer.thumbnail_path) {
+				if (performer.thumbnail_path.startsWith('http')) return performer.thumbnail_path
+				return getAssetURL(performer.thumbnail_path)
+			}
+			return performer.metadata_obj?.image_url || null
 		},
 		getFilename(path) {
 			if (!path) return ''
@@ -684,15 +824,23 @@ export default {
 			return count.toString()
 		},
 	},
+	beforeUnmount() {
+		window.removeEventListener('keydown', this.handleKeyboard)
+		this.cancelAutoPlay()
+		if (this.keyboardHintTimer) clearTimeout(this.keyboardHintTimer)
+	},
 	watch: {
 		async '$route.params.id'(newId) {
 			if (newId) {
 				// Reset video state
+				this.cancelAutoPlay()
 				this.video = null
 				this.videoError = false
 				this.duration = 0
 				this.currentTime = 0
 				this.relatedVideos = []
+				this.directVideoUrl = null
+				this.extractingVideoUrl = false
 
 				// Load new video first, then load related videos
 				const videoType = this.$route.name === 'ScrapedVideoPlayer' ? 'scraped' : 'local'

@@ -81,6 +81,15 @@ class WebSocketService {
 			case 'console_log':
 				this.notifyListeners('console_log', data)
 				break
+			case 'companion_event':
+				this.notifyListeners('companion_event', data)
+				break
+			case 'link_verification_complete':
+				this.notifyListeners('link_verification_complete', data)
+				break
+			case 'feed_update':
+				this.notifyListeners('feed_update', data)
+				break
 			default:
 				// Silently ignore unknown message types
 		}

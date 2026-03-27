@@ -239,7 +239,11 @@ func triggerAutoUpdateCheck(scraperType string, config *models.ScraperAutoUpdate
 		switch scraperType {
 		case "simpcity":
 			scraperSvc := ensureScraperService()
-			result, checkErr = scraperSvc.CheckWatchedThreadsForNewPosts(activity.ID)
+			urls := []string{}
+			if config.Config != nil && len(config.Config.URLs) > 0 {
+				urls = config.Config.URLs
+			}
+			result, checkErr = scraperSvc.CheckForNewContent(urls, config.MaxPagesToCheck, activity.ID)
 		case "pornhub":
 			pornhubSvc := ensurePornHubScraperService()
 			keywords := []string{}
@@ -264,6 +268,15 @@ func triggerAutoUpdateCheck(scraperType string, config *models.ScraperAutoUpdate
 				categories = config.Config.Categories
 			}
 			result, checkErr = sexuriaSvc.CheckForNewItems(categories, config.MaxPagesToCheck, activity.ID)
+		case "motherless":
+			motherlessSvc := ensureMotherlessScraperService()
+			result, checkErr = motherlessSvc.CheckForNewVideos(config.MaxPagesToCheck, activity.ID)
+		case "leakvids":
+			leakVidsSvc := ensureLeakVidsScraperService()
+			result, checkErr = leakVidsSvc.CheckForNewVideos(config.MaxPagesToCheck, activity.ID)
+		case "hqporner":
+			hqpornerSvc := ensureHQPornerScraperService()
+			result, checkErr = hqpornerSvc.CheckForNewVideos("", config.MaxPagesToCheck, activity.ID)
 		default:
 			checkErr = fmt.Errorf("unknown scraper type: %s", scraperType)
 		}
@@ -274,6 +287,24 @@ func triggerAutoUpdateCheck(scraperType string, config *models.ScraperAutoUpdate
 
 	if checkErr != nil {
 		activitySvc.FailTask(activity.ID, checkErr.Error())
+		// Disable so it doesn't keep retrying a failing site
+		autoUpdateSvc.ToggleEnabled(scraperType, false)
+		// Add a visible error entry to the dashboard feed
+		displayName, icon, _ := models.GetScraperDisplayInfo(scraperType)
+		if displayName == scraperType {
+			displayName = scraperType
+		}
+		dashboardSvc.AddFeedItem(&models.DashboardFeedItem{
+			ItemType:    "error",
+			Title:       displayName + ": Auto-Scraper Disabled",
+			Message:     "Scraper failed and was automatically disabled — " + checkErr.Error(),
+			Icon:        icon,
+			Color:       "danger",
+			ScraperType: scraperType,
+		})
+		if wsHub != nil {
+			wsHub.BroadcastFeedUpdate(scraperType, 0)
+		}
 		return
 	}
 
@@ -296,19 +327,29 @@ func triggerAutoUpdateCheck(scraperType string, config *models.ScraperAutoUpdate
 		if len(result.NewItems) > 0 {
 			videos := make([]map[string]interface{}, 0, len(result.NewItems))
 			for _, item := range result.NewItems {
-				videos = append(videos, map[string]interface{}{
+				v := map[string]interface{}{
 					"title":         item.Title,
 					"url":           item.URL,
 					"thumbnail_url": item.Thumbnail,
 					"duration":      item.Duration,
 					"views":         item.Views,
-				})
+					"type":          item.Type,
+				}
+				if item.ID > 0 {
+					v["id"] = item.ID
+				}
+				videos = append(videos, v)
 			}
 			details["videos"] = videos
 		}
 
 		dashboardSvc.AddNewContentFeedItem(scraperType, foundCount, details)
 		autoUpdateSvc.CreateNotification(scraperType, foundCount, result.Details)
+
+		// Broadcast feed update via WebSocket for live UI updates
+		if wsHub != nil {
+			wsHub.BroadcastFeedUpdate(scraperType, foundCount)
+		}
 	}
 
 	activitySvc.CompleteTask(int64(activity.ID), "Check completed. Found "+itoa(foundCount)+" new items.")

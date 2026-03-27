@@ -277,6 +277,49 @@
 					</div>
 				</div>
 			</div>
+
+		<!-- Website Connectivity -->
+		<div class="section">
+			<h3 class="section-title">
+				<font-awesome-icon :icon="['fas', 'globe']" />
+				Website Connectivity
+				<button class="btn btn-sm btn-outline-secondary ms-auto" @click="checkAllSites" :disabled="sitesChecking">
+					<font-awesome-icon :icon="['fas', sitesChecking ? 'spinner' : 'sync-alt']" :spin="sitesChecking" class="me-1" />
+					{{ sitesChecking ? 'Checking...' : 'Check All' }}
+				</button>
+			</h3>
+			<div class="sites-grid">
+				<div v-for="site in sites" :key="site.url" class="site-card" :class="getSiteStatusClass(site)">
+					<div class="site-card-top">
+						<div class="site-dot" :class="getSiteDotClass(site)"></div>
+						<div class="site-info">
+							<div class="site-name">{{ site.name }}</div>
+							<div class="site-url">{{ site.url }}</div>
+						</div>
+						<button class="site-refresh-btn" @click="checkSite(site)" :disabled="site.checking" title="Re-check">
+							<font-awesome-icon :icon="['fas', site.checking ? 'spinner' : 'sync-alt']" :spin="site.checking" />
+						</button>
+					</div>
+					<div class="site-card-bottom">
+						<span v-if="site.status === 'checking'" class="site-status-text checking">Checking...</span>
+						<span v-else-if="site.status === 'online'" class="site-status-text online">
+							<font-awesome-icon :icon="['fas', 'check-circle']" class="me-1" />
+							Online
+							<span v-if="site.latencyMs" class="site-latency">{{ site.latencyMs }}ms</span>
+						</span>
+						<span v-else-if="site.status === 'offline'" class="site-status-text offline">
+							<font-awesome-icon :icon="['fas', 'times-circle']" class="me-1" />
+							Offline
+						</span>
+						<span v-else class="site-status-text unknown">
+							<font-awesome-icon :icon="['fas', 'question-circle']" class="me-1" />
+							Not checked
+						</span>
+						<span v-if="site.httpStatus && site.status !== 'unknown'" class="site-http-status">HTTP {{ site.httpStatus }}</span>
+					</div>
+				</div>
+			</div>
+		</div>
 		</div>
 	</div>
 </template>
@@ -361,10 +404,71 @@ const formatTime = (date) => {
 	return date.toLocaleTimeString()
 }
 
+// ---- Website Connectivity ----
+const SCRAPER_SITES = [
+	{ name: 'Simpcity', url: 'https://simpcity.is' },
+	{ name: 'PornHub', url: 'https://www.pornhub.com' },
+	{ name: 'LuxureTV', url: 'https://www.luxuretv.com' },
+	{ name: 'Sexuria', url: 'https://sexuria.com' },
+	{ name: 'Rule34Video', url: 'https://rule34video.com' },
+	{ name: 'Motherless', url: 'https://motherless.com' },
+	{ name: 'HQPorner', url: 'https://www.hqporner.com' },
+	{ name: 'LeakVids', url: 'https://leakvids.com' },
+	{ name: 'Pixeldrain', url: 'https://pixeldrain.com' },
+	{ name: 'GoFile', url: 'https://gofile.io' },
+	{ name: 'Bunkr', url: 'https://bunkr.site' },
+	{ name: 'CyberFile', url: 'https://cyberfile.me/' },
+]
+
+const sites = ref(SCRAPER_SITES.map(s => ({ ...s, status: 'unknown', httpStatus: null, latencyMs: null, checking: false })))
+const sitesChecking = ref(false)
+
+const checkSite = async (site) => {
+	site.checking = true
+	site.status = 'checking'
+	try {
+		const res = await fetch(`http://localhost:8080/api/v1/sites/status?url=${encodeURIComponent(site.url)}`)
+		const data = await res.json()
+		if (data.success) {
+			site.status = data.data.online ? 'online' : 'offline'
+			site.httpStatus = data.data.status
+			site.latencyMs = data.data.latency_ms
+		} else {
+			site.status = 'offline'
+		}
+	} catch {
+		site.status = 'offline'
+	} finally {
+		site.checking = false
+	}
+}
+
+const checkAllSites = async () => {
+	sitesChecking.value = true
+	await Promise.all(sites.value.map(s => checkSite(s)))
+	sitesChecking.value = false
+}
+
+const getSiteStatusClass = (site) => {
+	if (site.status === 'online') return 'status-online'
+	if (site.status === 'offline') return 'status-offline'
+	if (site.status === 'checking') return 'status-checking'
+	return ''
+}
+
+const getSiteDotClass = (site) => {
+	if (site.status === 'online') return 'dot-online'
+	if (site.status === 'offline') return 'dot-offline'
+	if (site.status === 'checking') return 'dot-checking'
+	return 'dot-unknown'
+}
+
 onMounted(() => {
 	refreshHealth()
 	// Auto-refresh every 30 seconds
 	refreshInterval = setInterval(refreshHealth, 30000)
+	// Check all sites on load
+	checkAllSites()
 })
 
 onBeforeUnmount(() => {
@@ -807,5 +911,128 @@ onBeforeUnmount(() => {
 .btn-sm {
 	padding: 0.4rem 0.8rem;
 	font-size: 0.85rem;
+}
+
+/* ---- Website Connectivity ---- */
+.sites-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 1rem;
+}
+
+.site-card {
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 12px;
+	padding: 1rem;
+	transition: all 0.3s ease;
+}
+
+.site-card:hover {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+.site-card.status-online {
+	border-left: 4px solid #4caf50;
+}
+
+.site-card.status-offline {
+	border-left: 4px solid #f44336;
+}
+
+.site-card.status-checking {
+	border-left: 4px solid #ff9800;
+}
+
+.site-card-top {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-bottom: 0.75rem;
+}
+
+.site-dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.dot-online { background: #4caf50; box-shadow: 0 0 6px rgba(76, 175, 80, 0.6); }
+.dot-offline { background: #f44336; }
+.dot-checking { background: #ff9800; animation: pulse 1s infinite; }
+.dot-unknown { background: #555; }
+
+@keyframes pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.4; }
+}
+
+.site-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.site-name {
+	font-weight: 600;
+	color: #e0e0e0;
+	font-size: 0.95rem;
+}
+
+.site-url {
+	color: #888;
+	font-size: 0.75rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.site-refresh-btn {
+	background: none;
+	border: none;
+	color: #666;
+	cursor: pointer;
+	font-size: 0.85rem;
+	padding: 0.3rem;
+	border-radius: 6px;
+	transition: all 0.2s;
+	flex-shrink: 0;
+}
+.site-refresh-btn:hover:not(:disabled) { color: #e0e0e0; background: rgba(255,255,255,0.08); }
+.site-refresh-btn:disabled { cursor: not-allowed; }
+
+.site-card-bottom {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+
+.site-status-text {
+	font-size: 0.85rem;
+	display: flex;
+	align-items: center;
+}
+
+.site-status-text.online { color: #4caf50; }
+.site-status-text.offline { color: #f44336; }
+.site-status-text.checking { color: #ff9800; }
+.site-status-text.unknown { color: #888; }
+
+.site-latency {
+	margin-left: 0.5rem;
+	background: rgba(76, 175, 80, 0.15);
+	color: #81c784;
+	font-size: 0.75rem;
+	padding: 0.1rem 0.4rem;
+	border-radius: 4px;
+}
+
+.site-http-status {
+	font-size: 0.75rem;
+	color: #888;
+	background: rgba(255,255,255,0.06);
+	padding: 0.1rem 0.4rem;
+	border-radius: 4px;
 }
 </style>

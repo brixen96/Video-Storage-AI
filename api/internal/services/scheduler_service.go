@@ -12,6 +12,10 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
+// AutoUpdateHandler is a callback function that runs an auto-update check for a scraper type.
+// It receives the scraper type and config JSON, and handles the actual scraping logic.
+type AutoUpdateHandler func(scraperType string, configJSON string, maxPages int)
+
 // SchedulerService handles automated job scheduling and execution
 type SchedulerService struct {
 	db                  *sql.DB
@@ -20,6 +24,7 @@ type SchedulerService struct {
 	scraperService      *ScraperService
 	activityService     *ActivityService
 	notificationService *NotificationService
+	autoUpdateHandler   AutoUpdateHandler
 	running             bool
 	runningJobs         map[int64]*JobExecution
 	mu                  sync.RWMutex
@@ -46,6 +51,12 @@ func NewSchedulerService(db *sql.DB, scraperService *ScraperService, activitySer
 		running:             false,
 		runningJobs:         make(map[int64]*JobExecution),
 	}
+}
+
+// SetAutoUpdateHandler sets the callback function for running auto-update checks.
+// This allows the api package to inject the full implementation that has access to all scraper services.
+func (s *SchedulerService) SetAutoUpdateHandler(handler AutoUpdateHandler) {
+	s.autoUpdateHandler = handler
 }
 
 // Start starts the scheduler
@@ -155,7 +166,8 @@ func hash(s string) int64 {
 	return h
 }
 
-// runAutoUpdate runs an auto-update check for a scraper
+// runAutoUpdate runs an auto-update check for a scraper by delegating to the autoUpdateHandler.
+// The handler is set by the api package which has access to all scraper service singletons.
 func (s *SchedulerService) runAutoUpdate(configID int64, scraperType string, maxPages int, _ int, configJSON string) {
 	runningKey := fmt.Sprintf("auto_update_%s", scraperType)
 	keyHash := hash(runningKey)
@@ -174,107 +186,16 @@ func (s *SchedulerService) runAutoUpdate(configID int64, scraperType string, max
 		s.mu.Unlock()
 	}()
 
-	log.Printf("🔄 Running auto-update check for %s\n", scraperType)
+	log.Printf("🔄 Running scheduled auto-update check for %s\n", scraperType)
 
-	// Create activity record
-	activity, err := s.activityService.Create(&models.ActivityLogCreate{
-		TaskType: "auto_update_check",
-		Status:   "running",
-		Message:  fmt.Sprintf("Auto-update check for %s", scraperType),
-		Details: map[string]interface{}{
-			"scraper_type":       scraperType,
-			"max_pages_to_check": maxPages,
-		},
-	})
-
-	if err != nil {
-		log.Printf("Failed to create activity for auto-update: %v\n", err)
-		return
-	}
-
-	// Run the actual check based on scraper type
-	var foundCount int
-	var checkErr error
-
-	switch scraperType {
-	case "simpcity":
-		// Check watched threads for new posts
-		foundCount, checkErr = s.checkSimpcityForNewContent(activity.ID)
-	case "pornhub":
-		log.Printf("PornHub auto-update - checking for new videos\n")
-		foundCount = 0 // Placeholder - needs keywords from config
-	case "luxuretv":
-		log.Printf("LuxureTV auto-update - checking for new videos\n")
-		foundCount = 0 // Placeholder
-	case "sexuria":
-		log.Printf("Sexuria auto-update - checking for new items\n")
-		foundCount = 0 // Placeholder
-	case "rule34video":
-		log.Printf("Rule34Video auto-update - checking for new videos\n")
-		foundCount = 0 // Placeholder
-	default:
-		log.Printf("Unknown scraper type for auto-update: %s\n", scraperType)
-	}
-
-	// Update last_checked_at regardless of result
-	_, err = s.db.Exec(`
-		UPDATE scraper_auto_update_configs
-		SET last_checked_at = datetime('now'),
-		    last_found_count = ?,
-		    total_found_count = total_found_count + ?,
-		    check_count = check_count + 1,
-		    updated_at = datetime('now')
-		WHERE id = ?
-	`, foundCount, foundCount, configID)
-
-	if err != nil {
-		log.Printf("Failed to update auto-update config: %v\n", err)
-	}
-
-	// Update activity status
-	message := fmt.Sprintf("Auto-update check completed for %s", scraperType)
-	if checkErr != nil {
-		message = fmt.Sprintf("Auto-update check failed: %v", checkErr)
-		s.activityService.UpdateProgress(activity.ID, 100, message)
-	} else if foundCount > 0 {
-		message = fmt.Sprintf("Found %d new items from %s", foundCount, scraperType)
-		s.activityService.UpdateProgress(activity.ID, 100, message)
+	if s.autoUpdateHandler != nil {
+		// Delegate to the full implementation in the api package
+		s.autoUpdateHandler(scraperType, configJSON, maxPages)
 	} else {
-		s.activityService.UpdateProgress(activity.ID, 100, message)
+		log.Printf("⚠️ No auto-update handler set for scheduler - skipping %s\n", scraperType)
 	}
 
-	log.Printf("✅ Auto-update check completed for %s (found: %d)\n", scraperType, foundCount)
-}
-
-// checkSimpcityForNewContent checks watched Simpcity threads for new posts
-func (s *SchedulerService) checkSimpcityForNewContent(activityID int) (int, error) {
-	// Get watched threads
-	rows, err := s.db.Query(`
-		SELECT id, url, title, reply_count
-		FROM scraped_threads
-		WHERE is_watched = 1
-	`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	var totalNewPosts int
-	for rows.Next() {
-		var threadID int64
-		var url, title string
-		var replyCount int
-
-		if err := rows.Scan(&threadID, &url, &title, &replyCount); err != nil {
-			continue
-		}
-
-		// For now, just log that we checked
-		// Full implementation would scrape and compare reply counts
-		log.Printf("  Checking thread: %s (current replies: %d)\n", title, replyCount)
-	}
-
-	return totalNewPosts, nil
+	log.Printf("✅ Scheduled auto-update check completed for %s\n", scraperType)
 }
 
 // checkAndExecuteJobs checks for jobs that need to run
@@ -341,6 +262,10 @@ func (s *SchedulerService) executeJob(job *models.ScheduledJob) {
 		result = s.executeVerifyLinks(jobCtx, job)
 	case "cleanup_old_activities":
 		result = s.executeCleanupOldActivities(jobCtx, job)
+	case "cleanup_old_activity_logs":
+		result = s.executeCleanupOldActivityLogs(jobCtx, job)
+	case "cleanup_old_console_logs":
+		result = s.executeCleanupOldConsoleLogs(jobCtx, job)
 	case "cleanup_old_audit_logs":
 		result = s.executeCleanupOldAuditLogs(jobCtx, job)
 	case "database_backup":
@@ -461,6 +386,77 @@ func (s *SchedulerService) executeCleanupOldActivities(ctx context.Context, job 
 		Success:        true,
 		ItemsProcessed: int(rowsAffected),
 		Message:        fmt.Sprintf("Cleaned up %d old activity records", rowsAffected),
+	}
+}
+
+// executeCleanupOldActivityLogs cleans up old activity_logs records (completed/failed)
+func (s *SchedulerService) executeCleanupOldActivityLogs(ctx context.Context, job *models.ScheduledJob) *models.JobResult {
+	var config models.ScheduleConfig
+	if err := json.Unmarshal([]byte(job.ScheduleConfig), &config); err != nil {
+		return &models.JobResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to parse config: %v", err),
+		}
+	}
+
+	daysToKeep := 14
+	if config.TimeoutMinutes > 0 {
+		daysToKeep = config.TimeoutMinutes
+	}
+
+	result, err := s.db.Exec(`
+		DELETE FROM activity_logs
+		WHERE status IN ('completed', 'failed')
+		AND created_at < datetime('now', ?)
+	`, fmt.Sprintf("-%d days", daysToKeep))
+
+	if err != nil {
+		return &models.JobResult{
+			Success: false,
+			Message: fmt.Sprintf("Cleanup failed: %v", err),
+		}
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	return &models.JobResult{
+		Success:        true,
+		ItemsProcessed: int(rowsAffected),
+		Message:        fmt.Sprintf("Cleaned up %d old activity log records (kept %d days)", rowsAffected, daysToKeep),
+	}
+}
+
+// executeCleanupOldConsoleLogs cleans up old console_logs records
+func (s *SchedulerService) executeCleanupOldConsoleLogs(ctx context.Context, job *models.ScheduledJob) *models.JobResult {
+	var config models.ScheduleConfig
+	if err := json.Unmarshal([]byte(job.ScheduleConfig), &config); err != nil {
+		return &models.JobResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to parse config: %v", err),
+		}
+	}
+
+	daysToKeep := 7
+	if config.TimeoutMinutes > 0 {
+		daysToKeep = config.TimeoutMinutes
+	}
+
+	result, err := s.db.Exec(`
+		DELETE FROM console_logs
+		WHERE created_at < datetime('now', ?)
+	`, fmt.Sprintf("-%d days", daysToKeep))
+
+	if err != nil {
+		return &models.JobResult{
+			Success: false,
+			Message: fmt.Sprintf("Cleanup failed: %v", err),
+		}
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	return &models.JobResult{
+		Success:        true,
+		ItemsProcessed: int(rowsAffected),
+		Message:        fmt.Sprintf("Cleaned up %d old console log records (kept %d days)", rowsAffected, daysToKeep),
 	}
 }
 

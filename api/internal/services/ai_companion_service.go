@@ -1,13 +1,20 @@
 package services
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -96,6 +103,18 @@ func (s *AICompanionService) Start() error {
 	go s.monitorActivityLogs()
 	go s.MonitorConsoleLogsForErrors()
 
+	// Fire daily briefing after a short delay (gives app time to fully start)
+	go func() {
+		time.Sleep(6 * time.Second)
+		s.generateDailyBriefing()
+	}()
+
+	// Run library insights check shortly after startup
+	go func() {
+		time.Sleep(15 * time.Second)
+		s.runLibraryInsights()
+	}()
+
 	log.Println("✅ AI Companion Service started successfully")
 	return nil
 }
@@ -144,6 +163,3299 @@ func (s *AICompanionService) GetStatus() map[string]interface{} {
 		"start_time":        s.startTime,
 		"subscriber_count":  len(s.subscribers),
 	}
+}
+
+// GetFullContext gathers comprehensive app state for the LLM system prompt
+func (s *AICompanionService) GetFullContext() string {
+	var ctx strings.Builder
+
+	// Library stats
+	var videoCount, performerCount, tagCount, libraryCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM tags").Scan(&tagCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM libraries").Scan(&libraryCount)
+
+	ctx.WriteString("## Current App State\n\n")
+	var favCount, ratedCount int
+	var avgRating float64
+	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE is_favorite = 1").Scan(&favCount)
+	s.db.QueryRow("SELECT COUNT(*), COALESCE(AVG(CAST(rating AS FLOAT)), 0) FROM videos WHERE rating > 0").Scan(&ratedCount, &avgRating)
+
+	ctx.WriteString(fmt.Sprintf("### Library\n- Videos: %d\n- Performers: %d\n- Tags: %d\n- Libraries: %d\n- Favorites: %d | Rated: %d (avg %.1f/5)\n\n", videoCount, performerCount, tagCount, libraryCount, favCount, ratedCount, avgRating))
+
+	// List all libraries with names and video counts
+	libRows, libErr := s.db.Query("SELECT l.name, l.path, COUNT(v.id) FROM libraries l LEFT JOIN videos v ON l.id = v.library_id GROUP BY l.id ORDER BY COUNT(v.id) DESC")
+	if libErr == nil {
+		defer libRows.Close()
+		ctx.WriteString("### Libraries\n")
+		for libRows.Next() {
+			var name, path string
+			var cnt int
+			if libRows.Scan(&name, &path, &cnt) == nil {
+				ctx.WriteString(fmt.Sprintf("  - **%s** (%d videos) → %s\n", name, cnt, path))
+			}
+		}
+		ctx.WriteString("\n")
+	}
+
+	// Scraper state
+	var scrapedVideoCount, threadCount, postCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos").Scan(&scrapedVideoCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_threads").Scan(&threadCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts").Scan(&postCount)
+
+	// Per-source scraped counts
+	var phCount, ltCount, sxCount, r34Count int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'pornhub'").Scan(&phCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'luxuretv'").Scan(&ltCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'sexuria'").Scan(&sxCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = 'rule34video'").Scan(&r34Count)
+
+	ctx.WriteString(fmt.Sprintf("### Scrapers\n- Scraped Videos Total: %d (PornHub: %d, LuxureTV: %d, Sexuria: %d, Rule34Video: %d)\n", scrapedVideoCount, phCount, ltCount, sxCount, r34Count))
+	ctx.WriteString(fmt.Sprintf("- Forum Threads: %d, Posts: %d\n", threadCount, postCount))
+
+	// Running tasks from activity_logs
+	rows, err := s.db.Query(`
+		SELECT task_type, status, message, created_at
+		FROM activity_logs
+		WHERE status = 'running'
+		ORDER BY created_at DESC
+		LIMIT 10
+	`)
+	if err == nil {
+		defer rows.Close()
+		runningTasks := []string{}
+		for rows.Next() {
+			var taskType, status, message string
+			var createdAt time.Time
+			if rows.Scan(&taskType, &status, &message, &createdAt) == nil {
+				runningTasks = append(runningTasks, fmt.Sprintf("  - [%s] %s (started %s ago)", taskType, message, formatDuration(time.Since(createdAt))))
+			}
+		}
+		if len(runningTasks) > 0 {
+			ctx.WriteString("\n### Running Tasks\n")
+			for _, t := range runningTasks {
+				ctx.WriteString(t + "\n")
+			}
+		} else {
+			ctx.WriteString("\n### Running Tasks\nNo tasks currently running.\n")
+		}
+	}
+
+	// Recent completed activity
+	recentRows, err := s.db.Query(`
+		SELECT task_type, status, message, created_at
+		FROM activity_logs
+		WHERE status != 'running'
+		ORDER BY created_at DESC
+		LIMIT 5
+	`)
+	if err == nil {
+		defer recentRows.Close()
+		ctx.WriteString("\n### Recent Activity\n")
+		for recentRows.Next() {
+			var taskType, status, message string
+			var createdAt time.Time
+			if recentRows.Scan(&taskType, &status, &message, &createdAt) == nil {
+				ctx.WriteString(fmt.Sprintf("  - [%s] %s - %s (%s ago)\n", taskType, status, message, formatDuration(time.Since(createdAt))))
+			}
+		}
+	}
+
+	// JDownloader state
+	var jdConnType, jdConnStatus string
+	err = s.db.QueryRow("SELECT connection_type, connection_status FROM jdownloader_config LIMIT 1").Scan(&jdConnType, &jdConnStatus)
+	if err == nil {
+		ctx.WriteString(fmt.Sprintf("\n### JDownloader\n- Connection: %s (%s)\n", jdConnType, jdConnStatus))
+		var jdHistoryCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM jdownloader_history").Scan(&jdHistoryCount)
+		ctx.WriteString(fmt.Sprintf("- Links Sent: %d\n", jdHistoryCount))
+	}
+
+	// Recent errors (last hour)
+	var errorCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM console_logs WHERE level = 'error' AND created_at > datetime('now', '-1 hour')").Scan(&errorCount)
+	ctx.WriteString(fmt.Sprintf("\n### System Health\n- Errors (last hour): %d\n", errorCount))
+
+	// Companion uptime
+	s.mu.RLock()
+	uptime := time.Duration(0)
+	if s.isRunning {
+		uptime = time.Since(s.startTime)
+	}
+	s.mu.RUnlock()
+	ctx.WriteString(fmt.Sprintf("- AI Companion Uptime: %s\n", formatDuration(uptime)))
+
+	// Memories (top important ones)
+	memRows, err := s.db.Query("SELECT key, value FROM memories ORDER BY importance DESC, updated_at DESC LIMIT 5")
+	if err == nil {
+		defer memRows.Close()
+		memories := []string{}
+		for memRows.Next() {
+			var key, value string
+			if memRows.Scan(&key, &value) == nil {
+				memories = append(memories, fmt.Sprintf("  - %s: %s", key, value))
+			}
+		}
+		if len(memories) > 0 {
+			ctx.WriteString("\n### Remembered Context\n")
+			for _, m := range memories {
+				ctx.WriteString(m + "\n")
+			}
+		}
+	}
+
+	return ctx.String()
+}
+
+// GetAIConfig retrieves the AI/LM Studio configuration from the database
+func (s *AICompanionService) GetAIConfig() models.AIConfig {
+	config := models.AIConfig{
+		ID:          1,
+		LMStudioURL: "http://localhost:1234",
+		Temperature: 0.7,
+		MaxTokens:   2000,
+		Enabled:     true,
+	}
+	s.db.QueryRow(`SELECT id, lm_studio_url, model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.LMStudioURL, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
+	)
+	return config
+}
+
+// TestLMStudioConnection tests connectivity to LM Studio
+func (s *AICompanionService) TestLMStudioConnection() map[string]interface{} {
+	config := s.GetAIConfig()
+	result := map[string]interface{}{
+		"connected": false,
+		"url":       config.LMStudioURL,
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(config.LMStudioURL + "/v1/models")
+	if err != nil {
+		result["error"] = fmt.Sprintf("Connection failed: %v", err)
+		return result
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		result["error"] = "Failed to read response"
+		return result
+	}
+
+	var modelsResp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &modelsResp); err != nil {
+		result["error"] = "Invalid response from LM Studio"
+		return result
+	}
+
+	result["connected"] = true
+	models := []string{}
+	for _, m := range modelsResp.Data {
+		models = append(models, m.ID)
+	}
+	result["models"] = models
+	if len(models) > 0 {
+		result["message"] = fmt.Sprintf("Connected! %d model(s) available", len(models))
+	} else {
+		result["message"] = "Connected but no models loaded"
+	}
+	return result
+}
+
+// ================== LLM Chat Integration ==================
+
+// lmToolDefinition represents a tool definition for the LM Studio API
+type lmToolDefinition struct {
+	Type     string          `json:"type"`
+	Function lmToolFunction  `json:"function"`
+}
+
+type lmToolFunction struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+// getLMToolDefinitions returns all tool definitions for the LLM
+func getLMToolDefinitions() []lmToolDefinition {
+	return []lmToolDefinition{
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_library_stats", Description: "Get overall statistics about the video library including total videos, performers, tags, studios, and database size.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "search_videos",
+			Description: "Rich video search supporting natural-language criteria: filter by title, performer name, tag, studio, library, duration range, minimum rating, and favorite status. Also supports sort order. Use this to answer queries like 'Nicole Aniston videos over 30 minutes', 'my favorites rated 4+', 'newest videos in Backup', or 'random video suggestion'.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"query":        map[string]interface{}{"type": "string", "description": "Title keyword search (optional)"},
+				"performer":    map[string]interface{}{"type": "string", "description": "Filter by performer full name (optional)"},
+				"tag":          map[string]interface{}{"type": "string", "description": "Filter by tag name (optional)"},
+				"studio":       map[string]interface{}{"type": "string", "description": "Filter by studio name (optional)"},
+				"library":      map[string]interface{}{"type": "string", "description": "Filter by library name, e.g. 'Backup' (optional)"},
+				"min_duration": map[string]interface{}{"type": "number", "description": "Minimum duration in seconds, e.g. 1800 for 30 min (optional)"},
+				"max_duration": map[string]interface{}{"type": "number", "description": "Maximum duration in seconds (optional)"},
+				"min_rating":   map[string]interface{}{"type": "number", "description": "Minimum rating 1-5 (optional)"},
+				"is_favorite":  map[string]interface{}{"type": "boolean", "description": "If true, return only favorites (optional)"},
+				"sort_by":      map[string]interface{}{"type": "string", "description": "Sort order: 'recent' (default), 'rating', 'duration', 'title', 'random'"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max results (default: 20, max: 50)"},
+			}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "search_performers", Description: "Search for performers by name. Returns performer details.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"query": map[string]interface{}{"type": "string", "description": "Search query to filter performers by name"},
+				"limit": map[string]interface{}{"type": "number", "description": "Max results (default: 50)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_top_performers", Description: "Get performers with the most videos.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"limit": map[string]interface{}{"type": "number", "description": "Number of top performers (default: 10)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_all_tags", Description: "Get all tags with their names and video counts.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_all_libraries", Description: "Get all video libraries with names, paths, and video counts.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "save_memory", Description: "Store important information in long-term memory that persists forever.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"key":        map[string]interface{}{"type": "string", "description": "Unique identifier for this memory"},
+				"value":      map[string]interface{}{"type": "string", "description": "The information to remember"},
+				"category":   map[string]interface{}{"type": "string", "enum": []string{"preference", "fact", "insight", "task", "note"}, "description": "Type of memory"},
+				"importance": map[string]interface{}{"type": "number", "description": "Importance level 1-10"},
+			}, "required": []string{"key", "value", "category"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "recall_memories", Description: "Search and retrieve stored memories.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"query": map[string]interface{}{"type": "string", "description": "Search query to find relevant memories"},
+			}, "required": []string{}},
+		}},
+		// New app-awareness tools
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_running_tasks", Description: "Get currently running tasks/activities in the app (scraping, scanning, etc).",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_scraper_status", Description: "Get status of all scrapers including video counts per source, recent scrape activity, and auto-update configs.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_jdownloader_status", Description: "Get JDownloader connection status, queue info, and recent download history.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_recent_errors", Description: "Get recent errors from the console log (last hour).",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"limit": map[string]interface{}{"type": "number", "description": "Max errors to return (default: 10)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "search_scraped_content", Description: "Search scraped videos and forum posts by keyword.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"query":  map[string]interface{}{"type": "string", "description": "Search keyword"},
+				"source": map[string]interface{}{"type": "string", "description": "Filter by source: pornhub, luxuretv, sexuria, rule34video, simpcity"},
+				"limit":  map[string]interface{}{"type": "number", "description": "Max results (default: 10)"},
+			}, "required": []string{"query"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_recent_activity", Description: "Get recent activity log entries showing what happened in the app.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"limit": map[string]interface{}{"type": "number", "description": "Max entries (default: 10)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "suggest_scraper_config",
+			Description: "Fetch and analyze a website to suggest scraper configuration including site type and pagination pattern. Use this when the user wants to add a new scraper tab for a website and provides one or two page URLs.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"page1_url": map[string]interface{}{"type": "string", "description": "URL of the first/listing page of the site"},
+					"page2_url": map[string]interface{}{"type": "string", "description": "URL of the second page (optional but helps detect pagination pattern)"},
+				},
+				"required": []string{"page1_url"},
+			},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_favorites", Description: "Get the user's favorited videos with titles, ratings, and performers.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"limit": map[string]interface{}{"type": "number", "description": "Max results (default: 20)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_top_rated", Description: "Get the highest-rated videos sorted by rating descending, with performer names.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"limit":      map[string]interface{}{"type": "number", "description": "Max results (default: 20)"},
+				"min_rating": map[string]interface{}{"type": "number", "description": "Minimum rating to include (1-5, default: 1)"},
+			}, "required": []string{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "get_library_videos", Description: "List recent videos in a specific library (e.g. 'Downloads - Local', 'Backup'). Returns title, path, performers, and tags.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name to search for"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max results (default: 20)"},
+			}, "required": []string{"library_name"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "scan_library_structure", Description: "List the folder/directory structure of a library up to 3 levels deep. Use this to understand how a library (e.g. 'Backup') is organized before suggesting placement.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name"},
+				"max_depth":    map[string]interface{}{"type": "number", "description": "How many levels deep to scan (default: 2, max: 4)"},
+			}, "required": []string{"library_name"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "suggest_video_placement", Description: "Analyze a video's metadata (performers, tags, title) and suggest the best matching subfolders in the Backup library. Call scan_library_structure first if you haven't already.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id":       map[string]interface{}{"type": "number", "description": "ID of the video to place"},
+				"target_library": map[string]interface{}{"type": "string", "description": "Target library name (default: 'Backup')"},
+			}, "required": []string{"video_id"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "move_video_to_library", Description: "Move a video file to a subfolder in another library and update the database. Use suggest_video_placement first to get the right subfolder path.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id":        map[string]interface{}{"type": "number", "description": "ID of the video to move"},
+				"target_library":  map[string]interface{}{"type": "string", "description": "Target library name (e.g. 'Backup')"},
+				"target_subfolder": map[string]interface{}{"type": "string", "description": "Relative subfolder path inside target library (e.g. 'Performers/Alice'). Empty = library root."},
+			}, "required": []string{"video_id", "target_library"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "analyze_library_structure", Description: "Deep-analyze a library's organizational structure by examining what performers, tags, and studios already exist in each folder. Returns the detected pattern (e.g. Performers/<Name>/, Categories/<Tag>/), dominant entities per folder, and improvement suggestions. Use this to understand how Backup is organized before suggesting placements.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name to analyze"},
+				"max_depth":    map[string]interface{}{"type": "number", "description": "Max folder depth to analyze (default: 3)"},
+			}, "required": []string{"library_name"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "get_daily_briefing",
+			Description: "Generate a fresh daily briefing with library stats, new videos since yesterday, unorganized downloads, untagged count, and recent errors. Use this when the user asks for a status update, summary, or 'what happened today'.",
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "suggest_videos_to_watch",
+			Description: "Recommend videos the user hasn't favorited or rated highly yet, based on their taste profile built from favorites and 4★+ rated videos. Matches by shared performers, tags, and studios. Use when the user asks 'what should I watch?', 'suggest something', or 'recommend a video'.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"count":    map[string]interface{}{"type": "number", "description": "How many suggestions to return (default: 5)"},
+				"library":  map[string]interface{}{"type": "string", "description": "Restrict suggestions to a specific library (optional)"},
+			}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "get_performer_stats",
+			Description: "Get a comprehensive profile for a performer: total videos, total watch time, avg rating, rating distribution, favorite count, library breakdown (which libraries their videos are in), top tags, top studios, recent additions, and date range. Use when the user asks 'tell me about [performer]', 'how many [name] videos do I have', or wants a performer overview.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"performer": map[string]interface{}{"type": "string", "description": "Performer name to look up (partial match supported)"},
+			}, "required": []string{"performer"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "find_duplicate_videos",
+			Description: "Scan the video library for likely duplicate files — same filename in multiple places, same title across libraries, or same performers with similar duration. Returns suspect pairs grouped by confidence level. Use this when the user asks to find duplicates or clean up the library.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Restrict search to a specific library (optional — omit to search all libraries)"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max number of duplicate groups to return (default: 30)"},
+			}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "find_orphaned_videos",
+			Description: "Check which videos in the database no longer have their file on disk — the file was moved, renamed, or deleted outside the app. Returns a list of orphaned DB entries. Always run this before delete_video_records. Use when the user asks about broken entries, missing files, or wants to clean up the library.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Restrict check to a specific library (optional)"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max videos to scan (default: 2000)"},
+			}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "delete_video_records",
+			Description: "Delete video entries from the database by ID. Only deletes the DB record — never touches files on disk. Use this to clean up orphaned entries found by find_orphaned_videos. ALWAYS confirm with the user before calling this tool.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_ids": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "number"},
+					"description": "List of video IDs to remove from the database",
+				},
+			}, "required": []string{"video_ids"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "find_untagged_videos",
+			Description: "Find videos that have no tags, optionally filtered by library or performer. Returns video IDs, titles, and performer names so you can call suggest_tags_for_video then apply_tags_to_video on each. Use when the user wants to bulk-tag their library or asks 'which videos have no tags?'.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Restrict to a specific library (optional)"},
+				"performer":    map[string]interface{}{"type": "string", "description": "Restrict to videos featuring a specific performer (optional)"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max results (default: 20, max: 50)"},
+			}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "bulk_apply_tags",
+			Description: "Automatically suggest and apply performer-based tags to a batch of videos in one operation. For each video, finds the most common tags from other videos featuring the same performers and applies them. Use after find_untagged_videos for efficient bulk tagging. ALWAYS tell the user how many videos will be tagged and confirm before running.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_ids": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "number"},
+					"description": "List of video IDs to auto-tag",
+				},
+				"max_tags_per_video": map[string]interface{}{"type": "number", "description": "Max tags to apply per video (default: 5)"},
+			}, "required": []string{"video_ids"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "get_library_health",
+			Description: "Generate a comprehensive health report of the entire library: total counts, untagged %, unrated %, videos with no performers, recent additions, and a health score (0-100). Use when the user asks 'how's my library?', 'library health', or 'give me an overview'.",
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "suggest_tags_for_video",
+			Description: "Suggest tags for a video based on what tags are commonly applied to other videos featuring the same performers. Excludes tags already applied. Use when the user asks 'what tags should I add?', 'tag this video', or wants tag suggestions for a specific video.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id": map[string]interface{}{"type": "number", "description": "ID of the video to suggest tags for"},
+				"limit":    map[string]interface{}{"type": "number", "description": "Max suggestions to return (default: 10)"},
+			}, "required": []string{"video_id"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "apply_tags_to_video",
+			Description: "Apply one or more tags to a video by name. Creates tags that don't exist yet. Use after suggest_tags_for_video or when the user explicitly asks to tag a video with specific tags.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id": map[string]interface{}{"type": "number", "description": "ID of the video to tag"},
+				"tags": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "List of tag names to apply",
+				},
+			}, "required": []string{"video_id", "tags"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "set_video_rating",
+			Description: "Set the star rating of a video (0-5). Use when the user asks to rate a video or says something like 'give this a 4 star rating'. 0 clears the rating.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id": map[string]interface{}{"type": "number", "description": "ID of the video to rate"},
+				"rating":   map[string]interface{}{"type": "number", "description": "Rating from 0 (clear) to 5 (max)"},
+			}, "required": []string{"video_id", "rating"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "toggle_video_favorite",
+			Description: "Toggle the favorite flag on a video — marks it as a favorite if not already, or removes the favorite if it is. Use when the user says 'favorite this video', 'add to favorites', or 'remove from favorites'.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"video_id": map[string]interface{}{"type": "number", "description": "ID of the video to toggle favorite on"},
+			}, "required": []string{"video_id"}},
+		}},
+	}
+}
+
+// ExecuteTool executes a tool call from the LLM and returns the result
+func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{}) (interface{}, error) {
+	switch name {
+	case "get_library_stats":
+		var videoCount, performerCount, tagCount, libraryCount, studioCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM tags").Scan(&tagCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM libraries").Scan(&libraryCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM studios").Scan(&studioCount)
+		return map[string]interface{}{
+			"total_videos": videoCount, "total_performers": performerCount,
+			"total_tags": tagCount, "total_libraries": libraryCount, "total_studios": studioCount,
+		}, nil
+
+	case "search_videos":
+		titleQ, _ := args["query"].(string)
+		performer, _ := args["performer"].(string)
+		tag, _ := args["tag"].(string)
+		studio, _ := args["studio"].(string)
+		library, _ := args["library"].(string)
+		minDur := floatArg(args, "min_duration", 0)
+		maxDur := floatArg(args, "max_duration", 0)
+		minRating := intArg(args, "min_rating", 0)
+		isFavOnly, _ := args["is_favorite"].(bool)
+		sortBy, _ := args["sort_by"].(string)
+		limit := intArg(args, "limit", 20)
+		if limit > 50 {
+			limit = 50
+		}
+
+		var conds []string
+		var qArgs []interface{}
+
+		if titleQ != "" {
+			conds = append(conds, "v.title LIKE ?")
+			qArgs = append(qArgs, "%"+titleQ+"%")
+		}
+		if performer != "" {
+			conds = append(conds, `EXISTS (SELECT 1 FROM video_performers vp JOIN performers p ON p.id = vp.performer_id WHERE vp.video_id = v.id AND LOWER(p.name) LIKE LOWER(?))`)
+			qArgs = append(qArgs, "%"+performer+"%")
+		}
+		if tag != "" {
+			conds = append(conds, `EXISTS (SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE vt.video_id = v.id AND LOWER(t.name) LIKE LOWER(?))`)
+			qArgs = append(qArgs, "%"+tag+"%")
+		}
+		if studio != "" {
+			conds = append(conds, `EXISTS (SELECT 1 FROM video_studios vs JOIN studios s ON s.id = vs.studio_id WHERE vs.video_id = v.id AND LOWER(s.name) LIKE LOWER(?))`)
+			qArgs = append(qArgs, "%"+studio+"%")
+		}
+		if library != "" {
+			conds = append(conds, "LOWER(l.name) LIKE LOWER(?)")
+			qArgs = append(qArgs, "%"+library+"%")
+		}
+		if minDur > 0 {
+			conds = append(conds, "v.duration >= ?")
+			qArgs = append(qArgs, minDur)
+		}
+		if maxDur > 0 {
+			conds = append(conds, "v.duration <= ?")
+			qArgs = append(qArgs, maxDur)
+		}
+		if minRating > 0 {
+			conds = append(conds, "COALESCE(v.rating, 0) >= ?")
+			qArgs = append(qArgs, minRating)
+		}
+		if isFavOnly {
+			conds = append(conds, "v.is_favorite = 1")
+		}
+
+		where := ""
+		if len(conds) > 0 {
+			where = "WHERE " + strings.Join(conds, " AND ")
+		}
+
+		orderClause := "ORDER BY v.created_at DESC"
+		switch strings.ToLower(sortBy) {
+		case "rating":
+			orderClause = "ORDER BY COALESCE(v.rating, 0) DESC"
+		case "duration":
+			orderClause = "ORDER BY COALESCE(v.duration, 0) DESC"
+		case "title":
+			orderClause = "ORDER BY v.title ASC"
+		case "random":
+			orderClause = "ORDER BY RANDOM()"
+		}
+
+		searchQ := fmt.Sprintf(`
+			SELECT v.id, v.title,
+			       COALESCE(v.duration, 0),
+			       COALESCE(v.rating, 0),
+			       COALESCE(v.is_favorite, 0),
+			       COALESCE(v.thumbnail_path, ''),
+			       COALESCE(l.name, ''),
+			       COALESCE((SELECT GROUP_CONCAT(p2.name, ', ')
+			                 FROM video_performers vp2 JOIN performers p2 ON p2.id = vp2.performer_id
+			                 WHERE vp2.video_id = v.id), '') AS performers,
+			       COALESCE((SELECT GROUP_CONCAT(t2.name, ', ')
+			                 FROM video_tags vt2 JOIN tags t2 ON t2.id = vt2.tag_id
+			                 WHERE vt2.video_id = v.id), '') AS tags
+			FROM videos v
+			LEFT JOIN libraries l ON v.library_id = l.id
+			%s
+			%s
+			LIMIT ?`, where, orderClause)
+
+		qArgs = append(qArgs, limit)
+		rows, err := s.db.Query(searchQ, qArgs...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var title, thumbPath, libName, performers, tags string
+			var duration float64
+			var rating, isFav int
+			if rows.Scan(&id, &title, &duration, &rating, &isFav, &thumbPath, &libName, &performers, &tags) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "title": title,
+					"duration":       formatSeconds(duration),
+					"duration_s":     int(duration),
+					"rating":         rating,
+					"is_favorite":    isFav > 0,
+					"thumbnail_path": thumbPath,
+					"library":        libName,
+					"performers":     performers,
+					"tags":           tags,
+				})
+			}
+		}
+		return map[string]interface{}{"count": len(results), "videos": results}, nil
+
+	case "search_performers":
+		query, _ := args["query"].(string)
+		limit := intArg(args, "limit", 50)
+		rows, err := s.db.Query(`SELECT p.id, p.name, p.video_count FROM performers p WHERE p.name LIKE ? ORDER BY p.video_count DESC LIMIT ?`, "%"+query+"%", limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var name string
+			var videoCount int
+			if rows.Scan(&id, &name, &videoCount) == nil {
+				results = append(results, map[string]interface{}{"id": id, "name": name, "video_count": videoCount})
+			}
+		}
+		return results, nil
+
+	case "get_top_performers":
+		limit := intArg(args, "limit", 10)
+		rows, err := s.db.Query(`SELECT p.name, COUNT(vp.video_id) as cnt FROM performers p LEFT JOIN video_performers vp ON p.id = vp.performer_id GROUP BY p.id ORDER BY cnt DESC LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var name string
+			var cnt int
+			if rows.Scan(&name, &cnt) == nil {
+				results = append(results, map[string]interface{}{"name": name, "video_count": cnt})
+			}
+		}
+		return results, nil
+
+	case "get_all_tags":
+		rows, err := s.db.Query(`SELECT t.id, t.name, COUNT(vt.video_id) as cnt FROM tags t LEFT JOIN video_tags vt ON t.id = vt.tag_id GROUP BY t.id ORDER BY cnt DESC LIMIT 100`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var name string
+			var cnt int
+			if rows.Scan(&id, &name, &cnt) == nil {
+				results = append(results, map[string]interface{}{"id": id, "name": name, "video_count": cnt})
+			}
+		}
+		return results, nil
+
+	case "get_all_libraries":
+		rows, err := s.db.Query(`SELECT l.id, l.name, l.path, COUNT(v.id) as cnt FROM libraries l LEFT JOIN videos v ON l.id = v.library_id GROUP BY l.id`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var name, path string
+			var cnt int
+			if rows.Scan(&id, &name, &path, &cnt) == nil {
+				results = append(results, map[string]interface{}{"id": id, "name": name, "path": path, "video_count": cnt})
+			}
+		}
+		return results, nil
+
+	case "save_memory":
+		key, _ := args["key"].(string)
+		value, _ := args["value"].(string)
+		category, _ := args["category"].(string)
+		importance := intArg(args, "importance", 5)
+		if key == "" || value == "" {
+			return map[string]interface{}{"error": "key and value are required"}, nil
+		}
+		mem := &models.Memory{Key: key, Value: value, Category: category, Importance: importance}
+		err := s.SaveMemory(mem)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"saved": true, "key": key}, nil
+
+	case "recall_memories":
+		query, _ := args["query"].(string)
+		if query == "" {
+			memories, err := s.GetMemories("", 20)
+			if err != nil {
+				return nil, err
+			}
+			return memories, nil
+		}
+		memories, err := s.SearchMemories(query)
+		if err != nil {
+			return nil, err
+		}
+		return memories, nil
+
+	case "get_running_tasks":
+		rows, err := s.db.Query(`SELECT id, task_type, status, message, created_at FROM activity_logs WHERE status = 'running' ORDER BY created_at DESC LIMIT 20`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var taskType, status, message string
+			var createdAt time.Time
+			if rows.Scan(&id, &taskType, &status, &message, &createdAt) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "task_type": taskType, "status": status, "message": message,
+					"started_ago": formatDuration(time.Since(createdAt)),
+				})
+			}
+		}
+		return map[string]interface{}{"running_tasks": results, "count": len(results)}, nil
+
+	case "get_scraper_status":
+		result := map[string]interface{}{}
+		// Video counts per source
+		sources := []string{"pornhub", "luxuretv", "sexuria", "rule34video"}
+		for _, src := range sources {
+			var cnt int
+			s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE source = ?", src).Scan(&cnt)
+			result[src+"_count"] = cnt
+		}
+		var threadCount, postCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_threads").Scan(&threadCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts").Scan(&postCount)
+		result["simpcity_threads"] = threadCount
+		result["simpcity_posts"] = postCount
+		// Recent scraper activity
+		rows, err := s.db.Query(`SELECT task_type, status, message, created_at FROM activity_logs WHERE task_type LIKE '%scrape%' OR task_type LIKE '%scraper%' ORDER BY created_at DESC LIMIT 5`)
+		if err == nil {
+			defer rows.Close()
+			recent := []map[string]interface{}{}
+			for rows.Next() {
+				var taskType, status, message string
+				var createdAt time.Time
+				if rows.Scan(&taskType, &status, &message, &createdAt) == nil {
+					recent = append(recent, map[string]interface{}{"task_type": taskType, "status": status, "message": message, "when": formatDuration(time.Since(createdAt)) + " ago"})
+				}
+			}
+			result["recent_activity"] = recent
+		}
+		return result, nil
+
+	case "get_jdownloader_status":
+		result := map[string]interface{}{}
+		var connType, connStatus string
+		err := s.db.QueryRow("SELECT connection_type, connection_status FROM jdownloader_config LIMIT 1").Scan(&connType, &connStatus)
+		if err != nil {
+			result["configured"] = false
+			return result, nil
+		}
+		result["configured"] = true
+		result["connection_type"] = connType
+		result["connection_status"] = connStatus
+		// Recent history
+		var sentCount, failedCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM jdownloader_history WHERE status = 'sent'").Scan(&sentCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM jdownloader_history WHERE status = 'failed'").Scan(&failedCount)
+		result["total_sent"] = sentCount
+		result["total_failed"] = failedCount
+		// Recent sends
+		rows, err := s.db.Query(`SELECT link_url, package_name, status, sent_at FROM jdownloader_history ORDER BY sent_at DESC LIMIT 5`)
+		if err == nil {
+			defer rows.Close()
+			recent := []map[string]interface{}{}
+			for rows.Next() {
+				var url, pkg, status string
+				var sentAt time.Time
+				if rows.Scan(&url, &pkg, &status, &sentAt) == nil {
+					recent = append(recent, map[string]interface{}{"url": url, "package": pkg, "status": status, "when": formatDuration(time.Since(sentAt)) + " ago"})
+				}
+			}
+			result["recent_sends"] = recent
+		}
+		return result, nil
+
+	case "get_recent_errors":
+		limit := intArg(args, "limit", 10)
+		rows, err := s.db.Query(`SELECT source, level, message, created_at FROM console_logs WHERE level = 'error' ORDER BY created_at DESC LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var source, level, message string
+			var createdAt time.Time
+			if rows.Scan(&source, &level, &message, &createdAt) == nil {
+				results = append(results, map[string]interface{}{"source": source, "level": level, "message": message, "when": formatDuration(time.Since(createdAt)) + " ago"})
+			}
+		}
+		return map[string]interface{}{"errors": results, "count": len(results)}, nil
+
+	case "search_scraped_content":
+		query, _ := args["query"].(string)
+		source, _ := args["source"].(string)
+		limit := intArg(args, "limit", 10)
+		if query == "" {
+			return map[string]interface{}{"error": "query is required"}, nil
+		}
+		sqlQuery := `SELECT source, title, performers, url FROM scraped_videos WHERE (title LIKE ? OR performers LIKE ? OR tags LIKE ?)`
+		sqlArgs := []interface{}{"%" + query + "%", "%" + query + "%", "%" + query + "%"}
+		if source != "" {
+			sqlQuery += " AND source = ?"
+			sqlArgs = append(sqlArgs, source)
+		}
+		sqlQuery += " ORDER BY discovered_at DESC LIMIT ?"
+		sqlArgs = append(sqlArgs, limit)
+		rows, err := s.db.Query(sqlQuery, sqlArgs...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var src, title, performers, url string
+			if rows.Scan(&src, &title, &performers, &url) == nil {
+				results = append(results, map[string]interface{}{"source": src, "title": title, "performers": performers, "url": url})
+			}
+		}
+		return map[string]interface{}{"results": results, "count": len(results)}, nil
+
+	case "get_recent_activity":
+		limit := intArg(args, "limit", 10)
+		rows, err := s.db.Query(`SELECT task_type, status, message, created_at FROM activity_logs ORDER BY created_at DESC LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var taskType, status, message string
+			var createdAt time.Time
+			if rows.Scan(&taskType, &status, &message, &createdAt) == nil {
+				results = append(results, map[string]interface{}{"task_type": taskType, "status": status, "message": message, "when": formatDuration(time.Since(createdAt)) + " ago"})
+			}
+		}
+		return results, nil
+
+	case "suggest_scraper_config":
+		page1URL, _ := args["page1_url"].(string)
+		page2URL, _ := args["page2_url"].(string)
+		if page1URL == "" {
+			return map[string]interface{}{"error": "page1_url is required"}, nil
+		}
+		return s.fetchSiteInfo(page1URL, page2URL)
+
+	case "get_library_videos":
+		libraryName, _ := args["library_name"].(string)
+		limit := intArg(args, "limit", 20)
+		var libID int64
+		var libPath string
+		err := s.db.QueryRow("SELECT id, path FROM libraries WHERE name LIKE ?", "%"+libraryName+"%").Scan(&libID, &libPath)
+		if err != nil {
+			return map[string]interface{}{"error": "library not found: " + libraryName}, nil
+		}
+		rows, err := s.db.Query(`
+			SELECT v.id, v.title, COALESCE(v.thumbnail_path,''), COALESCE(v.rating,0), COALESCE(v.is_favorite,0),
+			       GROUP_CONCAT(p.name, ', ') as performers
+			FROM videos v
+			LEFT JOIN video_performers vp ON v.id = vp.video_id
+			LEFT JOIN performers p ON vp.performer_id = p.id
+			WHERE v.library_id = ?
+			GROUP BY v.id
+			ORDER BY v.created_at DESC
+			LIMIT ?`, libID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var title, thumbPath string
+			var rating, isFav int
+			var performers sql.NullString
+			if rows.Scan(&id, &title, &thumbPath, &rating, &isFav, &performers) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "title": title,
+					"thumbnail_path": thumbPath,
+					"rating": rating, "is_favorite": isFav > 0,
+					"performers": performers.String,
+				})
+			}
+		}
+		return map[string]interface{}{"library": libraryName, "videos": results, "count": len(results)}, nil
+
+	case "scan_library_structure":
+		libraryName, _ := args["library_name"].(string)
+		maxDepth := intArg(args, "max_depth", 2)
+		if maxDepth > 4 {
+			maxDepth = 4
+		}
+		var libID int64
+		var libPath string
+		err := s.db.QueryRow("SELECT id, path FROM libraries WHERE name LIKE ?", "%"+libraryName+"%").Scan(&libID, &libPath)
+		if err != nil {
+			return map[string]interface{}{"error": "library not found: " + libraryName}, nil
+		}
+		type folderInfo struct {
+			RelPath    string
+			Depth      int
+			VideoCount int
+		}
+		folders := []map[string]interface{}{}
+		_ = filepath.Walk(libPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil || !info.IsDir() || path == libPath {
+				return nil
+			}
+			relPath, _ := filepath.Rel(libPath, path)
+			parts := strings.Split(filepath.ToSlash(relPath), "/")
+			depth := len(parts)
+			if depth > maxDepth {
+				return filepath.SkipDir
+			}
+			var count int
+			s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
+				libID, "%"+string(filepath.Separator)+relPath+string(filepath.Separator)+"%").Scan(&count)
+			// Also check files directly in this folder
+			var direct int
+			s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
+				libID, "%"+string(filepath.Separator)+relPath+string(filepath.Separator)+"%.%").Scan(&direct)
+			folders = append(folders, map[string]interface{}{
+				"path": filepath.ToSlash(relPath), "depth": depth, "video_count": count + direct,
+			})
+			return nil
+		})
+		return map[string]interface{}{
+			"library": libraryName, "root": libPath,
+			"folders": folders, "total_folders": len(folders),
+		}, nil
+
+	case "suggest_video_placement":
+		videoID := int64(intArg(args, "video_id", 0))
+		targetLibraryName, _ := args["target_library"].(string)
+		if targetLibraryName == "" {
+			targetLibraryName = "Backup"
+		}
+		// Get video info
+		var title, filePath string
+		var srcLibID int64
+		err := s.db.QueryRow("SELECT title, file_path, library_id FROM videos WHERE id = ?", videoID).Scan(&title, &filePath, &srcLibID)
+		if err != nil {
+			return map[string]interface{}{"error": fmt.Sprintf("video %d not found", videoID)}, nil
+		}
+		var srcLibName string
+		s.db.QueryRow("SELECT name FROM libraries WHERE id = ?", srcLibID).Scan(&srcLibName)
+		// Get performers
+		perfRows, _ := s.db.Query("SELECT p.name FROM performers p JOIN video_performers vp ON p.id = vp.performer_id WHERE vp.video_id = ?", videoID)
+		performers := []string{}
+		for perfRows.Next() {
+			var n string
+			perfRows.Scan(&n)
+			performers = append(performers, n)
+		}
+		perfRows.Close()
+		// Get tags
+		tagRows, _ := s.db.Query("SELECT t.name FROM tags t JOIN video_tags vt ON t.id = vt.tag_id WHERE vt.video_id = ?", videoID)
+		tags := []string{}
+		for tagRows.Next() {
+			var n string
+			tagRows.Scan(&n)
+			tags = append(tags, n)
+		}
+		tagRows.Close()
+		// Get studios
+		studioRows, _ := s.db.Query("SELECT s.name FROM studios s JOIN video_studios vs ON s.id = vs.studio_id WHERE vs.video_id = ?", videoID)
+		studios := []string{}
+		for studioRows.Next() {
+			var n string
+			studioRows.Scan(&n)
+			studios = append(studios, n)
+		}
+		studioRows.Close()
+		// Get target library
+		var tgtLibID int64
+		var tgtLibPath string
+		err = s.db.QueryRow("SELECT id, path FROM libraries WHERE name LIKE ?", "%"+targetLibraryName+"%").Scan(&tgtLibID, &tgtLibPath)
+		if err != nil {
+			return map[string]interface{}{"error": "target library not found: " + targetLibraryName}, nil
+		}
+		// Check learned placement memories for performers (highest priority)
+		learnedFolders := map[string]string{}
+		for _, p := range performers {
+			if mems, err := s.SearchMemories("placement " + p); err == nil {
+				for _, mem := range mems {
+					if strings.Contains(mem.Value, "→") {
+						parts := strings.SplitN(mem.Value, "→", 2)
+						if len(parts) == 2 {
+							subfolder := strings.TrimSpace(strings.Split(parts[1], " in ")[0])
+							learnedFolders[subfolder] = "✅ learned: " + p
+						}
+					}
+				}
+			}
+		}
+
+		// Tier 1: content-based — find folders that already contain videos by the same performers
+		performerFolders := map[string]string{} // performer name → subfolder
+		for _, p := range performers {
+			var existingPath string
+			err2 := s.db.QueryRow(
+				`SELECT v.file_path FROM videos v
+				 JOIN video_performers vp ON v.id = vp.video_id
+				 JOIN performers perf ON perf.id = vp.performer_id
+				 WHERE v.library_id = ? AND LOWER(perf.name) = LOWER(?)
+				 LIMIT 1`, tgtLibID, p).Scan(&existingPath)
+			if err2 == nil && existingPath != "" {
+				rel, err3 := filepath.Rel(tgtLibPath, filepath.Dir(existingPath))
+				if err3 == nil {
+					performerFolders[p] = filepath.ToSlash(rel)
+				}
+			}
+		}
+
+		// Walk target library folders (max 3 levels)
+		type scored struct {
+			path    string
+			score   float64
+			reason  string
+			learned bool
+		}
+		var candidates []scored
+		_ = filepath.Walk(tgtLibPath, func(path string, info os.FileInfo, walkErr error) error {
+			if walkErr != nil || !info.IsDir() || path == tgtLibPath {
+				return nil
+			}
+			relPath, _ := filepath.Rel(tgtLibPath, path)
+			parts := strings.Split(filepath.ToSlash(relPath), "/")
+			if len(parts) > 3 {
+				return filepath.SkipDir
+			}
+			folderSlash := filepath.ToSlash(relPath)
+			folderLower := strings.ToLower(folderSlash)
+			sc := 0.0
+			var reasons []string
+			isLearned := false
+
+			if reason, ok := learnedFolders[folderSlash]; ok {
+				sc += 20
+				reasons = append(reasons, reason)
+				isLearned = true
+			}
+			// Tier 1: folder already contains videos by this performer (content-based, highest confidence)
+			for _, p := range performers {
+				if existing, ok := performerFolders[p]; ok && strings.EqualFold(existing, folderSlash) {
+					sc += 15
+					reasons = append(reasons, "existing videos by "+p)
+				}
+			}
+			// Tier 2: exact full performer name in folder base or path (full name only, not word fragments)
+			for _, p := range performers {
+				folderBase := strings.ToLower(filepath.Base(filepath.FromSlash(folderSlash)))
+				if strings.EqualFold(folderBase, p) {
+					sc += 10
+					reasons = append(reasons, "performer folder: "+p)
+				} else if strings.Contains(folderLower, strings.ToLower(p)) && len(strings.Fields(p)) > 1 {
+					// Only multi-word names (e.g. "Nicole Aniston") allowed as substring — avoids single word false positives
+					sc += 8
+					reasons = append(reasons, "performer in path: "+p)
+				}
+			}
+			for _, st := range studios {
+				if strings.Contains(folderLower, strings.ToLower(st)) {
+					sc += 7
+					reasons = append(reasons, "studio: "+st)
+				}
+			}
+			for _, t := range tags {
+				if strings.Contains(folderLower, strings.ToLower(t)) {
+					sc += 4
+					reasons = append(reasons, "tag: "+t)
+				}
+			}
+			// No title/filename word matching — leads to false positives
+			if sc > 0 {
+				candidates = append(candidates, scored{
+					path: folderSlash, score: sc,
+					reason: strings.Join(reasons, "; "), learned: isLearned,
+				})
+			}
+			return nil
+		})
+		sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+		suggestions := []map[string]interface{}{}
+		for i, c := range candidates {
+			if i >= 5 {
+				break
+			}
+			suggestions = append(suggestions, map[string]interface{}{
+				"subfolder": c.path, "score": c.score, "reason": c.reason, "learned": c.learned,
+			})
+		}
+		return map[string]interface{}{
+			"video_id": videoID, "title": title,
+			"source_library": srcLibName, "current_path": filepath.Base(filePath),
+			"performers": performers, "tags": tags, "studios": studios,
+			"target_library": targetLibraryName, "suggestions": suggestions,
+		}, nil
+
+	case "move_video_to_library":
+		videoID := int64(intArg(args, "video_id", 0))
+		targetLibraryName, _ := args["target_library"].(string)
+		targetSubfolder, _ := args["target_subfolder"].(string)
+		// Get video
+		var title, filePath string
+		var srcLibID int64
+		err := s.db.QueryRow("SELECT title, file_path, library_id FROM videos WHERE id = ?", videoID).Scan(&title, &filePath, &srcLibID)
+		if err != nil {
+			return map[string]interface{}{"error": fmt.Sprintf("video %d not found", videoID)}, nil
+		}
+		var srcLibPath, srcLibName string
+		s.db.QueryRow("SELECT name, path FROM libraries WHERE id = ?", srcLibID).Scan(&srcLibName, &srcLibPath)
+		// Get target library
+		var tgtLibID int64
+		var tgtLibPath string
+		err = s.db.QueryRow("SELECT id, path FROM libraries WHERE name LIKE ?", "%"+targetLibraryName+"%").Scan(&tgtLibID, &tgtLibPath)
+		if err != nil {
+			return map[string]interface{}{"error": "target library not found: " + targetLibraryName}, nil
+		}
+		// Build full source path (file_path may be absolute)
+		srcFullPath := filePath
+		if !filepath.IsAbs(filePath) {
+			srcFullPath = filepath.Join(srcLibPath, filePath)
+		}
+		if _, statErr := os.Stat(srcFullPath); os.IsNotExist(statErr) {
+			return map[string]interface{}{"error": "source file not found on disk: " + srcFullPath}, nil
+		}
+		filename := filepath.Base(srcFullPath)
+		// Build target full path
+		var tgtFullPath string
+		if targetSubfolder != "" {
+			tgtFullPath = filepath.Join(tgtLibPath, filepath.FromSlash(targetSubfolder), filename)
+		} else {
+			tgtFullPath = filepath.Join(tgtLibPath, filename)
+		}
+		// Check target doesn't already exist
+		if _, statErr := os.Stat(tgtFullPath); statErr == nil {
+			return map[string]interface{}{"error": "a file with that name already exists at the destination: " + tgtFullPath}, nil
+		}
+		// Create target directory
+		if err := os.MkdirAll(filepath.Dir(tgtFullPath), 0755); err != nil {
+			return map[string]interface{}{"error": "failed to create target directory: " + err.Error()}, nil
+		}
+		// Move (try rename first, fall back to copy+delete for cross-device)
+		if err := os.Rename(srcFullPath, tgtFullPath); err != nil {
+			srcData, readErr := os.ReadFile(srcFullPath)
+			if readErr != nil {
+				return map[string]interface{}{"error": "failed to read source: " + readErr.Error()}, nil
+			}
+			if writeErr := os.WriteFile(tgtFullPath, srcData, 0644); writeErr != nil {
+				return map[string]interface{}{"error": "failed to write target: " + writeErr.Error()}, nil
+			}
+			os.Remove(srcFullPath)
+		}
+		// Update DB record
+		_, dbErr := s.db.Exec("UPDATE videos SET file_path = ?, library_id = ?, updated_at = ? WHERE id = ?",
+			tgtFullPath, tgtLibID, time.Now(), videoID)
+		if dbErr != nil {
+			return map[string]interface{}{
+				"warning":  "file moved but DB update failed: " + dbErr.Error(),
+				"new_path": tgtFullPath,
+			}, nil
+		}
+		// Learn the pattern: remember which subfolder this performer's videos go to
+		if targetSubfolder != "" {
+			perfRows, _ := s.db.Query("SELECT p.name FROM performers p JOIN video_performers vp ON p.id = vp.performer_id WHERE vp.video_id = ?", videoID)
+			for perfRows.Next() {
+				var perfName string
+				if perfRows.Scan(&perfName) == nil {
+					memKey := "placement_" + strings.ToLower(strings.ReplaceAll(perfName, " ", "_"))
+					_ = s.SaveMemory(&models.Memory{
+						Key:        memKey,
+						Value:      fmt.Sprintf("Performer '%s' → %s in %s", perfName, targetSubfolder, targetLibraryName),
+						Category:   "insight",
+						Importance: 8,
+					})
+				}
+			}
+			perfRows.Close()
+		}
+		return map[string]interface{}{
+			"success":          true,
+			"video_id":         videoID,
+			"title":            title,
+			"from_library":     srcLibName,
+			"to_library":       targetLibraryName,
+			"destination_path": tgtFullPath,
+		}, nil
+
+	case "analyze_library_structure":
+		libraryName, _ := args["library_name"].(string)
+		maxDepth := intArg(args, "max_depth", 3)
+		if maxDepth > 5 {
+			maxDepth = 5
+		}
+		// Find library
+		var libID int64
+		var libPath, libNameFull string
+		err := s.db.QueryRow("SELECT id, name, path FROM libraries WHERE name LIKE ?", "%"+libraryName+"%").Scan(&libID, &libNameFull, &libPath)
+		if err != nil {
+			return map[string]interface{}{"error": "library not found: " + libraryName}, nil
+		}
+
+		// Load all videos + their metadata in this library
+		type videoMeta struct {
+			fileDir    string
+			performers []string
+			tags       []string
+			studios    []string
+		}
+		var allVideos []videoMeta
+
+		rows, err := s.db.Query("SELECT id, file_path FROM videos WHERE library_id = ?", libID)
+		if err != nil {
+			return nil, err
+		}
+		type idPath struct{ id int64; path string }
+		var vidList []idPath
+		for rows.Next() {
+			var id int64
+			var fp string
+			if rows.Scan(&id, &fp) == nil {
+				vidList = append(vidList, idPath{id, fp})
+			}
+		}
+		rows.Close()
+
+		for _, v := range vidList {
+			vm := videoMeta{fileDir: filepath.ToSlash(filepath.Dir(v.path))}
+			// performers
+			pr, _ := s.db.Query("SELECT p.name FROM performers p JOIN video_performers vp ON p.id = vp.performer_id WHERE vp.video_id = ?", v.id)
+			for pr.Next() {
+				var n string; pr.Scan(&n); vm.performers = append(vm.performers, n)
+			}
+			pr.Close()
+			// tags
+			tr, _ := s.db.Query("SELECT t.name FROM tags t JOIN video_tags vt ON t.id = vt.tag_id WHERE vt.video_id = ?", v.id)
+			for tr.Next() {
+				var n string; tr.Scan(&n); vm.tags = append(vm.tags, n)
+			}
+			tr.Close()
+			// studios
+			sr, _ := s.db.Query("SELECT st.name FROM studios st JOIN video_studios vs ON st.id = vs.studio_id WHERE vs.video_id = ?", v.id)
+			for sr.Next() {
+				var n string; sr.Scan(&n); vm.studios = append(vm.studios, n)
+			}
+			sr.Close()
+			allVideos = append(allVideos, vm)
+		}
+
+		// Group by folder (relative to library root, up to maxDepth)
+		type folderStats struct {
+			videoCount       int
+			performerCounts  map[string]int
+			tagCounts        map[string]int
+			studioCounts     map[string]int
+		}
+		folderMap := map[string]*folderStats{}
+		libPathSlash := filepath.ToSlash(libPath)
+
+		for _, vm := range allVideos {
+			rel := vm.fileDir
+			if strings.HasPrefix(rel, libPathSlash) {
+				rel = strings.TrimPrefix(rel, libPathSlash)
+				rel = strings.TrimPrefix(rel, "/")
+			}
+			parts := strings.Split(rel, "/")
+			if len(parts) > maxDepth {
+				parts = parts[:maxDepth]
+			}
+			folderKey := strings.Join(parts, "/")
+			if folderKey == "" {
+				folderKey = "."
+			}
+			if folderMap[folderKey] == nil {
+				folderMap[folderKey] = &folderStats{
+					performerCounts: map[string]int{},
+					tagCounts:       map[string]int{},
+					studioCounts:    map[string]int{},
+				}
+			}
+			fs := folderMap[folderKey]
+			fs.videoCount++
+			for _, p := range vm.performers { fs.performerCounts[p]++ }
+			for _, t := range vm.tags { fs.tagCounts[t]++ }
+			for _, st := range vm.studios { fs.studioCounts[st]++ }
+		}
+
+		// Detect dominant entity type per folder + overall pattern
+		type folderAnalysis struct {
+			Folder      string   `json:"folder"`
+			VideoCount  int      `json:"video_count"`
+			DominantType string  `json:"dominant_type"` // "performer", "tag", "studio", "mixed"
+			TopEntities []string `json:"top_entities"`
+		}
+		var analyzed []folderAnalysis
+		performerPatternCount := 0
+		tagPatternCount := 0
+		studioPatternCount := 0
+
+		for folder, fs := range folderMap {
+			if folder == "." {
+				continue
+			}
+			topPerf := topNFromMap(fs.performerCounts, 3)
+			topTag  := topNFromMap(fs.tagCounts, 3)
+			topStudio := topNFromMap(fs.studioCounts, 3)
+
+			maxPerf := 0; for _, c := range fs.performerCounts { if c > maxPerf { maxPerf = c } }
+			maxTag  := 0; for _, c := range fs.tagCounts { if c > maxTag { maxTag = c } }
+			maxStudio := 0; for _, c := range fs.studioCounts { if c > maxStudio { maxStudio = c } }
+
+			domType := "mixed"
+			var topEntities []string
+			switch {
+			case maxPerf >= maxTag && maxPerf >= maxStudio && maxPerf > 0:
+				domType = "performer"
+				topEntities = topPerf
+				performerPatternCount++
+			case maxTag >= maxPerf && maxTag >= maxStudio && maxTag > 0:
+				domType = "tag"
+				topEntities = topTag
+				tagPatternCount++
+			case maxStudio > 0:
+				domType = "studio"
+				topEntities = topStudio
+				studioPatternCount++
+			}
+			analyzed = append(analyzed, folderAnalysis{
+				Folder: folder, VideoCount: fs.videoCount,
+				DominantType: domType, TopEntities: topEntities,
+			})
+		}
+		sort.Slice(analyzed, func(i, j int) bool {
+			return analyzed[i].VideoCount > analyzed[j].VideoCount
+		})
+
+		// Detect overall organizational pattern
+		detectedPattern := "mixed"
+		if performerPatternCount > tagPatternCount && performerPatternCount > studioPatternCount {
+			detectedPattern = "performer-based (Performers/<Name>/)"
+		} else if tagPatternCount > performerPatternCount && tagPatternCount > studioPatternCount {
+			detectedPattern = "category-based (Categories/<Tag>/)"
+		} else if studioPatternCount > 0 {
+			detectedPattern = "studio-based (Studios/<Name>/)"
+		}
+
+		// Cap output to top 50 folders
+		if len(analyzed) > 50 {
+			analyzed = analyzed[:50]
+		}
+
+		return map[string]interface{}{
+			"library":           libNameFull,
+			"total_videos":      len(allVideos),
+			"total_folders":     len(folderMap),
+			"detected_pattern":  detectedPattern,
+			"folders":           analyzed,
+		}, nil
+
+	case "get_daily_briefing":
+		var vidCount, perfCount, downloadsCount, untaggedCount, errorCount, runningTasks int
+		s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&vidCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&perfCount)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos v JOIN libraries l ON v.library_id = l.id WHERE LOWER(l.name) LIKE '%download%'`).Scan(&downloadsCount)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE id NOT IN (SELECT DISTINCT video_id FROM video_tags)`).Scan(&untaggedCount)
+		s.db.QueryRow(`SELECT COUNT(*) FROM console_logs WHERE level = 'error' AND created_at > datetime('now', '-24 hours')`).Scan(&errorCount)
+		s.db.QueryRow(`SELECT COUNT(*) FROM activity_logs WHERE status = 'running'`).Scan(&runningTasks)
+
+		var snapshotJSON string
+		s.db.QueryRow("SELECT value FROM memories WHERE key = 'daily_snapshot'").Scan(&snapshotJSON)
+		prevCount := vidCount
+		if snapshotJSON != "" {
+			var snap map[string]int
+			if json.Unmarshal([]byte(snapshotJSON), &snap) == nil {
+				prevCount = snap["video_count"]
+			}
+		}
+		newVideos := vidCount - prevCount
+
+		// Recent scraper activity
+		type recentJob struct {
+			TaskType  string `json:"task_type"`
+			Message   string `json:"message"`
+			Status    string `json:"status"`
+			CreatedAt string `json:"created_at"`
+		}
+		var recentJobs []recentJob
+		jobRows, _ := s.db.Query(`SELECT task_type, COALESCE(message,''), status, created_at FROM activity_logs
+			WHERE created_at > datetime('now', '-24 hours') AND status IN ('completed','failed')
+			ORDER BY created_at DESC LIMIT 5`)
+		if jobRows != nil {
+			for jobRows.Next() {
+				var j recentJob
+				jobRows.Scan(&j.TaskType, &j.Message, &j.Status, &j.CreatedAt)
+				recentJobs = append(recentJobs, j)
+			}
+			jobRows.Close()
+		}
+
+		return map[string]interface{}{
+			"total_videos":      vidCount,
+			"total_performers":  perfCount,
+			"new_videos_delta":  newVideos,
+			"downloads_waiting": downloadsCount,
+			"untagged_videos":   untaggedCount,
+			"errors_24h":        errorCount,
+			"running_tasks":     runningTasks,
+			"recent_jobs":       recentJobs,
+		}, nil
+
+	case "find_orphaned_videos":
+		libFilter, _ := args["library_name"].(string)
+		limit := intArg(args, "limit", 2000)
+
+		baseQ := `SELECT v.id, v.title, v.file_path, COALESCE(l.name, '') FROM videos v LEFT JOIN libraries l ON v.library_id = l.id`
+		var qArgs []interface{}
+		if libFilter != "" {
+			baseQ += " WHERE LOWER(l.name) LIKE LOWER(?)"
+			qArgs = append(qArgs, "%"+libFilter+"%")
+		}
+		baseQ += " LIMIT ?"
+		qArgs = append(qArgs, limit)
+
+		rows, err := s.db.Query(baseQ, qArgs...)
+		if err != nil {
+			return nil, err
+		}
+		type orphan struct {
+			ID       int64  `json:"id"`
+			Title    string `json:"title"`
+			FilePath string `json:"file_path"`
+			Library  string `json:"library"`
+		}
+		var orphans []orphan
+		var scanned int
+		for rows.Next() {
+			var o orphan
+			rows.Scan(&o.ID, &o.Title, &o.FilePath, &o.Library)
+			scanned++
+			if _, statErr := os.Stat(o.FilePath); os.IsNotExist(statErr) {
+				orphans = append(orphans, o)
+			}
+		}
+		rows.Close()
+
+		return map[string]interface{}{
+			"scanned":        scanned,
+			"orphaned_count": len(orphans),
+			"orphans":        orphans,
+			"note":           "These DB entries have no file on disk. Use delete_video_records with the listed IDs to remove them — files are NOT touched.",
+		}, nil
+
+	case "delete_video_records":
+		rawIDs, ok := args["video_ids"]
+		if !ok {
+			return map[string]interface{}{"error": "video_ids required"}, nil
+		}
+		idSlice, ok := rawIDs.([]interface{})
+		if !ok || len(idSlice) == 0 {
+			return map[string]interface{}{"error": "video_ids must be a non-empty array"}, nil
+		}
+		var ids []int64
+		for _, raw := range idSlice {
+			switch v := raw.(type) {
+			case float64:
+				ids = append(ids, int64(v))
+			case int64:
+				ids = append(ids, v)
+			case int:
+				ids = append(ids, int64(v))
+			}
+		}
+		if len(ids) == 0 {
+			return map[string]interface{}{"error": "no valid video IDs provided"}, nil
+		}
+
+		// Build IN clause
+		ph := make([]string, len(ids))
+		iArgs := make([]interface{}, len(ids))
+		for i, id := range ids {
+			ph[i] = "?"
+			iArgs[i] = id
+		}
+		inClause := strings.Join(ph, ",")
+
+		// Delete from junction tables first, then videos
+		tables := []string{"video_performers", "video_tags", "video_studios", "dashboard_feed_items"}
+		colMap := map[string]string{
+			"video_performers":    "video_id",
+			"video_tags":          "video_id",
+			"video_studios":       "video_id",
+			"dashboard_feed_items": "item_id",
+		}
+		for _, tbl := range tables {
+			col := colMap[tbl]
+			_, _ = s.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s IN (%s)", tbl, col, inClause), iArgs...)
+		}
+		res, err := s.db.Exec(fmt.Sprintf("DELETE FROM videos WHERE id IN (%s)", inClause), iArgs...)
+		if err != nil {
+			return map[string]interface{}{"error": "delete failed: " + err.Error()}, nil
+		}
+		deleted, _ := res.RowsAffected()
+		log.Printf("[AI] delete_video_records: removed %d DB entries (IDs: %v)", deleted, ids)
+
+		return map[string]interface{}{
+			"deleted_count": deleted,
+			"requested_ids": ids,
+			"note":          "Database records removed. No files were touched on disk.",
+		}, nil
+
+	case "find_duplicate_videos":
+		targetLib, _ := args["library_name"].(string)
+		limit := intArg(args, "limit", 30)
+
+		type vidInfo struct {
+			ID        int64
+			Title     string
+			FilePath  string
+			Duration  float64
+			LibID     int64
+			LibName   string
+			Filename  string
+			NormTitle string
+			PerfKey   string
+		}
+
+		baseQ := `SELECT v.id, v.title, v.file_path, COALESCE(v.duration, 0), v.library_id, l.name
+		           FROM videos v JOIN libraries l ON v.library_id = l.id`
+		var qArgs []interface{}
+		if targetLib != "" {
+			baseQ += " WHERE LOWER(l.name) LIKE ?"
+			qArgs = append(qArgs, "%"+strings.ToLower(targetLib)+"%")
+		}
+		rows, err := s.db.Query(baseQ, qArgs...)
+		if err != nil {
+			return nil, err
+		}
+		var videos []vidInfo
+		for rows.Next() {
+			var v vidInfo
+			rows.Scan(&v.ID, &v.Title, &v.FilePath, &v.Duration, &v.LibID, &v.LibName)
+			v.Filename = strings.ToLower(filepath.Base(v.FilePath))
+			v.NormTitle = normalizeVideoTitle(v.Title)
+			videos = append(videos, v)
+		}
+		rows.Close()
+
+		// Load performers per video — sorted so the key is order-stable
+		perfsByVideo := map[int64][]string{}
+		perfRows, _ := s.db.Query(`SELECT vp.video_id, p.name FROM video_performers vp
+			JOIN performers p ON p.id = vp.performer_id ORDER BY vp.video_id, p.name`)
+		if perfRows != nil {
+			for perfRows.Next() {
+				var vid int64
+				var name string
+				perfRows.Scan(&vid, &name)
+				perfsByVideo[vid] = append(perfsByVideo[vid], name)
+			}
+			perfRows.Close()
+		}
+		for i := range videos {
+			if perfs := perfsByVideo[videos[i].ID]; len(perfs) > 0 {
+				videos[i].PerfKey = strings.Join(perfs, "|")
+			}
+		}
+
+		type dupGroup struct {
+			Reason     string                   `json:"reason"`
+			Confidence float64                  `json:"confidence"`
+			Videos     []map[string]interface{} `json:"videos"`
+		}
+
+		seen := map[string]bool{}
+		var groups []dupGroup
+
+		toEntry := func(v vidInfo) map[string]interface{} {
+			return map[string]interface{}{
+				"id": v.ID, "title": v.Title,
+				"library": v.LibName, "file": v.Filename,
+				"duration_s": int(v.Duration),
+			}
+		}
+		pairKey := func(a, b int64) string {
+			if a < b {
+				return fmt.Sprintf("%d:%d", a, b)
+			}
+			return fmt.Sprintf("%d:%d", b, a)
+		}
+		addPair := func(a, b vidInfo, reason string, conf float64) {
+			pk := pairKey(a.ID, b.ID)
+			if seen[pk] {
+				return
+			}
+			seen[pk] = true
+			groups = append(groups, dupGroup{
+				Reason:     reason,
+				Confidence: conf,
+				Videos:     []map[string]interface{}{toEntry(a), toEntry(b)},
+			})
+		}
+
+		// Tier 1: Identical filename (highest confidence)
+		filenameIdx := map[string][]vidInfo{}
+		for _, v := range videos {
+			if v.Filename == "" {
+				continue
+			}
+			filenameIdx[v.Filename] = append(filenameIdx[v.Filename], v)
+		}
+		for _, vids := range filenameIdx {
+			if len(vids) < 2 {
+				continue
+			}
+			for i := 0; i < len(vids); i++ {
+				for j := i + 1; j < len(vids); j++ {
+					addPair(vids[i], vids[j], "identical filename", 0.95)
+				}
+			}
+		}
+
+		// Tier 2: Matching normalized title across different libraries
+		titleIdx := map[string][]vidInfo{}
+		for _, v := range videos {
+			if len(v.NormTitle) < 5 {
+				continue
+			}
+			titleIdx[v.NormTitle] = append(titleIdx[v.NormTitle], v)
+		}
+		for _, vids := range titleIdx {
+			if len(vids) < 2 {
+				continue
+			}
+			for i := 0; i < len(vids); i++ {
+				for j := i + 1; j < len(vids); j++ {
+					if vids[i].LibID == vids[j].LibID {
+						continue
+					}
+					durDiff := vids[i].Duration - vids[j].Duration
+					if durDiff < 0 {
+						durDiff = -durDiff
+					}
+					conf := 0.75
+					reason := "same title (different libraries)"
+					if durDiff <= 10 {
+						conf = 0.88
+						reason = fmt.Sprintf("same title, duration matches (±%.0fs)", durDiff)
+					}
+					addPair(vids[i], vids[j], reason, conf)
+				}
+			}
+		}
+
+		// Tier 3: Same performer set + similar duration across different libraries
+		// Group by performer key + duration bucket (nearest 15s)
+		perfDurIdx := map[string][]vidInfo{}
+		for _, v := range videos {
+			if v.PerfKey == "" {
+				continue
+			}
+			bucket := (int(v.Duration) / 15) * 15
+			key := fmt.Sprintf("%s@%d", v.PerfKey, bucket)
+			perfDurIdx[key] = append(perfDurIdx[key], v)
+		}
+		for _, vids := range perfDurIdx {
+			if len(vids) < 2 {
+				continue
+			}
+			for i := 0; i < len(vids); i++ {
+				for j := i + 1; j < len(vids); j++ {
+					if vids[i].LibID == vids[j].LibID {
+						continue
+					}
+					durDiff := vids[i].Duration - vids[j].Duration
+					if durDiff < 0 {
+						durDiff = -durDiff
+					}
+					if durDiff > 30 {
+						continue
+					}
+					addPair(vids[i], vids[j],
+						fmt.Sprintf("same performers, similar duration (±%.0fs)", durDiff), 0.70)
+				}
+			}
+		}
+
+		// Sort by confidence desc, cap at limit
+		sort.Slice(groups, func(i, j int) bool { return groups[i].Confidence > groups[j].Confidence })
+		if len(groups) > limit {
+			groups = groups[:limit]
+		}
+
+		return map[string]interface{}{
+			"total_suspects": len(groups),
+			"duplicates":     groups,
+			"note":           "Review each pair — same filename/title is a strong signal, same performers+duration is weaker. Use video IDs to move or delete.",
+		}, nil
+
+	case "get_performer_stats":
+		performerQuery, _ := args["performer"].(string)
+		if performerQuery == "" {
+			return map[string]interface{}{"error": "performer name required"}, nil
+		}
+		// Find performer — prefer exact match, fall back to LIKE
+		var perfID int64
+		var perfName string
+		err := s.db.QueryRow(
+			"SELECT id, name FROM performers WHERE LOWER(name) = LOWER(?) LIMIT 1", performerQuery).Scan(&perfID, &perfName)
+		if err != nil {
+			err = s.db.QueryRow(
+				"SELECT id, name FROM performers WHERE LOWER(name) LIKE LOWER(?) ORDER BY LENGTH(name) ASC LIMIT 1",
+				"%"+performerQuery+"%").Scan(&perfID, &perfName)
+		}
+		if err != nil {
+			return map[string]interface{}{"error": "performer not found: " + performerQuery}, nil
+		}
+
+		// Totals: count, duration, avg rating
+		var videoCount, favCount int
+		var totalDuration, avgRating float64
+		s.db.QueryRow(`
+			SELECT COUNT(*),
+			       COALESCE(SUM(v.duration), 0),
+			       COALESCE(AVG(CASE WHEN v.rating > 0 THEN CAST(v.rating AS FLOAT) END), 0)
+			FROM videos v JOIN video_performers vp ON v.id = vp.video_id
+			WHERE vp.performer_id = ?`, perfID).Scan(&videoCount, &totalDuration, &avgRating)
+		s.db.QueryRow(`
+			SELECT COUNT(*) FROM videos v JOIN video_performers vp ON v.id = vp.video_id
+			WHERE vp.performer_id = ? AND v.is_favorite = 1`, perfID).Scan(&favCount)
+
+		// Rating distribution
+		ratingDist := map[string]int{"0★ (unrated)": 0, "1★": 0, "2★": 0, "3★": 0, "4★": 0, "5★": 0}
+		rdRows, _ := s.db.Query(`
+			SELECT COALESCE(v.rating, 0), COUNT(*)
+			FROM videos v JOIN video_performers vp ON v.id = vp.video_id
+			WHERE vp.performer_id = ?
+			GROUP BY COALESCE(v.rating, 0)`, perfID)
+		if rdRows != nil {
+			for rdRows.Next() {
+				var r, cnt int
+				rdRows.Scan(&r, &cnt)
+				key := fmt.Sprintf("%d★", r)
+				if r == 0 {
+					key = "0★ (unrated)"
+				}
+				ratingDist[key] = cnt
+			}
+			rdRows.Close()
+		}
+
+		// Library breakdown
+		type nameCount struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}
+		var libBreakdown []nameCount
+		lbRows, _ := s.db.Query(`
+			SELECT l.name, COUNT(v.id)
+			FROM videos v
+			JOIN video_performers vp ON v.id = vp.video_id
+			JOIN libraries l ON v.library_id = l.id
+			WHERE vp.performer_id = ?
+			GROUP BY l.id ORDER BY COUNT(v.id) DESC`, perfID)
+		if lbRows != nil {
+			for lbRows.Next() {
+				var nc nameCount
+				lbRows.Scan(&nc.Name, &nc.Count)
+				libBreakdown = append(libBreakdown, nc)
+			}
+			lbRows.Close()
+		}
+
+		// Top tags (across all their videos)
+		var topTags []nameCount
+		tagRows, _ := s.db.Query(`
+			SELECT t.name, COUNT(DISTINCT vt.video_id)
+			FROM tags t
+			JOIN video_tags vt ON t.id = vt.tag_id
+			JOIN video_performers vp ON vt.video_id = vp.video_id
+			WHERE vp.performer_id = ?
+			GROUP BY t.id ORDER BY COUNT(DISTINCT vt.video_id) DESC
+			LIMIT 10`, perfID)
+		if tagRows != nil {
+			for tagRows.Next() {
+				var nc nameCount
+				tagRows.Scan(&nc.Name, &nc.Count)
+				topTags = append(topTags, nc)
+			}
+			tagRows.Close()
+		}
+
+		// Top studios
+		var topStudios []nameCount
+		stRows, _ := s.db.Query(`
+			SELECT s.name, COUNT(DISTINCT vs.video_id)
+			FROM studios s
+			JOIN video_studios vs ON s.id = vs.studio_id
+			JOIN video_performers vp ON vs.video_id = vp.video_id
+			WHERE vp.performer_id = ?
+			GROUP BY s.id ORDER BY COUNT(DISTINCT vs.video_id) DESC
+			LIMIT 5`, perfID)
+		if stRows != nil {
+			for stRows.Next() {
+				var nc nameCount
+				stRows.Scan(&nc.Name, &nc.Count)
+				topStudios = append(topStudios, nc)
+			}
+			stRows.Close()
+		}
+
+		// 5 most recent videos
+		type recentVid struct {
+			ID      int64  `json:"id"`
+			Title   string `json:"title"`
+			AddedAt string `json:"added_at"`
+			Rating  int    `json:"rating"`
+			Library string `json:"library"`
+		}
+		var recentVideos []recentVid
+		recRows, _ := s.db.Query(`
+			SELECT v.id, v.title, v.created_at, COALESCE(v.rating, 0), COALESCE(l.name, '')
+			FROM videos v
+			JOIN video_performers vp ON v.id = vp.video_id
+			LEFT JOIN libraries l ON v.library_id = l.id
+			WHERE vp.performer_id = ?
+			ORDER BY v.created_at DESC LIMIT 5`, perfID)
+		if recRows != nil {
+			for recRows.Next() {
+				var rv recentVid
+				recRows.Scan(&rv.ID, &rv.Title, &rv.AddedAt, &rv.Rating, &rv.Library)
+				recentVideos = append(recentVideos, rv)
+			}
+			recRows.Close()
+		}
+
+		// Date range
+		var firstAdded, lastAdded string
+		s.db.QueryRow(`
+			SELECT MIN(v.created_at), MAX(v.created_at)
+			FROM videos v JOIN video_performers vp ON v.id = vp.video_id
+			WHERE vp.performer_id = ?`, perfID).Scan(&firstAdded, &lastAdded)
+
+		return map[string]interface{}{
+			"performer_id":         perfID,
+			"performer_name":       perfName,
+			"total_videos":         videoCount,
+			"favorite_count":       favCount,
+			"total_watch_time":     formatSeconds(totalDuration),
+			"total_watch_time_hrs": fmt.Sprintf("%.1fh", totalDuration/3600),
+			"avg_rating":           fmt.Sprintf("%.2f", avgRating),
+			"rating_distribution":  ratingDist,
+			"libraries":            libBreakdown,
+			"top_tags":             topTags,
+			"top_studios":          topStudios,
+			"recent_videos":        recentVideos,
+			"first_added":          firstAdded,
+			"last_added":           lastAdded,
+		}, nil
+
+	case "suggest_videos_to_watch":
+		count := intArg(args, "count", 5)
+		if count > 20 {
+			count = 20
+		}
+		libFilter, _ := args["library"].(string)
+
+		// ── Step 1: Build taste profile from favorites + 4★+ videos ──────────────
+		profQ := `SELECT id FROM videos WHERE is_favorite = 1 OR COALESCE(rating, 0) >= 4`
+		profRows, err := s.db.Query(profQ)
+		if err != nil {
+			return nil, err
+		}
+		var profileIDs []int64
+		profileSet := map[int64]bool{}
+		for profRows.Next() {
+			var id int64
+			profRows.Scan(&id)
+			profileIDs = append(profileIDs, id)
+			profileSet[id] = true
+		}
+		profRows.Close()
+
+		if len(profileIDs) == 0 {
+			return map[string]interface{}{
+				"message": "No favorites or 4★+ rated videos found. Rate or favorite some videos first so I can learn your taste.",
+			}, nil
+		}
+
+		// Count performer/tag/studio frequency across profile videos
+		perfFreq := map[int64]int{}
+		tagFreq := map[int64]int{}
+		studioFreq := map[int64]int{}
+
+		buildInPlaceholders := func(n int) string {
+			if n == 0 {
+				return ""
+			}
+			ph := make([]string, n)
+			for i := range ph {
+				ph[i] = "?"
+			}
+			return strings.Join(ph, ",")
+		}
+		int64sToIface := func(ids []int64) []interface{} {
+			out := make([]interface{}, len(ids))
+			for i, id := range ids {
+				out[i] = id
+			}
+			return out
+		}
+
+		if len(profileIDs) > 0 {
+			ph := buildInPlaceholders(len(profileIDs))
+			iargs := int64sToIface(profileIDs)
+
+			pr, _ := s.db.Query(fmt.Sprintf("SELECT performer_id FROM video_performers WHERE video_id IN (%s)", ph), iargs...)
+			if pr != nil {
+				for pr.Next() {
+					var pid int64
+					pr.Scan(&pid)
+					perfFreq[pid]++
+				}
+				pr.Close()
+			}
+			tr, _ := s.db.Query(fmt.Sprintf("SELECT tag_id FROM video_tags WHERE video_id IN (%s)", ph), iargs...)
+			if tr != nil {
+				for tr.Next() {
+					var tid int64
+					tr.Scan(&tid)
+					tagFreq[tid]++
+				}
+				tr.Close()
+			}
+			sr, _ := s.db.Query(fmt.Sprintf("SELECT studio_id FROM video_studios WHERE video_id IN (%s)", ph), iargs...)
+			if sr != nil {
+				for sr.Next() {
+					var sid int64
+					sr.Scan(&sid)
+					studioFreq[sid]++
+				}
+				sr.Close()
+			}
+		}
+
+		// Sort frequency maps and extract top IDs
+		type kv64 struct{ k int64; v int }
+		toSortedIDs := func(m map[int64]int, n int) []int64 {
+			var pairs []kv64
+			for k, v := range m {
+				pairs = append(pairs, kv64{k, v})
+			}
+			sort.Slice(pairs, func(i, j int) bool { return pairs[i].v > pairs[j].v })
+			out := make([]int64, 0, n)
+			for i, p := range pairs {
+				if i >= n {
+					break
+				}
+				out = append(out, p.k)
+			}
+			return out
+		}
+		perfIDList := toSortedIDs(perfFreq, 20)
+		tagIDList := toSortedIDs(tagFreq, 20)
+		studioIDList := toSortedIDs(studioFreq, 10)
+
+		if len(perfIDList) == 0 && len(tagIDList) == 0 && len(studioIDList) == 0 {
+			return map[string]interface{}{
+				"message": "Your favorite videos don't have enough metadata (performers/tags/studios) to build recommendations. Try adding performer and tag data to your videos.",
+			}, nil
+		}
+
+		// ── Step 2: Score candidates via SQL ──────────────────────────────────────
+		// Build a SQL score expression using EXISTS counts
+		var scoreExpr strings.Builder
+		var scoreArgs []interface{}
+
+		if len(perfIDList) > 0 {
+			ph := buildInPlaceholders(len(perfIDList))
+			scoreExpr.WriteString(fmt.Sprintf(`
+				(SELECT COUNT(*) FROM video_performers vp2 WHERE vp2.video_id = v.id AND vp2.performer_id IN (%s)) * 3`, ph))
+			for _, id := range perfIDList {
+				scoreArgs = append(scoreArgs, id)
+			}
+		}
+		if len(tagIDList) > 0 {
+			ph := buildInPlaceholders(len(tagIDList))
+			if scoreExpr.Len() > 0 {
+				scoreExpr.WriteString(" + ")
+			}
+			scoreExpr.WriteString(fmt.Sprintf(`
+				(SELECT COUNT(*) FROM video_tags vt2 WHERE vt2.video_id = v.id AND vt2.tag_id IN (%s)) * 1`, ph))
+			for _, id := range tagIDList {
+				scoreArgs = append(scoreArgs, id)
+			}
+		}
+		if len(studioIDList) > 0 {
+			ph := buildInPlaceholders(len(studioIDList))
+			if scoreExpr.Len() > 0 {
+				scoreExpr.WriteString(" + ")
+			}
+			scoreExpr.WriteString(fmt.Sprintf(`
+				(SELECT COUNT(*) FROM video_studios vs2 WHERE vs2.video_id = v.id AND vs2.studio_id IN (%s)) * 2`, ph))
+			for _, id := range studioIDList {
+				scoreArgs = append(scoreArgs, id)
+			}
+		}
+
+		// Exclude profile videos (cap at 200 to stay under SQLite's param limit)
+		excludeIDs := profileIDs
+		if len(excludeIDs) > 200 {
+			excludeIDs = excludeIDs[:200]
+		}
+		excludePH := buildInPlaceholders(len(excludeIDs))
+
+		libCond := ""
+		var libArgs []interface{}
+		if libFilter != "" {
+			libCond = "AND LOWER(l.name) LIKE LOWER(?)"
+			libArgs = append(libArgs, "%"+libFilter+"%")
+		}
+
+		candQ := fmt.Sprintf(`
+			SELECT v.id, v.title, COALESCE(v.duration, 0), COALESCE(v.rating, 0), COALESCE(l.name, ''),
+			       COALESCE(v.thumbnail_path, ''),
+			       COALESCE((SELECT GROUP_CONCAT(p.name, ', ') FROM video_performers vp JOIN performers p ON p.id = vp.performer_id WHERE vp.video_id = v.id), '') AS performers,
+			       (%s) AS score
+			FROM videos v
+			LEFT JOIN libraries l ON v.library_id = l.id
+			WHERE v.id NOT IN (%s)
+			  AND COALESCE(v.is_favorite, 0) = 0
+			  %s
+			HAVING score > 0
+			ORDER BY score DESC, RANDOM()
+			LIMIT ?`, scoreExpr.String(), excludePH, libCond)
+
+		var allArgs []interface{}
+		allArgs = append(allArgs, scoreArgs...)
+		allArgs = append(allArgs, int64sToIface(excludeIDs)...)
+		allArgs = append(allArgs, libArgs...)
+		allArgs = append(allArgs, count*3) // fetch 3× to allow for diversity
+
+		candRows, err := s.db.Query(candQ, allArgs...)
+		if err != nil {
+			log.Printf("[AI] suggest_videos_to_watch query error: %v", err)
+			return nil, err
+		}
+		defer candRows.Close()
+
+		type suggestion struct {
+			ID            int64
+			Title         string
+			Duration      float64
+			Rating        int
+			Library       string
+			ThumbnailPath string
+			Performers    string
+			Score         float64
+		}
+		var suggestions []suggestion
+		for candRows.Next() {
+			var s suggestion
+			candRows.Scan(&s.ID, &s.Title, &s.Duration, &s.Rating, &s.Library, &s.ThumbnailPath, &s.Performers, &s.Score)
+			suggestions = append(suggestions, s)
+		}
+		if len(suggestions) > count {
+			suggestions = suggestions[:count]
+		}
+
+		// Build result, enriching each suggestion with which specific performers/tags matched
+		results := make([]map[string]interface{}, 0, len(suggestions))
+		for _, sg := range suggestions {
+			entry := map[string]interface{}{
+				"id":             sg.ID,
+				"title":          sg.Title,
+				"duration":       formatSeconds(sg.Duration),
+				"rating":         sg.Rating,
+				"thumbnail_path": sg.ThumbnailPath,
+				"library":        sg.Library,
+				"performers":     sg.Performers,
+				"score":          sg.Score,
+			}
+
+			// Matched performers (from taste profile)
+			if len(perfIDList) > 0 {
+				ph := buildInPlaceholders(len(perfIDList))
+				mArgs := append([]interface{}{sg.ID}, int64sToIface(perfIDList)...)
+				mArgs = append(mArgs, 3)
+				mRows, mErr := s.db.Query(fmt.Sprintf(
+					`SELECT p.name FROM video_performers vp JOIN performers p ON p.id=vp.performer_id
+					 WHERE vp.video_id=? AND vp.performer_id IN (%s) LIMIT ?`, ph), mArgs...)
+				if mErr == nil {
+					var mp []string
+					for mRows.Next() {
+						var n string
+						if mRows.Scan(&n) == nil {
+							mp = append(mp, n)
+						}
+					}
+					mRows.Close()
+					if len(mp) > 0 {
+						entry["matched_performers"] = mp
+					}
+				}
+			}
+
+			// Matched tags (from taste profile)
+			if len(tagIDList) > 0 {
+				ph := buildInPlaceholders(len(tagIDList))
+				tArgs := append([]interface{}{sg.ID}, int64sToIface(tagIDList)...)
+				tArgs = append(tArgs, 3)
+				tRows, tErr := s.db.Query(fmt.Sprintf(
+					`SELECT t.name FROM video_tags vt JOIN tags t ON t.id=vt.tag_id
+					 WHERE vt.video_id=? AND vt.tag_id IN (%s) LIMIT ?`, ph), tArgs...)
+				if tErr == nil {
+					var mt []string
+					for tRows.Next() {
+						var n string
+						if tRows.Scan(&n) == nil {
+							mt = append(mt, n)
+						}
+					}
+					tRows.Close()
+					if len(mt) > 0 {
+						entry["matched_tags"] = mt
+					}
+				}
+			}
+
+			results = append(results, entry)
+		}
+
+		return map[string]interface{}{
+			"suggestions":    results,
+			"based_on":       fmt.Sprintf("taste profile built from %d favorite/4★+ videos", len(profileIDs)),
+			"top_performers": len(perfIDList),
+			"top_tags":       len(tagIDList),
+		}, nil
+
+	case "get_favorites":
+		limit := intArg(args, "limit", 20)
+		rows, err := s.db.Query(`
+			SELECT v.id, v.title, COALESCE(v.duration, 0), COALESCE(v.rating, 0),
+			       COALESCE(v.thumbnail_path, ''),
+			       GROUP_CONCAT(p.name, ', ') as performers
+			FROM videos v
+			LEFT JOIN video_performers vp ON v.id = vp.video_id
+			LEFT JOIN performers p ON vp.performer_id = p.id
+			WHERE v.is_favorite = 1
+			GROUP BY v.id
+			ORDER BY v.updated_at DESC
+			LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var title, thumbPath string
+			var duration float64
+			var rating int
+			var performers sql.NullString
+			if rows.Scan(&id, &title, &duration, &rating, &thumbPath, &performers) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "title": title, "duration": formatSeconds(duration),
+					"rating": rating, "is_favorite": true,
+					"thumbnail_path": thumbPath,
+					"performers":     performers.String,
+				})
+			}
+		}
+		return map[string]interface{}{"favorites": results, "count": len(results)}, nil
+
+	case "get_top_rated":
+		limit := intArg(args, "limit", 20)
+		minRating := intArg(args, "min_rating", 1)
+		rows, err := s.db.Query(`
+			SELECT v.id, v.title, COALESCE(v.duration, 0), v.rating,
+			       COALESCE(v.thumbnail_path, ''),
+			       GROUP_CONCAT(p.name, ', ') as performers
+			FROM videos v
+			LEFT JOIN video_performers vp ON v.id = vp.video_id
+			LEFT JOIN performers p ON vp.performer_id = p.id
+			WHERE v.rating >= ?
+			GROUP BY v.id
+			ORDER BY v.rating DESC, v.updated_at DESC
+			LIMIT ?`, minRating, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var title, thumbPath string
+			var duration float64
+			var rating int
+			var performers sql.NullString
+			if rows.Scan(&id, &title, &duration, &rating, &thumbPath, &performers) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "title": title, "duration": formatSeconds(duration),
+					"rating":         rating,
+					"thumbnail_path": thumbPath,
+					"performers":     performers.String,
+				})
+			}
+		}
+		return map[string]interface{}{"top_rated": results, "count": len(results)}, nil
+
+	case "find_untagged_videos":
+		libFilter, _ := args["library_name"].(string)
+		perfFilter, _ := args["performer"].(string)
+		limit := intArg(args, "limit", 20)
+		if limit > 50 {
+			limit = 50
+		}
+
+		var conds []string
+		var qArgs []interface{}
+		conds = append(conds, `NOT EXISTS (SELECT 1 FROM video_tags vt WHERE vt.video_id = v.id)`)
+		if libFilter != "" {
+			conds = append(conds, "LOWER(l.name) LIKE LOWER(?)")
+			qArgs = append(qArgs, "%"+libFilter+"%")
+		}
+		if perfFilter != "" {
+			conds = append(conds, `EXISTS (SELECT 1 FROM video_performers vp JOIN performers p ON p.id = vp.performer_id WHERE vp.video_id = v.id AND LOWER(p.name) LIKE LOWER(?))`)
+			qArgs = append(qArgs, "%"+perfFilter+"%")
+		}
+		where := "WHERE " + strings.Join(conds, " AND ")
+		qArgs = append(qArgs, limit)
+
+		rows, err := s.db.Query(fmt.Sprintf(`
+			SELECT v.id, v.title, COALESCE(v.thumbnail_path,''), COALESCE(v.rating,0),
+			       COALESCE((SELECT GROUP_CONCAT(p.name,', ') FROM video_performers vp JOIN performers p ON p.id=vp.performer_id WHERE vp.video_id=v.id),'') AS performers
+			FROM videos v LEFT JOIN libraries l ON l.id=v.library_id
+			%s ORDER BY v.created_at DESC LIMIT ?`, where), qArgs...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		results := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var title, thumbPath, performers string
+			var rating int
+			if rows.Scan(&id, &title, &thumbPath, &rating, &performers) == nil {
+				results = append(results, map[string]interface{}{
+					"id": id, "title": title,
+					"thumbnail_path": thumbPath,
+					"rating":         rating,
+					"performers":     performers,
+				})
+			}
+		}
+		return map[string]interface{}{
+			"untagged_videos": results,
+			"count":           len(results),
+			"note":            "For each video, call suggest_tags_for_video(video_id) then apply_tags_to_video(video_id, tags) to tag it.",
+		}, nil
+
+	case "get_library_health":
+		var total, rated, untagged, noPerformers, recentAdded int
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos`).Scan(&total)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE rating IS NOT NULL AND rating > 0`).Scan(&rated)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos v WHERE NOT EXISTS (SELECT 1 FROM video_tags vt WHERE vt.video_id = v.id)`).Scan(&untagged)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos v WHERE NOT EXISTS (SELECT 1 FROM video_performers vp WHERE vp.video_id = v.id)`).Scan(&noPerformers)
+		s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE created_at > datetime('now', '-7 days')`).Scan(&recentAdded)
+
+		var totalPerformers, totalTags, totalStudios, totalLibraries int
+		s.db.QueryRow(`SELECT COUNT(*) FROM performers`).Scan(&totalPerformers)
+		s.db.QueryRow(`SELECT COUNT(*) FROM tags`).Scan(&totalTags)
+		s.db.QueryRow(`SELECT COUNT(*) FROM studios`).Scan(&totalStudios)
+		s.db.QueryRow(`SELECT COUNT(*) FROM libraries`).Scan(&totalLibraries)
+
+		// Library breakdown
+		libRows, _ := s.db.Query(`SELECT l.name, COUNT(v.id) as cnt FROM libraries l LEFT JOIN videos v ON v.library_id = l.id GROUP BY l.id, l.name ORDER BY cnt DESC`)
+		var libraries []map[string]interface{}
+		if libRows != nil {
+			for libRows.Next() {
+				var lname string
+				var cnt int
+				if libRows.Scan(&lname, &cnt) == nil {
+					libraries = append(libraries, map[string]interface{}{"name": lname, "videos": cnt})
+				}
+			}
+			libRows.Close()
+		}
+
+		// Health score: weighted penalties per issue category
+		score := 100
+		if total > 0 {
+			untaggedPct := untagged * 100 / total
+			unratedPct := (total - rated) * 100 / total
+			noPerformerPct := noPerformers * 100 / total
+			if untaggedPct > 80 {
+				score -= 30
+			} else if untaggedPct > 50 {
+				score -= 20
+			} else if untaggedPct > 20 {
+				score -= 10
+			}
+			if unratedPct > 80 {
+				score -= 25
+			} else if unratedPct > 60 {
+				score -= 15
+			} else if unratedPct > 40 {
+				score -= 8
+			}
+			if noPerformerPct > 50 {
+				score -= 20
+			} else if noPerformerPct > 25 {
+				score -= 10
+			} else if noPerformerPct > 10 {
+				score -= 5
+			}
+		}
+		if score < 0 {
+			score = 0
+		}
+
+		grade := "A"
+		switch {
+		case score < 40:
+			grade = "D"
+		case score < 55:
+			grade = "C"
+		case score < 70:
+			grade = "B"
+		}
+
+		return map[string]interface{}{
+			"health_score":        score,
+			"health_grade":        grade,
+			"totals": map[string]interface{}{
+				"videos": total, "performers": totalPerformers,
+				"tags": totalTags, "studios": totalStudios, "libraries": totalLibraries,
+			},
+			"untagged":         untagged,
+			"untagged_pct":     func() int { if total == 0 { return 0 }; return untagged * 100 / total }(),
+			"unrated":          total - rated,
+			"unrated_pct":      func() int { if total == 0 { return 0 }; return (total - rated) * 100 / total }(),
+			"no_performers":    noPerformers,
+			"no_performer_pct": func() int { if total == 0 { return 0 }; return noPerformers * 100 / total }(),
+			"recent_additions": recentAdded,
+			"libraries":        libraries,
+		}, nil
+
+	case "bulk_apply_tags":
+		rawIDs, ok := args["video_ids"]
+		if !ok {
+			return map[string]interface{}{"error": "video_ids required"}, nil
+		}
+		idSlice, ok := rawIDs.([]interface{})
+		if !ok || len(idSlice) == 0 {
+			return map[string]interface{}{"error": "video_ids must be a non-empty array"}, nil
+		}
+		maxTags := intArg(args, "max_tags_per_video", 5)
+		if maxTags < 1 {
+			maxTags = 1
+		}
+		if maxTags > 15 {
+			maxTags = 15
+		}
+
+		var videoIDs []int64
+		for _, r := range idSlice {
+			switch v := r.(type) {
+			case float64:
+				videoIDs = append(videoIDs, int64(v))
+			case int64:
+				videoIDs = append(videoIDs, v)
+			case int:
+				videoIDs = append(videoIDs, int64(v))
+			}
+		}
+		if len(videoIDs) == 0 {
+			return map[string]interface{}{"error": "no valid video IDs"}, nil
+		}
+
+		type bulkResult struct {
+			ID          int64    `json:"id"`
+			Title       string   `json:"title"`
+			TagsApplied []string `json:"tags_applied"`
+			Skipped     bool     `json:"skipped,omitempty"` // no performers
+		}
+
+		var results []bulkResult
+		totalApplied := 0
+
+		perfPH := func(n int) string {
+			p := make([]string, n)
+			for i := range p {
+				p[i] = "?"
+			}
+			return strings.Join(p, ",")
+		}
+
+		for _, vid := range videoIDs {
+			var title string
+			s.db.QueryRow("SELECT title FROM videos WHERE id=?", vid).Scan(&title)
+
+			// Get this video's performer IDs
+			perfRows, _ := s.db.Query("SELECT performer_id FROM video_performers WHERE video_id=?", vid)
+			var perfArgs []interface{}
+			for perfRows.Next() {
+				var pid int64
+				if perfRows.Scan(&pid) == nil {
+					perfArgs = append(perfArgs, pid)
+				}
+			}
+			perfRows.Close()
+
+			if len(perfArgs) == 0 {
+				results = append(results, bulkResult{ID: vid, Title: title, Skipped: true})
+				continue
+			}
+
+			// Find top tags from sibling videos by same performers, excluding already-applied tags
+			qArgs := append(perfArgs, vid, vid, maxTags)
+			tagRows, err := s.db.Query(fmt.Sprintf(`
+				SELECT t.id, t.name, COUNT(*) as freq
+				FROM video_performers vp
+				JOIN video_tags vt ON vt.video_id = vp.video_id
+				JOIN tags t ON t.id = vt.tag_id
+				WHERE vp.performer_id IN (%s)
+				  AND vp.video_id != ?
+				  AND NOT EXISTS (SELECT 1 FROM video_tags ex WHERE ex.video_id=? AND ex.tag_id=t.id)
+				GROUP BY t.id, t.name
+				ORDER BY freq DESC
+				LIMIT ?`, perfPH(len(perfArgs))), qArgs...)
+
+			var applied []string
+			if err == nil {
+				for tagRows.Next() {
+					var tagID int64
+					var tagName string
+					var freq int
+					if tagRows.Scan(&tagID, &tagName, &freq) == nil {
+						if _, err := s.db.Exec("INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?,?)", vid, tagID); err == nil {
+							applied = append(applied, tagName)
+						}
+					}
+				}
+				tagRows.Close()
+			}
+
+			results = append(results, bulkResult{ID: vid, Title: title, TagsApplied: applied})
+			totalApplied += len(applied)
+		}
+
+		skipped := 0
+		for _, r := range results {
+			if r.Skipped {
+				skipped++
+			}
+		}
+		log.Printf("[AI] bulk_apply_tags: processed %d videos, applied %d tags total", len(videoIDs), totalApplied)
+
+		return map[string]interface{}{
+			"processed":          len(videoIDs),
+			"total_tags_applied": totalApplied,
+			"skipped_no_performers": skipped,
+			"videos":             results,
+		}, nil
+
+	case "suggest_tags_for_video":
+		videoID := int64(floatArg(args, "video_id", 0))
+		limit := intArg(args, "limit", 10)
+		if videoID == 0 {
+			return map[string]interface{}{"error": "video_id required"}, nil
+		}
+
+		// Get performers on this video
+		perfRows, err := s.db.Query(`
+			SELECT p.id FROM video_performers vp
+			JOIN performers p ON p.id = vp.performer_id
+			WHERE vp.video_id = ?`, videoID)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+		var perfIDs []interface{}
+		for perfRows.Next() {
+			var pid int64
+			if perfRows.Scan(&pid) == nil {
+				perfIDs = append(perfIDs, pid)
+			}
+		}
+		perfRows.Close()
+
+		if len(perfIDs) == 0 {
+			return map[string]interface{}{"suggestions": []interface{}{}, "note": "No performers linked to this video — cannot suggest tags"}, nil
+		}
+
+		// Get tags already on this video
+		existingRows, _ := s.db.Query(`SELECT tag_id FROM video_tags WHERE video_id = ?`, videoID)
+		existingTags := map[int64]bool{}
+		for existingRows.Next() {
+			var tid int64
+			if existingRows.Scan(&tid) == nil {
+				existingTags[tid] = true
+			}
+		}
+		existingRows.Close()
+
+		// Find top tags applied to other videos by same performers, excluding already-applied tags
+		ph := make([]string, len(perfIDs))
+		for i := range perfIDs {
+			ph[i] = "?"
+		}
+		inClause := strings.Join(ph, ",")
+		qArgs := append(perfIDs, videoID)
+		tagRows, err := s.db.Query(fmt.Sprintf(`
+			SELECT t.id, t.name, COUNT(*) as freq
+			FROM video_performers vp
+			JOIN video_tags vt ON vt.video_id = vp.video_id
+			JOIN tags t ON t.id = vt.tag_id
+			WHERE vp.performer_id IN (%s)
+			  AND vp.video_id != ?
+			GROUP BY t.id, t.name
+			ORDER BY freq DESC
+			LIMIT ?`, inClause), append(qArgs, limit)...)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+		defer tagRows.Close()
+
+		var suggestions []map[string]interface{}
+		for tagRows.Next() {
+			var tid int64
+			var tname string
+			var freq int
+			if tagRows.Scan(&tid, &tname, &freq) == nil && !existingTags[tid] {
+				suggestions = append(suggestions, map[string]interface{}{
+					"tag_id": tid, "name": tname, "frequency": freq,
+				})
+			}
+		}
+		if suggestions == nil {
+			suggestions = []map[string]interface{}{}
+		}
+		return map[string]interface{}{
+			"video_id":    videoID,
+			"suggestions": suggestions,
+			"count":       len(suggestions),
+		}, nil
+
+	case "apply_tags_to_video":
+		videoID := int64(floatArg(args, "video_id", 0))
+		if videoID == 0 {
+			return map[string]interface{}{"error": "video_id required"}, nil
+		}
+		rawTags, ok := args["tags"]
+		if !ok {
+			return map[string]interface{}{"error": "tags array required"}, nil
+		}
+		tagSlice, ok := rawTags.([]interface{})
+		if !ok || len(tagSlice) == 0 {
+			return map[string]interface{}{"error": "tags must be a non-empty array"}, nil
+		}
+
+		var applied []string
+		var skipped []string
+		for _, rawTag := range tagSlice {
+			tagName, ok := rawTag.(string)
+			if !ok || strings.TrimSpace(tagName) == "" {
+				continue
+			}
+			tagName = strings.TrimSpace(tagName)
+
+			// Find or create tag
+			var tagID int64
+			err := s.db.QueryRow(`SELECT id FROM tags WHERE LOWER(name) = LOWER(?)`, tagName).Scan(&tagID)
+			if err == sql.ErrNoRows {
+				res, err := s.db.Exec(`INSERT INTO tags (name) VALUES (?)`, tagName)
+				if err != nil {
+					skipped = append(skipped, tagName+" (create failed)")
+					continue
+				}
+				tagID, _ = res.LastInsertId()
+			} else if err != nil {
+				skipped = append(skipped, tagName+" (lookup failed)")
+				continue
+			}
+
+			// Link to video (ignore duplicate)
+			_, err = s.db.Exec(`INSERT OR IGNORE INTO video_tags (video_id, tag_id) VALUES (?, ?)`, videoID, tagID)
+			if err != nil {
+				skipped = append(skipped, tagName+" (link failed)")
+			} else {
+				applied = append(applied, tagName)
+			}
+		}
+
+		return map[string]interface{}{
+			"video_id": videoID,
+			"applied":  applied,
+			"skipped":  skipped,
+			"note":     fmt.Sprintf("Applied %d tag(s) to video %d", len(applied), videoID),
+		}, nil
+
+	case "set_video_rating":
+		videoID := int64(floatArg(args, "video_id", 0))
+		rating := intArg(args, "rating", -1)
+		if videoID == 0 {
+			return map[string]interface{}{"error": "video_id required"}, nil
+		}
+		if rating < 0 || rating > 5 {
+			return map[string]interface{}{"error": "rating must be 0-5"}, nil
+		}
+
+		// Verify video exists and get current state
+		var oldRating int
+		var title string
+		err := s.db.QueryRow(`SELECT COALESCE(rating, 0), title FROM videos WHERE id = ?`, videoID).Scan(&oldRating, &title)
+		if err == sql.ErrNoRows {
+			return map[string]interface{}{"error": fmt.Sprintf("video %d not found", videoID)}, nil
+		} else if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+
+		_, err = s.db.Exec(`UPDATE videos SET rating = ? WHERE id = ?`, rating, videoID)
+		if err != nil {
+			return map[string]interface{}{"error": "update failed: " + err.Error()}, nil
+		}
+		log.Printf("[AI] set_video_rating: video %d (%s) rated %d (was %d)", videoID, title, rating, oldRating)
+
+		return map[string]interface{}{
+			"video_id":   videoID,
+			"title":      title,
+			"old_rating": oldRating,
+			"new_rating": rating,
+		}, nil
+
+	case "toggle_video_favorite":
+		videoID := int64(floatArg(args, "video_id", 0))
+		if videoID == 0 {
+			return map[string]interface{}{"error": "video_id required"}, nil
+		}
+
+		var isFav int
+		var title string
+		err := s.db.QueryRow(`SELECT COALESCE(is_favorite, 0), title FROM videos WHERE id = ?`, videoID).Scan(&isFav, &title)
+		if err == sql.ErrNoRows {
+			return map[string]interface{}{"error": fmt.Sprintf("video %d not found", videoID)}, nil
+		} else if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+
+		newFav := 0
+		if isFav == 0 {
+			newFav = 1
+		}
+		_, err = s.db.Exec(`UPDATE videos SET is_favorite = ? WHERE id = ?`, newFav, videoID)
+		if err != nil {
+			return map[string]interface{}{"error": "update failed: " + err.Error()}, nil
+		}
+
+		action := "added to favorites"
+		if newFav == 0 {
+			action = "removed from favorites"
+		}
+		log.Printf("[AI] toggle_video_favorite: video %d (%s) %s", videoID, title, action)
+
+		return map[string]interface{}{
+			"video_id":    videoID,
+			"title":       title,
+			"is_favorite": newFav == 1,
+			"action":      action,
+		}, nil
+
+	default:
+		return map[string]interface{}{"error": fmt.Sprintf("Unknown tool: %s", name)}, nil
+	}
+}
+
+// fetchSiteInfo fetches a page and returns structural info for scraper config suggestions
+func (s *AICompanionService) fetchSiteInfo(page1URL, page2URL string) (interface{}, error) {
+	client := &http.Client{Timeout: 12 * time.Second}
+
+	// Detect pagination if page2 provided
+	paginationInfo := map[string]interface{}{
+		"template":    "",
+		"starts_at":   1,
+		"confidence":  "unknown",
+		"notes":       "No second page URL provided",
+	}
+	if page2URL != "" {
+		// Inline pagination detection (mirrors the handler logic)
+		detected := detectPaginationForAI(page1URL, page2URL)
+		paginationInfo = detected
+	}
+
+	// Fetch page1 HTML
+	req, err := http.NewRequest("GET", page1URL, nil)
+	if err != nil {
+		return map[string]interface{}{
+			"error":          fmt.Sprintf("Invalid URL: %v", err),
+			"pagination":     paginationInfo,
+		}, nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return map[string]interface{}{
+			"error":          fmt.Sprintf("Failed to fetch page: %v", err),
+			"pagination":     paginationInfo,
+		}, nil
+	}
+	defer resp.Body.Close()
+
+	// Read up to 80KB
+	limitReader := io.LimitReader(resp.Body, 80*1024)
+	bodyBytes, err := io.ReadAll(limitReader)
+	if err != nil {
+		return map[string]interface{}{"error": fmt.Sprintf("Failed to read page: %v", err)}, nil
+	}
+	html := string(bodyBytes)
+
+	// Extract page title
+	title := ""
+	titleRe := regexp.MustCompile(`(?i)<title[^>]*>([^<]+)</title>`)
+	if m := titleRe.FindStringSubmatch(html); len(m) > 1 {
+		title = strings.TrimSpace(m[1])
+	}
+
+	// Strip all tags for content summary
+	stripTags := regexp.MustCompile(`<[^>]+>`)
+	text := stripTags.ReplaceAllString(html, " ")
+	// Collapse whitespace
+	wsRe := regexp.MustCompile(`\s+`)
+	text = strings.TrimSpace(wsRe.ReplaceAllString(text, " "))
+	if len(text) > 2000 {
+		text = text[:2000]
+	}
+
+	// Count structural elements
+	linkCount := strings.Count(strings.ToLower(html), "<a ")
+	imgCount := strings.Count(strings.ToLower(html), "<img ")
+	videoCount := strings.Count(strings.ToLower(html), "<video") + strings.Count(strings.ToLower(html), "iframe")
+
+	return map[string]interface{}{
+		"url":               page1URL,
+		"page_title":        title,
+		"status_code":       resp.StatusCode,
+		"link_count":        linkCount,
+		"image_count":       imgCount,
+		"video_embed_count": videoCount,
+		"content_preview":   text,
+		"pagination":        paginationInfo,
+	}, nil
+}
+
+// detectPaginationForAI is a lightweight version of analyzePaginationURLs for use in the AI service
+func detectPaginationForAI(url1, url2 string) map[string]interface{} {
+	// Compare the two URLs to find a numeric difference
+	// Simple approach: find the token that changed
+	if len(url1) == 0 || len(url2) == 0 {
+		return map[string]interface{}{"template": "", "confidence": "low", "notes": "Missing URLs"}
+	}
+
+	// Find common prefix
+	prefix := ""
+	for i := 0; i < len(url1) && i < len(url2); i++ {
+		if url1[i] == url2[i] {
+			prefix += string(url1[i])
+		} else {
+			break
+		}
+	}
+
+	// Find common suffix (reversed)
+	suffix := ""
+	for i := 0; i < len(url1) && i < len(url2); i++ {
+		if url1[len(url1)-1-i] == url2[len(url2)-1-i] {
+			suffix = string(url1[len(url1)-1-i]) + suffix
+		} else {
+			break
+		}
+	}
+
+	middle1 := url1[len(prefix) : len(url1)-len(suffix)]
+	middle2 := url2[len(prefix) : len(url2)-len(suffix)]
+
+	n1, e1 := strconv.Atoi(middle1)
+	n2, e2 := strconv.Atoi(middle2)
+	if e1 == nil && e2 == nil && n2 == n1+1 {
+		template := prefix + "{page}" + suffix
+		return map[string]interface{}{
+			"template":   template,
+			"starts_at":  n1,
+			"confidence": "high",
+			"notes":      fmt.Sprintf("Page number changes from %d to %d between the two URLs", n1, n2),
+		}
+	}
+
+	return map[string]interface{}{
+		"template":   "",
+		"starts_at":  1,
+		"confidence": "low",
+		"notes":      "Could not auto-detect pagination pattern",
+	}
+}
+
+// normalizeVideoTitle strips resolution/quality markers for duplicate-title comparison
+var (
+	reBrackets   = regexp.MustCompile(`[\(\[\{][^\)\]\}]*[\)\]\}]`)
+	reWhitespace = regexp.MustCompile(`\s+`)
+)
+
+func normalizeVideoTitle(title string) string {
+	s := strings.ToLower(title)
+	s = reBrackets.ReplaceAllString(s, " ")
+	s = strings.NewReplacer(
+		"1080p", "", "720p", "", "480p", "", "360p", "",
+		"2160p", "", "4k", "", "uhd", "", "full hd", "", " hd ", " ",
+		"x264", "", "x265", "", "hevc", "", "avc", "",
+		".mp4", "", ".mkv", "", ".avi", "", ".wmv", "",
+	).Replace(s)
+	s = strings.TrimSpace(reWhitespace.ReplaceAllString(s, " "))
+	return s
+}
+
+// intArg extracts an int from args with a default value
+func intArg(args map[string]interface{}, key string, defaultVal int) int {
+	if v, ok := args[key]; ok {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		case int64:
+			return int(n)
+		}
+	}
+	return defaultVal
+}
+
+// floatArg extracts a float64 from args with a default value
+func floatArg(args map[string]interface{}, key string, defaultVal float64) float64 {
+	if v, ok := args[key]; ok {
+		switch n := v.(type) {
+		case float64:
+			return n
+		case int:
+			return float64(n)
+		case int64:
+			return float64(n)
+		}
+	}
+	return defaultVal
+}
+
+// formatSeconds converts a duration in seconds to "H:MM:SS" or "M:SS"
+func formatSeconds(secs float64) string {
+	total := int(secs)
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+// topNFromMap returns the top N keys by value from a map
+func topNFromMap(m map[string]int, n int) []string {
+	type kv struct {
+		key string
+		val int
+	}
+	var pairs []kv
+	for k, v := range m {
+		pairs = append(pairs, kv{k, v})
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].val > pairs[j].val })
+	out := make([]string, 0, n)
+	for i, p := range pairs {
+		if i >= n {
+			break
+		}
+		out = append(out, p.key)
+	}
+	return out
+}
+
+// ChatLLM processes user messages using LM Studio with tool calling, falling back to rule-based
+func (s *AICompanionService) ChatLLM(message string, history []map[string]string) (string, error) {
+	config := s.GetAIConfig()
+	if !config.Enabled {
+		log.Printf("[AI] LLM is disabled in config")
+		return "", fmt.Errorf("LLM disabled in config")
+	}
+
+	log.Printf("[AI] ChatLLM called - URL: %s, Model: %s, Message: %.80s...", config.LMStudioURL, config.ModelName, message)
+	startTime := time.Now()
+
+	// Build system prompt with full app context
+	appContext := s.GetFullContext()
+	systemPrompt := `You are the AI Companion for a Video Storage application. You have direct access to the app's database and systems through tool calls.
+
+You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health.
+
+When the user asks about data (videos, performers, stats, etc.), use the appropriate tool to get real-time data rather than guessing.
+When the user asks about app status (running tasks, errors, scrapers, JDownloader), use the relevant status tools.
+You can save and recall memories to remember user preferences.
+You can help organize videos: use scan_library_structure to understand how Backup is organized, suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
+You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
+You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
+You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite).
+You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
+For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
+
+Keep responses concise and formatted with markdown. Use bullet points and bold text for readability.
+
+` + appContext
+
+	// Build messages
+	messages := []map[string]interface{}{
+		{"role": "system", "content": systemPrompt},
+	}
+
+	// Add conversation history
+	for _, h := range history {
+		if h["role"] != "" && h["content"] != "" {
+			messages = append(messages, map[string]interface{}{"role": h["role"], "content": h["content"]})
+		}
+	}
+
+	// Add current user message
+	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
+
+	tools := getLMToolDefinitions()
+
+	// Tool calling loop (max 5 iterations)
+	for iteration := 0; iteration < 5; iteration++ {
+		reqBody := map[string]interface{}{
+			"messages":    messages,
+			"tools":       tools,
+			"temperature": config.Temperature,
+			"max_tokens":  config.MaxTokens,
+			"stream":      false,
+		}
+		if config.ModelName != "" {
+			reqBody["model"] = config.ModelName
+		}
+
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		client := &http.Client{Timeout: 120 * time.Second}
+		resp, err := client.Post(config.LMStudioURL+"/v1/chat/completions", "application/json", bytes.NewReader(bodyBytes))
+		if err != nil {
+			log.Printf("[AI] LM Studio connection failed after %v: %v", time.Since(startTime), err)
+			return "", fmt.Errorf("LM Studio connection failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to read LM Studio response: %w", err)
+		}
+
+		if resp.StatusCode != 200 {
+			return "", fmt.Errorf("LM Studio returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var result struct {
+			Choices []struct {
+				Message struct {
+					Role      string `json:"role"`
+					Content   string `json:"content"`
+					ToolCalls []struct {
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"message"`
+				FinishReason string `json:"finish_reason"`
+			} `json:"choices"`
+		}
+
+		if err := json.Unmarshal(respBody, &result); err != nil {
+			return "", fmt.Errorf("failed to parse LM Studio response: %w", err)
+		}
+
+		if len(result.Choices) == 0 {
+			return "", fmt.Errorf("no choices in LM Studio response")
+		}
+
+		choice := result.Choices[0]
+
+		// If no tool calls, return the content
+		if len(choice.Message.ToolCalls) == 0 || choice.FinishReason == "stop" {
+			content := choice.Message.Content
+			if content == "" {
+				content = "I processed your request but have no additional information to share."
+			}
+			log.Printf("[AI] LLM response received in %v (iteration %d, %d chars)", time.Since(startTime), iteration+1, len(content))
+			return content, nil
+		}
+
+		// Process tool calls
+		// Add assistant message with tool calls to messages
+		messages = append(messages, map[string]interface{}{
+			"role":       "assistant",
+			"content":    choice.Message.Content,
+			"tool_calls": choice.Message.ToolCalls,
+		})
+
+		for _, tc := range choice.Message.ToolCalls {
+			var toolArgs map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &toolArgs); err != nil {
+				toolArgs = map[string]interface{}{}
+			}
+
+			log.Printf("[AI] Tool call: %s(%v)", tc.Function.Name, toolArgs)
+
+			toolResult, err := s.ExecuteTool(tc.Function.Name, toolArgs)
+			if err != nil {
+				toolResult = map[string]interface{}{"error": err.Error()}
+			}
+
+			resultJSON, _ := json.Marshal(toolResult)
+
+			messages = append(messages, map[string]interface{}{
+				"role":         "tool",
+				"tool_call_id": tc.ID,
+				"content":      string(resultJSON),
+			})
+		}
+	}
+
+	return "I ran out of tool calling iterations. Please try a simpler question.", nil
+}
+
+// extractVideoCards pulls a normalised video card list from a tool result.
+// Returns nil when the tool doesn't produce a video list.
+// Capped at 10 cards to keep the UI readable.
+func extractVideoCards(toolName string, result interface{}) []map[string]interface{} {
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	listKey := ""
+	switch toolName {
+	case "search_videos", "get_library_videos":
+		listKey = "videos"
+	case "suggest_videos_to_watch":
+		listKey = "suggestions"
+	case "get_favorites":
+		listKey = "favorites"
+	case "get_top_rated":
+		listKey = "top_rated"
+	case "find_untagged_videos":
+		listKey = "untagged_videos"
+	default:
+		return nil
+	}
+	rawList, ok := resultMap[listKey]
+	if !ok {
+		return nil
+	}
+	list, ok := rawList.([]map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if len(list) > 10 {
+		list = list[:10]
+	}
+	return list
+}
+
+// ChatLLMStream processes user messages using LM Studio with tool calling and streams the final
+// text response chunk-by-chunk via onChunk. onCards is called once (if non-nil) when the
+// response involves video results — the frontend uses these to render inline video cards.
+// Returns false from onChunk to abort (client gone).
+func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{})) error {
+	config := s.GetAIConfig()
+	if !config.Enabled {
+		return fmt.Errorf("LLM disabled in config")
+	}
+
+	appContext := s.GetFullContext()
+	systemPrompt := `You are the AI Companion for a Video Storage application. You have direct access to the app's database and systems through tool calls.
+
+You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health.
+
+When the user asks about data (videos, performers, stats, etc.), use the appropriate tool to get real-time data rather than guessing.
+When the user asks about app status (running tasks, errors, scrapers, JDownloader), use the relevant status tools.
+You can save and recall memories to remember user preferences.
+You can help organize videos: use scan_library_structure to understand how Backup is organized, suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
+You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
+You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
+You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite).
+You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
+For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
+
+Keep responses concise and formatted with markdown. Use bullet points and bold text for readability.
+
+` + appContext
+
+	messages := []map[string]interface{}{{"role": "system", "content": systemPrompt}}
+	for _, h := range history {
+		if h["role"] != "" && h["content"] != "" {
+			messages = append(messages, map[string]interface{}{"role": h["role"], "content": h["content"]})
+		}
+	}
+	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
+
+	tools := getLMToolDefinitions()
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	// Accumulate video card data across all tool iterations
+	var collectedCards []map[string]interface{}
+
+	type accToolCall struct {
+		id       string
+		name     string
+		argsJSON strings.Builder
+	}
+
+	for iteration := 0; iteration < 5; iteration++ {
+		reqBody := map[string]interface{}{
+			"messages":    messages,
+			"tools":       tools,
+			"temperature": config.Temperature,
+			"max_tokens":  config.MaxTokens,
+			"stream":      true,
+		}
+		if config.ModelName != "" {
+			reqBody["model"] = config.ModelName
+		}
+
+		bodyBytes, err := json.Marshal(reqBody)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request: %w", err)
+		}
+
+		resp, err := client.Post(config.LMStudioURL+"/v1/chat/completions", "application/json", bytes.NewReader(bodyBytes))
+		if err != nil {
+			return fmt.Errorf("LM Studio connection failed: %w", err)
+		}
+
+		var accContent strings.Builder
+		var accCalls []accToolCall
+		hasToolCalls := false
+
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := line[6:]
+			if data == "[DONE]" {
+				break
+			}
+
+			var chunk struct {
+				Choices []struct {
+					Delta struct {
+						Content   string `json:"content"`
+						ToolCalls []struct {
+							Index    int    `json:"index"`
+							ID       string `json:"id"`
+							Function struct {
+								Name      string `json:"name"`
+								Arguments string `json:"arguments"`
+							} `json:"function"`
+						} `json:"tool_calls"`
+					} `json:"delta"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil || len(chunk.Choices) == 0 {
+				continue
+			}
+
+			delta := chunk.Choices[0].Delta
+
+			// Accumulate tool call fragments
+			for _, tc := range delta.ToolCalls {
+				hasToolCalls = true
+				for len(accCalls) <= tc.Index {
+					accCalls = append(accCalls, accToolCall{})
+				}
+				if tc.ID != "" {
+					accCalls[tc.Index].id = tc.ID
+				}
+				if tc.Function.Name != "" {
+					accCalls[tc.Index].name = tc.Function.Name
+				}
+				accCalls[tc.Index].argsJSON.WriteString(tc.Function.Arguments)
+			}
+
+			// Stream text — safe to emit immediately because tool calls and content
+			// are mutually exclusive in a single LLM response
+			if delta.Content != "" {
+				accContent.WriteString(delta.Content)
+				if !hasToolCalls {
+					if !onChunk(delta.Content) {
+						resp.Body.Close()
+						return nil // client disconnected
+					}
+				}
+			}
+		}
+		resp.Body.Close()
+
+		if !hasToolCalls {
+			// Final answer already streamed; ensure non-empty
+			if accContent.Len() == 0 {
+				onChunk("I processed your request but have no additional information to share.")
+			}
+			if onCards != nil && len(collectedCards) > 0 {
+				onCards(collectedCards)
+			}
+			return nil
+		}
+
+		// Build assistant message with tool calls for next iteration
+		toolCallsMsg := make([]map[string]interface{}, len(accCalls))
+		for i, tc := range accCalls {
+			toolCallsMsg[i] = map[string]interface{}{
+				"id": tc.id, "type": "function",
+				"function": map[string]interface{}{"name": tc.name, "arguments": tc.argsJSON.String()},
+			}
+		}
+		messages = append(messages, map[string]interface{}{
+			"role": "assistant", "content": accContent.String(), "tool_calls": toolCallsMsg,
+		})
+
+		for i, tc := range accCalls {
+			var toolArgs map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.argsJSON.String()), &toolArgs); err != nil {
+				toolArgs = map[string]interface{}{}
+			}
+			log.Printf("[AI] Stream tool call: %s(%v)", tc.name, toolArgs)
+			toolResult, err := s.ExecuteTool(tc.name, toolArgs)
+			if err != nil {
+				toolResult = map[string]interface{}{"error": err.Error()}
+			}
+			// Collect video cards for inline rendering
+			if cards := extractVideoCards(tc.name, toolResult); len(cards) > 0 {
+				collectedCards = append(collectedCards, cards...)
+			}
+			resultJSON, _ := json.Marshal(toolResult)
+			tcID := tc.id
+			if tcID == "" {
+				tcID = fmt.Sprintf("call_%d", i)
+			}
+			messages = append(messages, map[string]interface{}{
+				"role": "tool", "tool_call_id": tcID, "content": string(resultJSON),
+			})
+		}
+	}
+
+	onChunk("I ran out of tool calling iterations. Please try a simpler question.")
+	return nil
 }
 
 // SubscribeToEvents allows clients to receive real-time events
@@ -310,25 +3622,214 @@ func (s *AICompanionService) handleFileEvent(event fsnotify.Event, libraryName, 
 	}
 }
 
-// analyzeNewFile performs autonomous analysis on a new file
+// analyzeNewFile generates proactive placement suggestions when a video lands in a Downloads library
 func (s *AICompanionService) analyzeNewFile(filePath, libraryName string) {
-	// Wait a bit to ensure file is fully written
+	// Wait for file to stabilize
 	time.Sleep(5 * time.Second)
 
-	// Emit analysis event
+	filename := filepath.Base(filePath)
+
+	// Only generate placement suggestions for download-type libraries
+	if !strings.Contains(strings.ToLower(libraryName), "download") {
+		s.emitEvent(CompanionEvent{
+			Type:      "insight",
+			Source:    "analysis_engine",
+			Message:   fmt.Sprintf("New file in **%s**: `%s`", libraryName, filename),
+			Severity:  "info",
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	// Find Backup library
+	var tgtLibID int64
+	var tgtLibPath, tgtLibName string
+	if err := s.db.QueryRow("SELECT id, name, path FROM libraries WHERE LOWER(name) LIKE ?", "%backup%").Scan(&tgtLibID, &tgtLibName, &tgtLibPath); err != nil {
+		s.emitEvent(CompanionEvent{
+			Type:      "insight",
+			Source:    "analysis_engine",
+			Message:   fmt.Sprintf("📥 **New download**: `%s`\n\nNo Backup library configured.", filename),
+			Severity:  "info",
+			Timestamp: time.Now(),
+		})
+		return
+	}
+
+	// Poll DB for up to 30s — the library scanner may not have run yet
+	var videoID int64
+	var performers, tags, studios []string
+	for i := 0; i < 6; i++ {
+		if i > 0 {
+			time.Sleep(5 * time.Second)
+		}
+		var vid int64
+		if s.db.QueryRow("SELECT id FROM videos WHERE file_path = ?", filePath).Scan(&vid) == nil && vid > 0 {
+			videoID = vid
+			perfRows, _ := s.db.Query("SELECT p.name FROM performers p JOIN video_performers vp ON p.id = vp.performer_id WHERE vp.video_id = ?", videoID)
+			for perfRows.Next() {
+				var n string
+				perfRows.Scan(&n)
+				performers = append(performers, n)
+			}
+			perfRows.Close()
+			tagRows, _ := s.db.Query("SELECT t.name FROM tags t JOIN video_tags vt ON t.id = vt.tag_id WHERE vt.video_id = ?", videoID)
+			for tagRows.Next() {
+				var n string
+				tagRows.Scan(&n)
+				tags = append(tags, n)
+			}
+			tagRows.Close()
+			studioRows, _ := s.db.Query("SELECT st.name FROM studios st JOIN video_studios vs ON st.id = vs.studio_id WHERE vs.video_id = ?", videoID)
+			for studioRows.Next() {
+				var n string
+				studioRows.Scan(&n)
+				studios = append(studios, n)
+			}
+			studioRows.Close()
+			break
+		}
+	}
+
+	// Check learned placement memories for known performers
+	learnedFolders := map[string]string{} // subfolder → reason
+	for _, p := range performers {
+		if mems, err := s.SearchMemories("placement " + p); err == nil {
+			for _, mem := range mems {
+				if strings.Contains(mem.Value, "→") {
+					parts := strings.SplitN(mem.Value, "→", 2)
+					if len(parts) == 2 {
+						subfolder := strings.TrimSpace(strings.Split(parts[1], " in ")[0])
+						learnedFolders[subfolder] = "✅ learned: " + p
+					}
+				}
+			}
+		}
+	}
+
+	// Score Backup folders against metadata + filename
+	type candidate struct {
+		path    string
+		score   float64
+		reason  string
+		learned bool
+	}
+	var candidates []candidate
+
+	// Build a map of performer → existing folder in Backup (content-based, highest confidence)
+	// This finds folders that ALREADY contain videos by the same performer
+	performerFolders := map[string]string{} // performer name → subfolder
+	for _, p := range performers {
+		var existingPath string
+		err := s.db.QueryRow(
+			`SELECT v.file_path FROM videos v
+			 JOIN video_performers vp ON v.id = vp.video_id
+			 JOIN performers perf ON perf.id = vp.performer_id
+			 WHERE v.library_id = ? AND LOWER(perf.name) = LOWER(?)
+			 LIMIT 1`, tgtLibID, p).Scan(&existingPath)
+		if err == nil && existingPath != "" {
+			rel, err2 := filepath.Rel(tgtLibPath, filepath.Dir(existingPath))
+			if err2 == nil {
+				performerFolders[p] = filepath.ToSlash(rel)
+			}
+		}
+	}
+
+	_ = filepath.Walk(tgtLibPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || !info.IsDir() || path == tgtLibPath {
+			return nil
+		}
+		relPath, _ := filepath.Rel(tgtLibPath, path)
+		if len(strings.Split(filepath.ToSlash(relPath), "/")) > 3 {
+			return filepath.SkipDir
+		}
+		folderSlash := filepath.ToSlash(relPath)
+		folderLower := strings.ToLower(folderSlash)
+		sc := 0.0
+		var reasons []string
+		isLearned := false
+
+		if reason, ok := learnedFolders[folderSlash]; ok {
+			sc += 20
+			reasons = append(reasons, reason)
+			isLearned = true
+		}
+		// Tier 1: folder already contains videos by this performer (content-based)
+		for _, p := range performers {
+			if existing, ok := performerFolders[p]; ok && strings.EqualFold(existing, folderSlash) {
+				sc += 15
+				reasons = append(reasons, "existing videos by "+p)
+			}
+		}
+		// Tier 2: exact full performer name in folder path
+		for _, p := range performers {
+			folderBase := strings.ToLower(filepath.Base(filepath.FromSlash(folderSlash)))
+			if strings.EqualFold(folderBase, p) {
+				sc += 10
+				reasons = append(reasons, "performer folder: "+p)
+			} else if strings.Contains(folderLower, strings.ToLower(p)) && len(strings.Fields(p)) > 1 {
+				// Only match multi-word full names (e.g. "Nicole Aniston") in path, not single words
+				sc += 8
+				reasons = append(reasons, "performer in path: "+p)
+			}
+		}
+		for _, st := range studios {
+			if strings.Contains(folderLower, strings.ToLower(st)) {
+				sc += 7
+				reasons = append(reasons, "studio: "+st)
+			}
+		}
+		for _, t := range tags {
+			if strings.Contains(folderLower, strings.ToLower(t)) {
+				sc += 4
+				reasons = append(reasons, "tag: "+t)
+			}
+		}
+		// No filename word matching — that leads to false positives
+
+		if sc > 0 {
+			candidates = append(candidates, candidate{path: folderSlash, score: sc, reason: strings.Join(reasons, "; "), learned: isLearned})
+		}
+		return nil
+	})
+
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].score > candidates[j].score })
+	if len(candidates) > 3 {
+		candidates = candidates[:3]
+	}
+
+	// Format message
+	var msg strings.Builder
+	msg.WriteString(fmt.Sprintf("📥 **New download detected**: `%s`\n\n", filename))
+	if len(performers) > 0 {
+		msg.WriteString(fmt.Sprintf("**Performers**: %s\n\n", strings.Join(performers, ", ")))
+	}
+	if len(candidates) > 0 {
+		msg.WriteString(fmt.Sprintf("**Suggested placements in %s:**\n", tgtLibName))
+		for i, c := range candidates {
+			msg.WriteString(fmt.Sprintf("%d. `%s` — %s\n", i+1, c.path, c.reason))
+		}
+		if videoID != 0 {
+			msg.WriteString(fmt.Sprintf("\n*Video ID: **%d*** — tell me which number to move it to.", videoID))
+		} else {
+			msg.WriteString("\n*Not indexed yet* — scan the Downloads library first, then ask me to move it.")
+		}
+	} else {
+		msg.WriteString(fmt.Sprintf("No matching folders found in **%s**.\n", tgtLibName))
+		msg.WriteString("Ask me to scan its structure to see what's available.")
+	}
+
+	eventData := map[string]interface{}{"file_path": filePath, "library": libraryName}
+	if videoID != 0 {
+		eventData["video_id"] = videoID
+	}
 	s.emitEvent(CompanionEvent{
-		Type:    "insight",
-		Source:  "analysis_engine",
-		Message: fmt.Sprintf("Analyzing new video in %s", libraryName),
-		Data: map[string]interface{}{
-			"file_path": filePath,
-			"library":   libraryName,
-		},
+		Type:      "suggestion",
+		Source:    "analysis_engine",
+		Message:   msg.String(),
+		Data:      eventData,
 		Severity:  "info",
 		Timestamp: time.Now(),
 	})
-
-	// TODO: Trigger actual analysis (metadata extraction, performer detection, etc.)
 }
 
 // processEvents processes events and broadcasts to subscribers
@@ -377,6 +3878,128 @@ func (s *AICompanionService) emitEvent(event CompanionEvent) {
 	default:
 		log.Printf("Event channel full, dropping event: %s", event.Message)
 	}
+}
+
+// generateDailyBriefing emits a proactive morning summary once per ~20 hours.
+// It also saves a video-count snapshot so it can report deltas the next day.
+func (s *AICompanionService) generateDailyBriefing() {
+	// Check when we last sent a briefing
+	var lastBriefingStr string
+	s.db.QueryRow("SELECT value FROM memories WHERE key = 'last_daily_briefing'").Scan(&lastBriefingStr)
+	if lastBriefingStr != "" {
+		if t, err := time.Parse(time.RFC3339, lastBriefingStr); err == nil {
+			if time.Since(t) < 20*time.Hour {
+				log.Printf("[AI] Daily briefing skipped — last sent %s ago", formatDuration(time.Since(t)))
+				return
+			}
+		}
+	}
+
+	// Current stats
+	var videoCount, performerCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+
+	// Delta since last snapshot
+	var snapshotJSON string
+	s.db.QueryRow("SELECT value FROM memories WHERE key = 'daily_snapshot'").Scan(&snapshotJSON)
+	prevVideoCount := videoCount
+	if snapshotJSON != "" {
+		var snap map[string]int
+		if json.Unmarshal([]byte(snapshotJSON), &snap) == nil {
+			prevVideoCount = snap["video_count"]
+		}
+	}
+	newVideos := videoCount - prevVideoCount
+
+	// Videos sitting in Downloads library
+	var downloadsCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM videos v JOIN libraries l ON v.library_id = l.id WHERE LOWER(l.name) LIKE '%download%'`).Scan(&downloadsCount)
+
+	// Untagged videos
+	var untaggedCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE id NOT IN (SELECT DISTINCT video_id FROM video_tags)`).Scan(&untaggedCount)
+
+	// Recent errors (last 24h)
+	var errorCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM console_logs WHERE level = 'error' AND created_at > datetime('now', '-24 hours')`).Scan(&errorCount)
+
+	// Currently running tasks
+	var runningTasks int
+	s.db.QueryRow(`SELECT COUNT(*) FROM activity_logs WHERE status = 'running'`).Scan(&runningTasks)
+
+	// Quick orphan sample — check first 200 videos for missing files (fast, SSD-friendly)
+	orphanCount := 0
+	sampleRows, _ := s.db.Query(`SELECT file_path FROM videos ORDER BY created_at DESC LIMIT 200`)
+	if sampleRows != nil {
+		for sampleRows.Next() {
+			var fp string
+			sampleRows.Scan(&fp)
+			if _, statErr := os.Stat(fp); os.IsNotExist(statErr) {
+				orphanCount++
+			}
+		}
+		sampleRows.Close()
+	}
+
+	// Build the briefing message
+	var msg strings.Builder
+	msg.WriteString("## 🌅 Daily Briefing\n\n")
+
+	// Library headline
+	if newVideos > 0 {
+		msg.WriteString(fmt.Sprintf("📈 **%d new video(s)** added since last briefing — library now at **%d total**\n\n", newVideos, videoCount))
+	} else if newVideos < 0 {
+		msg.WriteString(fmt.Sprintf("📚 Library: **%d videos** across **%d performers**\n\n", videoCount, performerCount))
+	} else {
+		msg.WriteString(fmt.Sprintf("📚 Library unchanged: **%d videos** across **%d performers**\n\n", videoCount, performerCount))
+	}
+
+	// Downloads waiting
+	if downloadsCount > 0 {
+		msg.WriteString(fmt.Sprintf("📥 **%d video(s)** in Downloads waiting to be organized into Backup\n\n", downloadsCount))
+	}
+
+	// Untagged
+	if untaggedCount > 0 {
+		msg.WriteString(fmt.Sprintf("🏷️ **%d video(s)** have no tags — ask me to help tag them\n\n", untaggedCount))
+	}
+
+	// Errors
+	if errorCount > 0 {
+		msg.WriteString(fmt.Sprintf("⚠️ **%d error(s)** logged in the last 24 hours — ask me to check for errors\n\n", errorCount))
+	} else {
+		msg.WriteString("✅ No errors logged in the last 24 hours\n\n")
+	}
+
+	// Running tasks
+	if runningTasks > 0 {
+		msg.WriteString(fmt.Sprintf("⚙️ **%d task(s)** currently running in the background\n\n", runningTasks))
+	}
+
+	// Orphan warning (sampled check)
+	if orphanCount > 0 {
+		msg.WriteString(fmt.Sprintf("🔍 **%d video(s)** in the last 200 sampled appear to be missing from disk — ask me to run a full orphan scan\n\n", orphanCount))
+	}
+
+	msg.WriteString("_Ask me anything, or say **\"help me organize my downloads\"** to get started!_")
+
+	// Persist snapshot + timestamp
+	newSnap, _ := json.Marshal(map[string]int{"video_count": videoCount})
+	s.db.Exec(`INSERT OR REPLACE INTO memories (key, value, category, importance, created_at, updated_at)
+		VALUES ('daily_snapshot', ?, 'system', 1, datetime('now'), datetime('now'))`, string(newSnap))
+	s.db.Exec(`INSERT OR REPLACE INTO memories (key, value, category, importance, created_at, updated_at)
+		VALUES ('last_daily_briefing', ?, 'system', 1, datetime('now'), datetime('now'))`, time.Now().Format(time.RFC3339))
+
+	log.Printf("[AI] Emitting daily briefing (newVideos=%d, downloads=%d, errors=%d, orphanSample=%d)", newVideos, downloadsCount, errorCount, orphanCount)
+
+	s.emitEvent(CompanionEvent{
+		Type:      "insight",
+		Source:    "daily_briefing",
+		Message:   msg.String(),
+		Severity:  "info",
+		Timestamp: time.Now(),
+	})
 }
 
 // monitorLibraryHealth periodically checks library health
@@ -549,15 +4172,119 @@ func (s *AICompanionService) performPeriodicAnalysis() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			// TODO: Run automated tasks based on learned patterns
-			log.Println("🔍 AI Companion: Running periodic analysis...")
+			log.Println("🔍 AI Companion: Running periodic library analysis...")
+			s.runLibraryInsights()
 		}
 	}
 }
 
+// runLibraryInsights checks for actionable library conditions and emits proactive insights.
+// Each insight type has its own cooldown key in the memories table to avoid spam.
+func (s *AICompanionService) runLibraryInsights() {
+	s.checkInsight(
+		"insight_unrated_recent",
+		24*time.Hour,
+		func() (bool, string, map[string]interface{}) {
+			var count int
+			s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE (rating IS NULL OR rating = 0) AND created_at > datetime('now', '-14 days')`).Scan(&count)
+			if count < 6 {
+				return false, "", nil
+			}
+			msg := fmt.Sprintf("⭐ **%d videos** added in the last 2 weeks haven't been rated yet. Rating helps me give you better recommendations — ask me to help rate them!", count)
+			return true, msg, map[string]interface{}{"unrated_recent": count, "action": "rate_videos"}
+		},
+	)
+
+	s.checkInsight(
+		"insight_untagged_videos",
+		48*time.Hour,
+		func() (bool, string, map[string]interface{}) {
+			var untagged, total int
+			s.db.QueryRow(`SELECT COUNT(*) FROM videos v WHERE NOT EXISTS (SELECT 1 FROM video_tags vt WHERE vt.video_id = v.id)`).Scan(&untagged)
+			s.db.QueryRow(`SELECT COUNT(*) FROM videos`).Scan(&total)
+			if untagged < 15 || total == 0 {
+				return false, "", nil
+			}
+			pct := untagged * 100 / total
+			msg := fmt.Sprintf("🏷️ **%d videos (%d%%)** in your library have no tags. Ask me to suggest tags — I can analyse performers to recommend the best ones!", untagged, pct)
+			return true, msg, map[string]interface{}{"untagged": untagged, "total": total, "action": "suggest_tags"}
+		},
+	)
+
+	s.checkInsight(
+		"insight_unorganized_downloads",
+		12*time.Hour,
+		func() (bool, string, map[string]interface{}) {
+			var count int
+			s.db.QueryRow(`
+				SELECT COUNT(*) FROM videos v
+				JOIN libraries l ON l.id = v.library_id
+				WHERE LOWER(l.name) LIKE '%download%'
+				  AND NOT EXISTS (SELECT 1 FROM video_performers vp WHERE vp.video_id = v.id)
+			`).Scan(&count)
+			if count < 8 {
+				return false, "", nil
+			}
+			msg := fmt.Sprintf("📥 **%d unlinked videos** in your Downloads library have no performers attached. These are likely freshly downloaded files that haven't been processed yet. Want me to help organise them?", count)
+			return true, msg, map[string]interface{}{"unlinked_downloads": count, "action": "organize_downloads"}
+		},
+	)
+
+	s.checkInsight(
+		"insight_rating_coverage",
+		72*time.Hour,
+		func() (bool, string, map[string]interface{}) {
+			var rated, total int
+			s.db.QueryRow(`SELECT COUNT(*) FROM videos WHERE rating IS NOT NULL AND rating > 0`).Scan(&rated)
+			s.db.QueryRow(`SELECT COUNT(*) FROM videos`).Scan(&total)
+			if total < 20 {
+				return false, "", nil
+			}
+			pct := rated * 100 / total
+			if pct >= 30 {
+				return false, "", nil
+			}
+			msg := fmt.Sprintf("📊 Only **%d%% of your library** (%d / %d videos) has been rated. The more you rate, the smarter my recommendations get. Ask me to pull up your unrated videos!", pct, rated, total)
+			return true, msg, map[string]interface{}{"rated": rated, "total": total, "rating_pct": pct, "action": "rate_videos"}
+		},
+	)
+}
+
+// checkInsight runs a single insight check with cooldown guard.
+// fn returns (shouldFire, message, data). If shouldFire is false nothing is emitted.
+func (s *AICompanionService) checkInsight(cooldownKey string, cooldown time.Duration, fn func() (bool, string, map[string]interface{})) {
+	var lastStr string
+	s.db.QueryRow("SELECT value FROM memories WHERE key = ?", cooldownKey).Scan(&lastStr)
+	if lastStr != "" {
+		if t, err := time.Parse(time.RFC3339, lastStr); err == nil {
+			if time.Since(t) < cooldown {
+				return
+			}
+		}
+	}
+
+	shouldFire, msg, data := fn()
+	if !shouldFire {
+		return
+	}
+
+	s.db.Exec(`INSERT OR REPLACE INTO memories (key, value, category, importance, created_at, updated_at)
+		VALUES (?, ?, 'system', 1, datetime('now'), datetime('now'))`, cooldownKey, time.Now().Format(time.RFC3339))
+
+	s.emitEvent(CompanionEvent{
+		Type:      "insight",
+		Source:    "library_insights",
+		Message:   msg,
+		Data:      data,
+		Severity:  "info",
+		Timestamp: time.Now(),
+	})
+	log.Printf("[AI] Library insight fired: %s", cooldownKey)
+}
+
 // monitorActivityLogs monitors activity_logs table for task completions
 func (s *AICompanionService) monitorActivityLogs() {
-	ticker := time.NewTicker(5 * time.Second) // Check every 5 seconds
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
 	defer ticker.Stop()
 
 	for {
@@ -1814,13 +5541,21 @@ func (s *AICompanionService) AnalyzeConsoleErrors() (string, error) {
 	consoleLogSvc := NewConsoleLogService()
 
 	// Get recent errors
-	errors, _, err := consoleLogSvc.GetAll(50, 0, "", "error", "")
+	allErrors, _, err := consoleLogSvc.GetAll(50, 0, "", "error", "")
 	if err != nil {
 		return "", fmt.Errorf("failed to retrieve error logs: %w", err)
 	}
 
+	// Filter out noisy/benign errors
+	errors := make([]*models.ConsoleLog, 0)
+	for _, e := range allErrors {
+		if !isNoisyError(e.Message) {
+			errors = append(errors, e)
+		}
+	}
+
 	if len(errors) == 0 {
-		return "✅ No recent errors detected! Your system is running smoothly.", nil
+		return "✅ No significant errors detected! Your system is running smoothly.", nil
 	}
 
 	// Analyze error patterns
@@ -1847,7 +5582,7 @@ func (s *AICompanionService) AnalyzeConsoleErrors() (string, error) {
 	}
 
 	var response strings.Builder
-	response.WriteString(fmt.Sprintf("⚠️ Found %d recent errors. Analysis:\n\n", len(errors)))
+	response.WriteString(fmt.Sprintf("⚠️ Found %d significant errors (filtered %d noisy). Analysis:\n\n", len(errors), len(allErrors)-len(errors)))
 
 	response.WriteString("Error Sources:\n")
 	for source, count := range sources {
@@ -1873,6 +5608,32 @@ func (s *AICompanionService) AnalyzeConsoleErrors() (string, error) {
 	return response.String(), nil
 }
 
+// isNoisyError returns true if the error message is benign/expected and should not trigger alerts
+func isNoisyError(message string) bool {
+	noisyPatterns := []string{
+		"Error closing WebSocket connection",
+		"use of closed network connection",
+		"broken pipe",
+		"connection reset by peer",
+		"websocket: close",
+		"context canceled",
+		"http: Server closed",
+		"[AI] Tool call",
+		"[AI] LLM",
+		"[AI] ChatLLM",
+		"Network Error",
+		"Failed to load dashboard",
+		"Failed to load running tasks",
+	}
+	lowerMsg := strings.ToLower(message)
+	for _, pattern := range noisyPatterns {
+		if strings.Contains(lowerMsg, strings.ToLower(pattern)) {
+			return true
+		}
+	}
+	return false
+}
+
 // MonitorConsoleLogsForErrors periodically checks for new errors
 func (s *AICompanionService) MonitorConsoleLogsForErrors() {
 	ticker := time.NewTicker(2 * time.Minute) // Check every 2 minutes
@@ -1891,12 +5652,18 @@ func (s *AICompanionService) MonitorConsoleLogsForErrors() {
 				continue
 			}
 
-			// Alert if new errors appeared
-			if len(errors) > lastErrorCount && len(errors) > 0 {
-				newErrors := len(errors) - lastErrorCount
+			// Filter out noisy/benign errors
+			significantErrors := make([]*models.ConsoleLog, 0)
+			for _, e := range errors {
+				if !isNoisyError(e.Message) {
+					significantErrors = append(significantErrors, e)
+				}
+			}
 
-				// Get the most recent error
-				recentError := errors[0]
+			// Alert if new significant errors appeared
+			if len(significantErrors) > lastErrorCount && len(significantErrors) > 0 {
+				newErrors := len(significantErrors) - lastErrorCount
+				recentError := significantErrors[0]
 
 				s.emitEvent(CompanionEvent{
 					Type:    "notification",
@@ -1904,7 +5671,7 @@ func (s *AICompanionService) MonitorConsoleLogsForErrors() {
 					Message: fmt.Sprintf("🚨 %d new error(s) detected! Latest: %s", newErrors, recentError.Message),
 					Data: map[string]interface{}{
 						"new_errors":    newErrors,
-						"total_errors":  len(errors),
+						"total_errors":  len(significantErrors),
 						"latest_source": recentError.Source,
 						"latest_level":  recentError.Level,
 					},
@@ -1913,14 +5680,565 @@ func (s *AICompanionService) MonitorConsoleLogsForErrors() {
 				})
 			}
 
-			lastErrorCount = len(errors)
+			lastErrorCount = len(significantErrors)
 		}
 	}
+}
+
+// ================== Chat Helper Methods ==================
+
+// generateAppUpdate creates a comprehensive status update of the app
+func (s *AICompanionService) generateAppUpdate() (string, error) {
+	var response strings.Builder
+	response.WriteString("📊 **App Status Update**\n\n")
+
+	// Library stats
+	var videoCount, performerCount, tagCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM tags").Scan(&tagCount)
+	response.WriteString(fmt.Sprintf("**Library:** %d videos, %d performers, %d tags\n\n", videoCount, performerCount, tagCount))
+
+	// Running tasks
+	rows, err := s.db.Query(`SELECT task_type, message, created_at FROM activity_logs WHERE status = 'running' ORDER BY created_at DESC LIMIT 5`)
+	if err == nil {
+		defer rows.Close()
+		running := []string{}
+		for rows.Next() {
+			var taskType, message string
+			var createdAt time.Time
+			if rows.Scan(&taskType, &message, &createdAt) == nil {
+				running = append(running, fmt.Sprintf("  - [%s] %s (%s ago)", taskType, message, formatDuration(time.Since(createdAt))))
+			}
+		}
+		if len(running) > 0 {
+			response.WriteString("**Running Tasks:**\n")
+			for _, r := range running {
+				response.WriteString(r + "\n")
+			}
+			response.WriteString("\n")
+		} else {
+			response.WriteString("**Running Tasks:** None - system is idle\n\n")
+		}
+	}
+
+	// Recent activity
+	recentRows, err := s.db.Query(`SELECT task_type, status, message, created_at FROM activity_logs WHERE status != 'running' ORDER BY created_at DESC LIMIT 5`)
+	if err == nil {
+		defer recentRows.Close()
+		response.WriteString("**Recent Activity:**\n")
+		hasActivity := false
+		for recentRows.Next() {
+			var taskType, status, message string
+			var createdAt time.Time
+			if recentRows.Scan(&taskType, &status, &message, &createdAt) == nil {
+				hasActivity = true
+				response.WriteString(fmt.Sprintf("  - [%s] %s - %s (%s ago)\n", taskType, status, message, formatDuration(time.Since(createdAt))))
+			}
+		}
+		if !hasActivity {
+			response.WriteString("  No recent activity.\n")
+		}
+		response.WriteString("\n")
+	}
+
+	// Scraper summary
+	var scrapedTotal int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos").Scan(&scrapedTotal)
+	if scrapedTotal > 0 {
+		response.WriteString(fmt.Sprintf("**Scraped Content:** %d total items\n", scrapedTotal))
+	}
+
+	// JDownloader
+	var jdStatus string
+	err = s.db.QueryRow("SELECT connection_status FROM jdownloader_config LIMIT 1").Scan(&jdStatus)
+	if err == nil {
+		response.WriteString(fmt.Sprintf("**JDownloader:** %s\n", jdStatus))
+	}
+
+	// Errors
+	var errorCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM console_logs WHERE level = 'error' AND created_at > datetime('now', '-1 hour')").Scan(&errorCount)
+	if errorCount > 0 {
+		response.WriteString(fmt.Sprintf("\n⚠️ **%d error(s)** in the last hour\n", errorCount))
+	} else {
+		response.WriteString("\n✅ No errors in the last hour\n")
+	}
+
+	return response.String(), nil
+}
+
+// looksLikePerformerName checks if a message looks like a performer name (2-4 capitalized words, no common keywords)
+func (s *AICompanionService) looksLikePerformerName(message string) bool {
+	words := strings.Fields(message)
+	if len(words) < 1 || len(words) > 5 {
+		return false
+	}
+
+	// Must have at least one word starting with uppercase
+	hasUppercase := false
+	for _, w := range words {
+		if len(w) > 0 && w[0] >= 'A' && w[0] <= 'Z' {
+			hasUppercase = true
+		}
+	}
+	if !hasUppercase {
+		return false
+	}
+
+	// Reject if contains common keywords
+	lower := strings.ToLower(message)
+	commonWords := []string{"how", "what", "where", "when", "why", "show", "find", "search", "get", "list", "help", "status", "update", "check", "error", "video", "tag", "scraper", "library", "jdownloader", "hello", "hi", "hey", "please", "thanks", "yes", "no"}
+	for _, w := range commonWords {
+		if strings.Contains(lower, w) {
+			return false
+		}
+	}
+
+	// Check if this name exists in the performers table
+	var exists int
+	s.db.QueryRow("SELECT COUNT(*) FROM performers WHERE name LIKE ?", "%"+message+"%").Scan(&exists)
+	return exists > 0
+}
+
+// searchPerformerAcrossAll searches for a performer name in both library and scraped content
+func (s *AICompanionService) searchPerformerAcrossAll(name string) (string, error) {
+	var response strings.Builder
+
+	// Search scraped videos
+	var scrapedCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos WHERE performers LIKE ? OR title LIKE ?", "%"+name+"%", "%"+name+"%").Scan(&scrapedCount)
+
+	if scrapedCount > 0 {
+		response.WriteString(fmt.Sprintf("\n🔍 **Scraped Content:** Found %d items mentioning \"%s\"\n", scrapedCount, name))
+
+		rows, err := s.db.Query(`SELECT source, title FROM scraped_videos WHERE performers LIKE ? OR title LIKE ? ORDER BY discovered_at DESC LIMIT 5`, "%"+name+"%", "%"+name+"%")
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var source, title string
+				if rows.Scan(&source, &title) == nil {
+					response.WriteString(fmt.Sprintf("  - [%s] %s\n", strings.ToUpper(source), title))
+				}
+			}
+			if scrapedCount > 5 {
+				response.WriteString(fmt.Sprintf("  _... and %d more_\n", scrapedCount-5))
+			}
+		}
+	}
+
+	// Search forum posts
+	var postCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts WHERE plain_text LIKE ?", "%"+name+"%").Scan(&postCount)
+	if postCount > 0 {
+		response.WriteString(fmt.Sprintf("\n💬 **Forum Posts:** %d posts mention \"%s\"\n", postCount, name))
+	}
+
+	if response.Len() == 0 {
+		return "", nil
+	}
+	return response.String(), nil
+}
+
+// searchPerformerWithTag searches for a performer's content with a specific tag/keyword
+func (s *AICompanionService) searchPerformerWithTag(performerName, tag string) (string, error) {
+	var response strings.Builder
+	response.WriteString(fmt.Sprintf("🔍 **Searching \"%s\" + \"%s\"**\n\n", performerName, tag))
+
+	// Search in library videos
+	rows, err := s.db.Query(`
+		SELECT v.title
+		FROM videos v
+		JOIN video_performers vp ON v.id = vp.video_id
+		JOIN performers p ON vp.performer_id = p.id
+		WHERE p.name LIKE ? AND v.title LIKE ?
+		LIMIT 10
+	`, "%"+performerName+"%", "%"+tag+"%")
+
+	libraryCount := 0
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var title string
+			if rows.Scan(&title) == nil {
+				libraryCount++
+				response.WriteString(fmt.Sprintf("📹 %s\n", title))
+			}
+		}
+	}
+
+	// Search scraped content
+	scrapedRows, err := s.db.Query(`
+		SELECT source, title FROM scraped_videos
+		WHERE (performers LIKE ? OR title LIKE ?) AND (title LIKE ? OR tags LIKE ?)
+		ORDER BY discovered_at DESC LIMIT 10
+	`, "%"+performerName+"%", "%"+performerName+"%", "%"+tag+"%", "%"+tag+"%")
+
+	scrapedCount := 0
+	if err == nil {
+		defer scrapedRows.Close()
+		for scrapedRows.Next() {
+			var source, title string
+			if scrapedRows.Scan(&source, &title) == nil {
+				scrapedCount++
+				response.WriteString(fmt.Sprintf("🔗 [%s] %s\n", strings.ToUpper(source), title))
+			}
+		}
+	}
+
+	// Search forum posts
+	var postCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts WHERE plain_text LIKE ? AND plain_text LIKE ?", "%"+performerName+"%", "%"+tag+"%").Scan(&postCount)
+
+	if libraryCount == 0 && scrapedCount == 0 && postCount == 0 {
+		response.WriteString(fmt.Sprintf("No results found for \"%s\" with \"%s\" in library, scraped videos, or forum posts.", performerName, tag))
+	} else {
+		response.WriteString(fmt.Sprintf("\n**Totals:** %d library videos, %d scraped items, %d forum posts\n", libraryCount, scrapedCount, postCount))
+	}
+
+	return response.String(), nil
+}
+
+// extractNameAfterPhrase extracts a name/subject after a trigger phrase
+func extractNameAfterPhrase(message string, phrases []string) string {
+	lower := strings.ToLower(message)
+	for _, phrase := range phrases {
+		idx := strings.Index(lower, phrase)
+		if idx >= 0 {
+			after := strings.TrimSpace(message[idx+len(phrase):])
+			// Remove surrounding quotes if present
+			after = strings.Trim(after, "\"'")
+			if after != "" {
+				return after
+			}
+		}
+	}
+	return ""
+}
+
+// listForumPosts lists actual forum posts matching a performer name and optional keyword
+func (s *AICompanionService) listForumPosts(performerName, keyword string, limit int) (string, error) {
+	var response strings.Builder
+	var rows *sql.Rows
+	var err error
+
+	if keyword != "" {
+		response.WriteString(fmt.Sprintf("💬 **Forum posts mentioning \"%s\" + \"%s\":**\n\n", performerName, keyword))
+		rows, err = s.db.Query(`
+			SELECT sp.plain_text, sp.author, st.title as thread_title
+			FROM scraped_posts sp
+			LEFT JOIN scraped_threads st ON sp.thread_id = st.id
+			WHERE sp.plain_text LIKE ? AND sp.plain_text LIKE ?
+			ORDER BY sp.scraped_at DESC LIMIT ?
+		`, "%"+performerName+"%", "%"+keyword+"%", limit)
+	} else {
+		response.WriteString(fmt.Sprintf("💬 **Forum posts mentioning \"%s\":**\n\n", performerName))
+		rows, err = s.db.Query(`
+			SELECT sp.plain_text, sp.author, st.title as thread_title
+			FROM scraped_posts sp
+			LEFT JOIN scraped_threads st ON sp.thread_id = st.id
+			WHERE sp.plain_text LIKE ?
+			ORDER BY sp.scraped_at DESC LIMIT ?
+		`, "%"+performerName+"%", limit)
+	}
+
+	if err != nil {
+		return "Failed to search forum posts.", err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		var text, author, threadTitle string
+		if rows.Scan(&text, &author, &threadTitle) == nil {
+			count++
+			// Truncate long post text
+			if len(text) > 200 {
+				text = text[:200] + "..."
+			}
+			response.WriteString(fmt.Sprintf("**%d.** [%s] by **%s**\n> %s\n\n", count, threadTitle, author, text))
+		}
+	}
+
+	if count == 0 {
+		return fmt.Sprintf("No forum posts found matching those criteria."), nil
+	}
+
+	response.WriteString(fmt.Sprintf("_Showing %d results_", count))
+	return response.String(), nil
+}
+
+// searchScrapedContentByKeyword searches all scraped content (videos + posts) by keyword
+func (s *AICompanionService) searchScrapedContentByKeyword(keyword string, limit int) (string, error) {
+	var response strings.Builder
+	response.WriteString(fmt.Sprintf("🔍 **Scraped content matching \"%s\":**\n\n", keyword))
+
+	// Search scraped videos
+	videoRows, err := s.db.Query(`
+		SELECT source, title, performers, url
+		FROM scraped_videos
+		WHERE title LIKE ? OR performers LIKE ? OR tags LIKE ?
+		ORDER BY discovered_at DESC LIMIT ?
+	`, "%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%", limit)
+
+	videoCount := 0
+	if err == nil {
+		defer videoRows.Close()
+		for videoRows.Next() {
+			var source, title, performers, url string
+			if videoRows.Scan(&source, &title, &performers, &url) == nil {
+				videoCount++
+				response.WriteString(fmt.Sprintf("🎬 [%s] %s", strings.ToUpper(source), title))
+				if performers != "" {
+					response.WriteString(fmt.Sprintf(" (%s)", performers))
+				}
+				response.WriteString("\n")
+			}
+		}
+	}
+
+	// Search forum posts
+	postRows, err := s.db.Query(`
+		SELECT sp.plain_text, sp.author, st.title as thread_title
+		FROM scraped_posts sp
+		LEFT JOIN scraped_threads st ON sp.thread_id = st.id
+		WHERE sp.plain_text LIKE ?
+		ORDER BY sp.scraped_at DESC LIMIT ?
+	`, "%"+keyword+"%", limit)
+
+	postCount := 0
+	if err == nil {
+		defer postRows.Close()
+		if videoCount > 0 {
+			response.WriteString("\n")
+		}
+		for postRows.Next() {
+			var text, author, threadTitle string
+			if postRows.Scan(&text, &author, &threadTitle) == nil {
+				postCount++
+				if len(text) > 150 {
+					text = text[:150] + "..."
+				}
+				response.WriteString(fmt.Sprintf("💬 [%s] by %s: %s\n", threadTitle, author, text))
+			}
+		}
+	}
+
+	if videoCount == 0 && postCount == 0 {
+		return fmt.Sprintf("No scraped content found matching \"%s\".", keyword), nil
+	}
+
+	response.WriteString(fmt.Sprintf("\n**Found:** %d videos, %d forum posts", videoCount, postCount))
+	return response.String(), nil
 }
 
 // Chat processes user messages with rule-based intelligence
 func (s *AICompanionService) Chat(message string, history []map[string]string) (string, error) {
 	messageLower := strings.ToLower(message)
+
+	// ===== CONVERSATION HISTORY CONTEXT =====
+	// Check last assistant response for context-aware follow-ups
+	var lastAssistantMsg string
+	if len(history) > 0 {
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i]["role"] == "assistant" {
+				lastAssistantMsg = history[i]["content"]
+				break
+			}
+		}
+	}
+
+	// ===== FOLLOW-UP HANDLING =====
+	// Use conversation history to handle follow-up questions
+	if lastAssistantMsg != "" {
+		lastLower := strings.ToLower(lastAssistantMsg)
+
+		// Extract quoted terms from previous response for context
+		reQuoted := regexp.MustCompile(`"([^"]+)"`)
+		prevQuotedTerms := reQuoted.FindAllStringSubmatch(lastAssistantMsg, -1)
+
+		// "List/show the forum posts" after a response that mentioned forum posts
+		if (strings.Contains(messageLower, "list") || strings.Contains(messageLower, "show") || strings.Contains(messageLower, "can you list") || strings.Contains(messageLower, "can you show")) &&
+			(strings.Contains(messageLower, "forum") || strings.Contains(messageLower, "post")) &&
+			strings.Contains(lastLower, "forum posts") {
+			// Extract performer name and search term from previous response
+			re := regexp.MustCompile(`(?i)Searching "([^"]+)" \+ "([^"]+)"`)
+			matches := re.FindStringSubmatch(lastAssistantMsg)
+			if len(matches) >= 3 {
+				return s.listForumPosts(matches[1], matches[2], 10)
+			}
+			if len(prevQuotedTerms) > 0 {
+				return s.listForumPosts(prevQuotedTerms[0][1], "", 10)
+			}
+		}
+
+		// "Is this from X scraper?" / "Is that from Simpcity?" - source questions
+		if (strings.Contains(messageLower, "is this from") || strings.Contains(messageLower, "is that from") ||
+			strings.Contains(messageLower, "is the") && strings.Contains(messageLower, "from") ||
+			strings.Contains(messageLower, "which scraper") || strings.Contains(messageLower, "what source") ||
+			strings.Contains(messageLower, "where") && (strings.Contains(messageLower, "from") || strings.Contains(messageLower, "come from"))) {
+
+			// Check if previous response has thread/source info
+			if strings.Contains(lastLower, "forum posts") || strings.Contains(lastLower, "scraped") || strings.Contains(lastLower, "thread") {
+				var response strings.Builder
+				response.WriteString("The forum posts are from the **Simpcity Forum Scraper**. ")
+				response.WriteString("This scraper collects posts and download links from forum threads.\n\n")
+
+				// Show which threads contained the data
+				if len(prevQuotedTerms) > 0 {
+					searchTerm := prevQuotedTerms[0][1]
+					rows, err := s.db.Query(`
+						SELECT st.title, COUNT(*) as cnt
+						FROM scraped_posts sp
+						JOIN scraped_threads st ON sp.thread_id = st.id
+						WHERE sp.plain_text LIKE ?
+						GROUP BY st.id
+						ORDER BY cnt DESC LIMIT 5
+					`, "%"+searchTerm+"%")
+					if err == nil {
+						defer rows.Close()
+						response.WriteString(fmt.Sprintf("**Threads containing \"%s\":**\n", searchTerm))
+						for rows.Next() {
+							var title string
+							var cnt int
+							if rows.Scan(&title, &cnt) == nil {
+								response.WriteString(fmt.Sprintf("  - %s (%d posts)\n", title, cnt))
+							}
+						}
+					}
+				}
+				return response.String(), nil
+			}
+		}
+
+		// "Yes" / "Yes please" / "Sure" - affirmative follow-up with context
+		if messageLower == "yes" || messageLower == "yes please" || messageLower == "sure" || messageLower == "yeah" || messageLower == "more" || messageLower == "go on" || messageLower == "tell me more" {
+			// If previous response mentioned forum posts, list them
+			if strings.Contains(lastLower, "forum posts") {
+				re := regexp.MustCompile(`(?i)Searching "([^"]+)" \+ "([^"]+)"`)
+				matches := re.FindStringSubmatch(lastAssistantMsg)
+				if len(matches) >= 3 {
+					return s.listForumPosts(matches[1], matches[2], 10)
+				}
+				if len(prevQuotedTerms) > 0 {
+					return s.listForumPosts(prevQuotedTerms[0][1], "", 10)
+				}
+			}
+
+			// If previous response mentioned scraped content, show more
+			if strings.Contains(lastLower, "scraped content") || strings.Contains(lastLower, "scraped items") {
+				if len(prevQuotedTerms) > 0 {
+					return s.searchScrapedContentByKeyword(prevQuotedTerms[0][1], 15)
+				}
+			}
+
+			// If previous response was about a performer, show full details
+			rePerfName := regexp.MustCompile(`\*\*([A-Z][a-zA-Z]+(?: [A-Z][a-zA-Z]+)+)\*\*`)
+			perfMatches := rePerfName.FindStringSubmatch(lastAssistantMsg)
+			if len(perfMatches) >= 2 {
+				result, err := s.FindPerformer(perfMatches[1])
+				if err == nil {
+					scrapedInfo, _ := s.searchPerformerAcrossAll(perfMatches[1])
+					if scrapedInfo != "" {
+						result += "\n" + scrapedInfo
+					}
+					return result, nil
+				}
+			}
+		}
+
+		// "Can you list/show" generic follow-up
+		if (strings.Contains(messageLower, "can you") || strings.Contains(messageLower, "show me") || strings.Contains(messageLower, "what are")) &&
+			!strings.Contains(messageLower, "scraper") && !strings.Contains(messageLower, "forum") {
+			// Try to use context from previous response
+			if strings.Contains(lastLower, "scraped content") || strings.Contains(lastLower, "scraped items") {
+				if len(prevQuotedTerms) > 0 {
+					return s.searchScrapedContentByKeyword(prevQuotedTerms[0][1], 15)
+				}
+			}
+			if strings.Contains(lastLower, "forum posts") {
+				if len(prevQuotedTerms) > 0 {
+					return s.listForumPosts(prevQuotedTerms[0][1], "", 10)
+				}
+			}
+		}
+	}
+
+	// ===== GREETINGS =====
+	if messageLower == "hi" || messageLower == "hello" || messageLower == "hey" || messageLower == "yo" || messageLower == "sup" || strings.HasPrefix(messageLower, "hello ") || strings.HasPrefix(messageLower, "hi ") || strings.HasPrefix(messageLower, "hey ") {
+		var videoCount, performerCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+		s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+		var runningCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = 'running'").Scan(&runningCount)
+		greeting := fmt.Sprintf("Hey! 👋 Your library has **%d videos** and **%d performers**.", videoCount, performerCount)
+		if runningCount > 0 {
+			greeting += fmt.Sprintf(" There are **%d tasks** currently running.", runningCount)
+		} else {
+			greeting += " Everything is idle right now."
+		}
+		greeting += "\n\nWhat would you like to know?"
+		return greeting, nil
+	}
+
+	// ===== UPDATE / WHAT'S HAPPENING =====
+	if messageLower == "update" || messageLower == "give me an update" || messageLower == "what's new" || messageLower == "whats new" || strings.Contains(messageLower, "what's happening") || strings.Contains(messageLower, "whats happening") || (strings.Contains(messageLower, "give") && strings.Contains(messageLower, "update")) || messageLower == "overview" || messageLower == "summary" {
+		return s.generateAppUpdate()
+	}
+
+	// ===== SHORT CONVERSATIONAL FOLLOW-UPS (no history context) =====
+	if lastAssistantMsg == "" && (messageLower == "yes" || messageLower == "yes please" || messageLower == "sure" || messageLower == "ok" || messageLower == "yeah" || messageLower == "tell me more" || messageLower == "more" || messageLower == "go on") {
+		return "Could you be more specific about what you'd like to know? I can help with:\n\n" +
+			"- **Performer info**: Ask about any performer by name (e.g. \"Kendra Lust\")\n" +
+			"- **Library stats**: \"How many videos?\", \"Top performers\"\n" +
+			"- **Scrapers**: \"Scraper summary\", \"PornHub stats\"\n" +
+			"- **System**: \"Status\", \"Check for errors\"\n" +
+			"- **JDownloader**: \"JDownloader status\"", nil
+	}
+
+	// ===== DIRECT PERFORMER NAME LOOKUP =====
+	// If the message looks like a performer name (2-4 words, capitalized, no common keywords)
+	if s.looksLikePerformerName(message) {
+		result, err := s.FindPerformer(message)
+		if err == nil && !strings.Contains(result, "couldn't find") {
+			return result, nil
+		}
+		// Also search scraped content for this name
+		scrapedResult, _ := s.searchPerformerAcrossAll(message)
+		if scrapedResult != "" {
+			return scrapedResult, nil
+		}
+		// Fall through to other patterns
+	}
+
+	// ===== "ALL DATA ON X" / "EVERYTHING ABOUT X" =====
+	if (strings.Contains(messageLower, "all data") || strings.Contains(messageLower, "everything about") || strings.Contains(messageLower, "tell me about") || strings.Contains(messageLower, "info on") || strings.Contains(messageLower, "details on") || strings.Contains(messageLower, "details about")) {
+		// Extract the name after the keyword phrase
+		name := extractNameAfterPhrase(message, []string{"all data on", "everything about", "tell me about", "info on", "details on", "details about"})
+		if name != "" {
+			result, err := s.FindPerformer(name)
+			if err == nil {
+				// Also check scraped content
+				scrapedInfo, _ := s.searchPerformerAcrossAll(name)
+				if scrapedInfo != "" {
+					result += "\n" + scrapedInfo
+				}
+				return result, nil
+			}
+		}
+	}
+
+	// ===== "DOES X HAVE ANY Y" pattern =====
+	if strings.Contains(messageLower, "does") && (strings.Contains(messageLower, "have any") || strings.Contains(messageLower, "have a")) {
+		// Extract performer name and search term
+		re := regexp.MustCompile(`(?i)does\s+["']?(.+?)["']?\s+have\s+(?:any|a)\s+["']?(.+?)["']?\s*(?:scenes?|videos?|content)?[?]?$`)
+		matches := re.FindStringSubmatch(message)
+		if len(matches) >= 3 {
+			performerName := strings.TrimSpace(matches[1])
+			searchTerm := strings.TrimSpace(matches[2])
+			return s.searchPerformerWithTag(performerName, searchTerm)
+		}
+	}
 
 	// Rule-based responses for common queries
 	if strings.Contains(messageLower, "how many videos") {
@@ -2164,8 +6482,70 @@ func (s *AICompanionService) Chat(message string, history []map[string]string) (
 		return response.String(), nil
 	}
 
-	// Scraper stats (enhanced with video scrapers)
-	if strings.Contains(messageLower, "scraper") || strings.Contains(messageLower, "scraped") || strings.Contains(messageLower, "forum") {
+	// ===== SEARCH SCRAPED CONTENT (broad pattern) =====
+	// Handles: "search for X from scrapers", "find X in scraped content", "search scrapers for X"
+	if (strings.Contains(messageLower, "search") || strings.Contains(messageLower, "find") || strings.Contains(messageLower, "look")) &&
+		(strings.Contains(messageLower, "scraper") || strings.Contains(messageLower, "scraped") || strings.Contains(messageLower, "from the scraper")) {
+
+		// Extract keyword - try quotes first
+		re := regexp.MustCompile(`["']([^"']+)["']`)
+		matches := re.FindAllStringSubmatch(message, -1)
+		keyword := ""
+		if len(matches) > 0 {
+			keyword = matches[0][1]
+		}
+
+		// If no quotes, extract the search subject
+		if keyword == "" {
+			// Try "search for X from", "find X from", "search X from"
+			reFor := regexp.MustCompile(`(?i)(?:search|find|look)\s+(?:for\s+)?(.+?)\s+(?:from|in|on)\s+(?:the\s+)?scrap`)
+			m := reFor.FindStringSubmatch(message)
+			if len(m) >= 2 {
+				keyword = strings.TrimSpace(m[1])
+			}
+		}
+
+		// Try "search scrapers for X"
+		if keyword == "" {
+			reAfter := regexp.MustCompile(`(?i)(?:search|find|look)\s+(?:the\s+)?scrapers?\s+(?:for\s+)(.+)`)
+			m := reAfter.FindStringSubmatch(message)
+			if len(m) >= 2 {
+				keyword = strings.TrimSpace(m[1])
+			}
+		}
+
+		// Last resort: take everything after "search for" or "find"
+		if keyword == "" {
+			words := strings.Fields(message)
+			for i, w := range words {
+				wl := strings.ToLower(w)
+				if (wl == "for" || wl == "find" || wl == "search") && i+1 < len(words) {
+					remaining := strings.Join(words[i+1:], " ")
+					// Remove "from scrapers", "in scraped", etc.
+					remaining = regexp.MustCompile(`(?i)\s*(from|in|on)\s+(the\s+)?scrap\w+\s*$`).ReplaceAllString(remaining, "")
+					remaining = strings.TrimSpace(remaining)
+					if remaining != "" && remaining != "scrapers" && remaining != "scraped" {
+						keyword = remaining
+					}
+					break
+				}
+			}
+		}
+
+		if keyword != "" {
+			// Remove trailing "videos" or "content" from keyword
+			keyword = regexp.MustCompile(`(?i)\s*(videos?|content|items?)\s*$`).ReplaceAllString(keyword, "")
+			keyword = strings.TrimSpace(keyword)
+			if keyword != "" {
+				return s.searchScrapedContentByKeyword(keyword, 15)
+			}
+		}
+	}
+
+	// Scraper stats (only for stats/summary requests, not searches)
+	if (strings.Contains(messageLower, "scraper") && (strings.Contains(messageLower, "stat") || strings.Contains(messageLower, "summary") || strings.Contains(messageLower, "overview") || messageLower == "scraper" || messageLower == "scrapers")) ||
+		(strings.Contains(messageLower, "scraped") && !strings.Contains(messageLower, "search") && !strings.Contains(messageLower, "find")) ||
+		(messageLower == "forum" || messageLower == "forum stats" || (strings.Contains(messageLower, "forum") && strings.Contains(messageLower, "stat"))) {
 		var threadCount, postCount, linkCount, activeLinks int
 		s.db.QueryRow("SELECT COUNT(*) FROM scraped_threads").Scan(&threadCount)
 		s.db.QueryRow("SELECT COUNT(*) FROM scraped_posts").Scan(&postCount)
@@ -3291,12 +7671,99 @@ Keep your library organized with intelligent naming!`, nil
 			"For complex questions or natural conversations, I can connect to LM Studio for advanced AI capabilities!", nil
 	}
 
-	// Default response if no rule matches
-	return "I understand your question. For advanced natural language processing, I can connect to LM Studio if needed. For now, I can help with:\n" +
-		"- Library statistics ('how many videos?')\n" +
-		"- Performer information ('top performers')\n" +
-		"- System status ('status')\n" +
-		"- General help ('help')", nil
+	// Default: try to find anything matching the message as a search
+	// First, try as a performer name (direct DB lookup)
+	var performerMatch string
+	s.db.QueryRow("SELECT name FROM performers WHERE name LIKE ? LIMIT 1", "%"+message+"%").Scan(&performerMatch)
+	if performerMatch != "" {
+		result, err := s.FindPerformer(performerMatch)
+		if err == nil {
+			scrapedInfo, _ := s.searchPerformerAcrossAll(performerMatch)
+			if scrapedInfo != "" {
+				result += "\n" + scrapedInfo
+			}
+			return result, nil
+		}
+	}
+
+	// Try as video search
+	var videoMatch string
+	s.db.QueryRow("SELECT title FROM videos WHERE title LIKE ? LIMIT 1", "%"+message+"%").Scan(&videoMatch)
+	if videoMatch != "" {
+		results, err := s.SearchVideos(message)
+		if err == nil && len(results) > 0 {
+			var response strings.Builder
+			response.WriteString(fmt.Sprintf("🎬 Found videos matching \"%s\":\n\n", message))
+			for _, r := range results {
+				response.WriteString(r + "\n")
+			}
+			return response.String(), nil
+		}
+	}
+
+	// Default fallback with quick summary
+	var videoCount, performerCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM videos").Scan(&videoCount)
+	s.db.QueryRow("SELECT COUNT(*) FROM performers").Scan(&performerCount)
+
+	return fmt.Sprintf("I'm not sure how to help with that. Here's what I can do:\n\n"+
+		"📊 **Your Library:** %d videos, %d performers\n\n"+
+		"**Try asking:**\n"+
+		"- A performer name (e.g. \"Kendra Lust\")\n"+
+		"- \"Give me an update\" for app status\n"+
+		"- \"How many videos?\" for stats\n"+
+		"- \"Top performers\" for rankings\n"+
+		"- \"Scraper summary\" for scraping info\n"+
+		"- \"Check for errors\" for system health\n"+
+		"- \"Help\" for full capabilities list",
+		videoCount, performerCount), nil
+}
+
+// ================== Chat History ==================
+
+// SaveChatMessage persists a chat message to the database
+func (s *AICompanionService) SaveChatMessage(role, content, source string) {
+	_, _ = s.db.Exec(
+		`INSERT INTO ai_chat_messages (role, content, source, created_at) VALUES (?, ?, ?, ?)`,
+		role, content, source, time.Now(),
+	)
+	// Prune: keep only the 500 most recent messages
+	_, _ = s.db.Exec(`DELETE FROM ai_chat_messages WHERE id NOT IN (
+		SELECT id FROM ai_chat_messages ORDER BY created_at DESC LIMIT 500
+	)`)
+}
+
+// GetChatHistory returns the most recent N messages, oldest-first
+func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(
+		`SELECT id, role, content, source, created_at FROM ai_chat_messages
+		 ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id int64
+		var role, content, source, createdAt string
+		if rows.Scan(&id, &role, &content, &source, &createdAt) == nil {
+			results = append(results, map[string]interface{}{
+				"id": id, "role": role, "content": content,
+				"source": source, "created_at": createdAt,
+			})
+		}
+	}
+	// Reverse to oldest-first order
+	for i, j := 0, len(results)-1; i < j; i, j = i+1, j-1 {
+		results[i], results[j] = results[j], results[i]
+	}
+	return results, nil
+}
+
+// ClearChatHistory deletes all persisted chat messages
+func (s *AICompanionService) ClearChatHistory() error {
+	_, err := s.db.Exec("DELETE FROM ai_chat_messages")
+	return err
 }
 
 // ================== Memory Management ==================

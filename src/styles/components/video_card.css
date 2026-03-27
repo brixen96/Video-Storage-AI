@@ -3,21 +3,21 @@
 	border-radius: 16px;
 	overflow: hidden;
 	cursor: pointer;
-	transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+	transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
 	position: relative;
 	height: 100%;
 	display: flex;
 	flex-direction: column;
 	border: 1px solid rgba(102, 126, 234, 0.2);
-	backdrop-filter: blur(20px);
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+	will-change: transform;
+	contain: layout style;
 }
 
 .video-card:hover {
-	transform: translateY(-12px) scale(1.03);
-	box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 30px rgba(102, 126, 234, 0.4), 0 0 60px rgba(118, 75, 162, 0.2);
+	transform: translateY(-8px);
+	box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5), 0 0 20px rgba(102, 126, 234, 0.3);
 	border-color: rgba(102, 126, 234, 0.6);
-	background: linear-gradient(145deg, rgba(26, 41, 66, 0.6), rgba(22, 33, 62, 0.8));
 }
 
 .video-card.selected {
@@ -32,7 +32,7 @@
 	left: 0.5rem;
 	z-index: 10;
 	background: rgba(0, 0, 0, 0.75);
-	backdrop-filter: blur(10px);
+	/* backdrop-filter removed for scroll performance */
 	border-radius: 8px;
 	padding: 0.35rem;
 	border: 1px solid rgba(255, 255, 255, 0.2);
@@ -116,7 +116,7 @@
 .badge-pinned,
 .badge-rating {
 	background: rgba(0, 0, 0, 0.75);
-	backdrop-filter: blur(10px);
+	/* backdrop-filter removed for scroll performance */
 	color: white;
 	padding: 0.35rem 0.6rem;
 	border-radius: 8px;
@@ -186,7 +186,7 @@
 	bottom: 0.5rem;
 	right: 0.5rem;
 	background: rgba(0, 0, 0, 0.85);
-	backdrop-filter: blur(10px);
+	/* backdrop-filter removed for scroll performance */
 	color: white;
 	padding: 0.35rem 0.6rem;
 	border-radius: 8px;
@@ -258,7 +258,7 @@
 	font-size: 0.7rem;
 	padding: 0.3rem 0.5rem;
 	border-radius: 6px;
-	backdrop-filter: blur(10px);
+	/* backdrop-filter removed for scroll performance */
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	transition: all 0.3s ease;
 }
@@ -354,7 +354,7 @@
 	color: white;
 	font-weight: 500;
 	border: 1px solid rgba(255, 255, 255, 0.2);
-	backdrop-filter: blur(10px);
+	/* backdrop-filter removed for scroll performance */
 	transition: all 0.3s ease;
 	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
 }
@@ -370,4 +370,46 @@
 	color: #a0a0c0;
 	padding: 0.3rem 0.6rem;
 	font-weight: 500;
+}
+
+/* Quick favorite button — visible on card hover */
+.quick-favorite {
+	position: absolute;
+	bottom: 0.5rem;
+	left: 0.5rem;
+	z-index: 10;
+	background: rgba(0, 0, 0, 0.65);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 8px;
+	padding: 0.3rem 0.45rem;
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 0.85rem;
+	cursor: pointer;
+	opacity: 0;
+	transform: translateY(4px);
+	transition: opacity 0.2s, transform 0.2s, color 0.15s, border-color 0.15s;
+	line-height: 1;
+}
+
+.video-card:hover .quick-favorite {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.quick-favorite:hover {
+	color: #f87171;
+	border-color: rgba(248, 113, 113, 0.4);
+	background: rgba(0, 0, 0, 0.8);
+}
+
+.quick-favorite.active {
+	color: #f43f5e;
+	border-color: rgba(244, 63, 94, 0.4);
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.quick-favorite.active:hover {
+	color: rgba(255, 255, 255, 0.6);
+	border-color: rgba(255, 255, 255, 0.2);
 }

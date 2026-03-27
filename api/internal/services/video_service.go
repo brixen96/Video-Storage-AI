@@ -2081,3 +2081,38 @@ func (s *VideoService) UpdateContentTypeByFolder(folderPath string, contentType 
 
 	return rowsAffected, nil
 }
+
+// LinkPerformerToFolderVideos links all videos in a folder (recursively) to a performer
+func (s *VideoService) LinkPerformerToFolderVideos(folderPath string, performerID int64) (int64, error) {
+	searchPath := folderPath
+	if !strings.HasSuffix(searchPath, "\\") && !strings.HasSuffix(searchPath, "/") {
+		searchPath += "\\"
+	}
+
+	// Insert relationships for all folder videos that don't already have this performer
+	query := `
+		INSERT INTO video_performers (video_id, performer_id)
+		SELECT v.id, ?
+		FROM videos v
+		WHERE v.file_path LIKE ?
+		AND NOT EXISTS (
+			SELECT 1 FROM video_performers vp
+			WHERE vp.video_id = v.id AND vp.performer_id = ?
+		)
+	`
+	result, err := s.db.Exec(query, performerID, searchPath+"%", performerID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to link performer to folder: %w", err)
+	}
+
+	linked, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get affected rows: %w", err)
+	}
+
+	// Update performer video count
+	s.db.Exec(`UPDATE performers SET video_count = (SELECT COUNT(*) FROM video_performers WHERE performer_id = ?) WHERE id = ?`, performerID, performerID)
+
+	log.Printf("LinkPerformerToFolderVideos: linked performer %d to %d videos in folder %s", performerID, linked, folderPath)
+	return linked, nil
+}

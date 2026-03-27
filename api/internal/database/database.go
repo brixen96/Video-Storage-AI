@@ -32,7 +32,7 @@ func Initialize(cfg *config.Config) error {
 
 	// Open database connection with optimized settings
 	// Enable WAL mode for better concurrent read performance
-	dbPath := cfg.Database.Path + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL&_cache_size=10000&_foreign_keys=ON"
+	dbPath := cfg.Database.Path + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=FULL&_cache_size=10000&_foreign_keys=ON"
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -364,9 +364,12 @@ func runMigrations() error {
 		// Migration 14: Add category column to tags table
 		`ALTER TABLE tags ADD COLUMN category TEXT DEFAULT 'regular'`,
 		// Migration 15: Add category to performers and migrate zoo data
+		// NOTE: The zoo column was removed by migration 21. Migration 4 re-adds it on every restart
+		// with default 0, which caused the UPDATE below to reset ALL categories to 'regular'.
+		// The UPDATEs are now safe: only migrate rows where category hasn't been set yet (IS NULL).
 		`ALTER TABLE performers ADD COLUMN category TEXT DEFAULT 'regular'`,
-		`UPDATE performers SET category = 'zoo' WHERE zoo = 1`,
-		`UPDATE performers SET category = 'regular' WHERE zoo = 0 OR zoo IS NULL`,
+		`UPDATE performers SET category = 'zoo' WHERE zoo = 1 AND category = 'regular'`,
+		`UPDATE performers SET category = 'regular' WHERE category IS NULL`,
 		// Migration 16: Add category to studios
 		`ALTER TABLE studios ADD COLUMN category TEXT DEFAULT 'regular'`,
 		// Migration 17: Add category to groups
@@ -375,26 +378,7 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_performers_category ON performers(category)`,
 		`CREATE INDEX IF NOT EXISTS idx_studios_category ON studios(category)`,
 		`CREATE INDEX IF NOT EXISTS idx_groups_category ON groups(category)`,
-		// Migration 19: Update tags table to allow duplicate names across categories
-		// Step 1: Create new tags table with composite unique constraint
-		`CREATE TABLE IF NOT EXISTS tags_new (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL,
-			color TEXT,
-			icon TEXT,
-			category TEXT DEFAULT 'regular',
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			UNIQUE(name, category)
-		)`,
-		// Step 2: Copy data from old table
-		`INSERT INTO tags_new (id, name, color, icon, category, created_at, updated_at)
-		 SELECT id, name, color, icon, category, created_at, updated_at FROM tags`,
-		// Step 3: Drop old table
-		`DROP TABLE tags`,
-		// Step 4: Rename new table
-		`ALTER TABLE tags_new RENAME TO tags`,
-		// Step 5: Recreate index
+		// Migration 19: Moved to conditional block (see below) to avoid cascade-deleting video_tags/performer_tags on every restart
 		`CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)`,
 		`CREATE INDEX IF NOT EXISTS idx_tags_category ON tags(category)`,
 		// Migration 20: Add video_count to performers and populate from existing data
@@ -403,26 +387,7 @@ func runMigrations() error {
 		`UPDATE performers SET video_count = (
 			SELECT COUNT(*) FROM video_performers WHERE performer_id = performers.id
 		)`,
-		// Migration 21: Remove scene_count column (deprecated, use video_count)
-		// SQLite doesn't support DROP COLUMN, so we recreate the table
-		`CREATE TABLE IF NOT EXISTS performers_new (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			preview_path TEXT,
-			folder_path TEXT,
-			video_count INTEGER DEFAULT 0,
-			category TEXT DEFAULT 'regular' CHECK(category IN ('regular', 'zoo', '3d')),
-			metadata TEXT DEFAULT '{}',
-			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)`,
-		`INSERT INTO performers_new (id, name, preview_path, folder_path, video_count, category, metadata, created_at, updated_at)
-		 SELECT id, name, preview_path, folder_path, video_count, category, metadata, created_at, updated_at FROM performers`,
-		`DROP TABLE performers`,
-		`ALTER TABLE performers_new RENAME TO performers`,
-		// Recreate indexes
-		`CREATE INDEX IF NOT EXISTS idx_performers_name ON performers(name)`,
-		`CREATE INDEX IF NOT EXISTS idx_performers_category ON performers(category)`,
+		// Migration 21: Moved to conditional block (see below) to avoid cascade-deleting performer_tags on every restart
 		// Migration 22: Add thumbnail_path to performers
 		`ALTER TABLE performers ADD COLUMN thumbnail_path TEXT DEFAULT ''`,
 		// Migration 23: Create scraper tables
@@ -1148,6 +1113,176 @@ func runMigrations() error {
 
 	// Fix JDownloader port from 3129 to 3128 (correct default port)
 	DB.Exec(`UPDATE jdownloader_config SET local_port = 3128 WHERE local_port = 3129`)
+
+	// Migration 45: AI Config table for LM Studio integration
+	migration45AIConfig := []string{
+		`CREATE TABLE IF NOT EXISTS ai_config (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			lm_studio_url TEXT DEFAULT 'http://localhost:1234',
+			model_name TEXT DEFAULT '',
+			temperature REAL DEFAULT 0.7,
+			max_tokens INTEGER DEFAULT 2000,
+			enabled BOOLEAN DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+	}
+
+	for _, migration := range migration45AIConfig {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !strings.Contains(errMsg, "already exists") && !strings.Contains(errMsg, "duplicate column name") {
+				return fmt.Errorf("migration 45 (ai_config) failed: %w", err)
+			}
+		}
+	}
+
+	// Insert default AI config if not exists
+	if _, err := DB.Exec(`INSERT OR IGNORE INTO ai_config (id, lm_studio_url) VALUES (1, 'http://localhost:1234')`); err != nil {
+		// Ignore if already exists
+	}
+
+	// Migration 46: Backfill category column for Sexuria items from metadata JSON
+	// The subcategory was previously only stored in metadata JSON, now we populate the category column
+	DB.Exec(`
+		UPDATE scraped_videos
+		SET category = json_extract(metadata, '$.subcategory')
+		WHERE source LIKE 'sexuria%'
+		AND (category IS NULL OR category = '')
+		AND metadata IS NOT NULL
+		AND json_extract(metadata, '$.subcategory') IS NOT NULL
+		AND json_extract(metadata, '$.subcategory') != ''
+	`)
+
+	// Migration 47: Fix stuck auto_update_check tasks at 100% progress but still "running"
+	// The scheduler was calling UpdateProgress(100) instead of CompleteTask(), leaving tasks stuck
+	DB.Exec(`
+		UPDATE activity_logs
+		SET status = 'completed', completed_at = datetime('now')
+		WHERE task_type = 'auto_update_check'
+		AND status = 'running'
+		AND progress = 100
+	`)
+
+	// Migration 48: Performance indexes and startup cleanup
+	// Composite index for console_logs error monitoring queries (level + created_at)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_console_logs_level_created ON console_logs(level, created_at DESC)`)
+	// Composite index for activity_logs status + created_at queries
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_status_created ON activity_logs(status, created_at DESC)`)
+	// Index for dashboard feed recent items query
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_dashboard_feed_type_created ON dashboard_feed_items(item_type, created_at DESC)`)
+	// Startup cleanup: delete completed/failed activity_logs older than 14 days
+	DB.Exec(`DELETE FROM activity_logs WHERE status IN ('completed', 'failed') AND created_at < datetime('now', '-14 days')`)
+	// Startup cleanup: delete console_logs older than 7 days
+	DB.Exec(`DELETE FROM console_logs WHERE created_at < datetime('now', '-7 days')`)
+
+	// Migration 19 (conditional): Update tags table to allow duplicate names across categories.
+	// Only run if tags table still has the old UNIQUE(name) constraint (no category in unique).
+	// DROP TABLE with foreign_keys=ON triggers implicit DELETE FROM, which cascades to video_tags/performer_tags.
+	var hasTagsNew int
+	DB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='tags_new'").Scan(&hasTagsNew)
+	// Check if tags table has the old unique constraint (name only, not name+category composite)
+	var needsTagsMigration bool
+	rows, err := DB.Query("SELECT sql FROM sqlite_master WHERE type='table' AND name='tags'")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var sql string
+			rows.Scan(&sql)
+			// Old schema has UNIQUE on name only; new schema has UNIQUE(name, category)
+			if !strings.Contains(sql, "UNIQUE(name, category)") && !strings.Contains(sql, "UNIQUE (name, category)") {
+				needsTagsMigration = true
+			}
+		}
+	}
+	if needsTagsMigration {
+		log.Println("Migration 19: Updating tags table unique constraint...")
+		migration19Steps := []string{
+			`CREATE TABLE IF NOT EXISTS tags_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				color TEXT,
+				icon TEXT,
+				category TEXT DEFAULT 'regular',
+				created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE(name, category)
+			)`,
+			`INSERT INTO tags_new (id, name, color, icon, category, created_at, updated_at)
+			 SELECT id, name, color, icon, category, created_at, updated_at FROM tags`,
+			`DROP TABLE tags`,
+			`ALTER TABLE tags_new RENAME TO tags`,
+		}
+		for _, step := range migration19Steps {
+			if _, err := DB.Exec(step); err != nil {
+				if !isColumnExistsError(err) {
+					return fmt.Errorf("migration 19 (tags unique constraint) failed: %w", err)
+				}
+			}
+		}
+	} else {
+		DB.Exec("DROP TABLE IF EXISTS tags_new")
+	}
+
+	// Migration 21 (conditional): Remove scene_count column by recreating performers table.
+	// Only run if scene_count column still exists to avoid cascade-deleting performer_tags on every restart.
+	// DROP TABLE with foreign_keys=ON triggers implicit DELETE FROM, which cascades to performer_tags.
+	var hasSceneCount int
+	if err := DB.QueryRow("SELECT COUNT(*) FROM pragma_table_info('performers') WHERE name='scene_count'").Scan(&hasSceneCount); err == nil && hasSceneCount > 0 {
+		log.Println("Migration 21: Removing scene_count column from performers table...")
+		migration21Steps := []string{
+			`CREATE TABLE IF NOT EXISTS performers_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL UNIQUE,
+				preview_path TEXT,
+				thumbnail_path TEXT DEFAULT '',
+				folder_path TEXT,
+				video_count INTEGER DEFAULT 0,
+				category TEXT DEFAULT 'regular' CHECK(category IN ('regular', 'zoo', '3d')),
+				metadata TEXT DEFAULT '{}',
+				created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+				updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`INSERT INTO performers_new (id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at)
+			 SELECT id, name, preview_path, COALESCE(thumbnail_path, ''), folder_path, video_count, category, metadata, created_at, updated_at FROM performers`,
+			`DROP TABLE performers`,
+			`ALTER TABLE performers_new RENAME TO performers`,
+			`CREATE INDEX IF NOT EXISTS idx_performers_name ON performers(name)`,
+			`CREATE INDEX IF NOT EXISTS idx_performers_category ON performers(category)`,
+		}
+		for _, step := range migration21Steps {
+			if _, err := DB.Exec(step); err != nil {
+				if !isColumnExistsError(err) {
+					return fmt.Errorf("migration 21 (remove scene_count) failed: %w", err)
+				}
+			}
+		}
+	} else {
+		// Clean up leftover temp table if it exists
+		DB.Exec("DROP TABLE IF EXISTS performers_new")
+	}
+
+	// Migration 49: Add is_read column to scraped_posts for read tracking
+	DB.Exec(`ALTER TABLE scraped_posts ADD COLUMN is_read BOOLEAN DEFAULT 0`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_scraped_posts_thread_read ON scraped_posts(thread_id, is_read)`)
+
+	// Migration 50: Performance indexes for scraped_videos sort/filter queries
+	// Composite index covers the most common query: WHERE source = ? ORDER BY discovered_at DESC
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_scraped_videos_source_discovered ON scraped_videos(source, discovered_at DESC)`)
+	// Sort indexes for ORDER BY view_count, rating, duration queries
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_scraped_videos_view_count ON scraped_videos(view_count DESC)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_scraped_videos_rating ON scraped_videos(rating DESC)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_scraped_videos_duration ON scraped_videos(duration DESC)`)
+
+	// Migration 51: Persistent AI chat history
+	DB.Exec(`CREATE TABLE IF NOT EXISTS ai_chat_messages (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		role       TEXT NOT NULL,
+		content    TEXT NOT NULL,
+		source     TEXT NOT NULL DEFAULT 'user',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created ON ai_chat_messages(created_at DESC)`)
 
 	for i, migration := range migrations {
 		if _, err := DB.Exec(migration); err != nil {

@@ -423,6 +423,33 @@ func updateFolderContentType(c *gin.Context) {
 	}, fmt.Sprintf("Updated %d videos to %s", updated, request.ContentType)))
 }
 
+// linkPerformerToFolder links all videos in a folder to a performer
+func linkPerformerToFolder(c *gin.Context) {
+	svc := ensureVideoService()
+
+	var request struct {
+		FolderPath  string `json:"folder_path" binding:"required"`
+		PerformerID int64  `json:"performer_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+
+	linked, err := svc.LinkPerformerToFolderVideos(request.FolderPath, request.PerformerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to link performer to folder", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{
+		"linked":       linked,
+		"folder_path":  request.FolderPath,
+		"performer_id": request.PerformerID,
+	}, fmt.Sprintf("Linked performer to %d videos", linked)))
+}
+
 // generateVideoThumbnails generates thumbnails for all videos that don't have them
 func generateVideoThumbnails(c *gin.Context) {
 	svc := ensureVideoService()

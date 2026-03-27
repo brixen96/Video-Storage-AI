@@ -1,9 +1,11 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
@@ -74,6 +76,8 @@ func testJDownloaderConnection(c *gin.Context) {
 // sendToJDownloader handles POST /api/v1/jdownloader/send
 func sendToJDownloader(c *gin.Context) {
 	svc := ensureJDownloaderService()
+	activitySvc := ensureActivityService()
+	videoScraperSvc := ensureVideoScraperService()
 
 	var request models.JDownloaderSendLinksRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -86,6 +90,20 @@ func sendToJDownloader(c *gin.Context) {
 		return
 	}
 
+	// Extract scraped video IDs and clear them from the link objects before sending to JD.
+	// jdownloader_history.video_id has a FK to the regular "videos" table, not scraped_videos,
+	// so passing a scraped video ID causes a FK constraint failure.
+	scrapedVideoIDs := make([]*int64, len(request.Links))
+	for i, link := range request.Links {
+		scrapedVideoIDs[i] = link.VideoID
+		request.Links[i].VideoID = nil
+	}
+
+	// Use autoStart=false so we can rename the file before JD starts downloading
+	for i := range request.Links {
+		request.Links[i].AutoStart = false
+	}
+
 	results, err := svc.SendLinks(request.Links)
 	if err != nil {
 		log.Printf("Failed to send links to JDownloader: %v", err)
@@ -93,15 +111,99 @@ func sendToJDownloader(c *gin.Context) {
 		return
 	}
 
-	// Count successes and failures
+	// Count successes/failures, then post-process successful ones
 	successCount := 0
 	failCount := 0
-	for _, r := range results {
-		if r.Success {
-			successCount++
-		} else {
+	for i, r := range results {
+		if !r.Success {
 			failCount++
+			continue
 		}
+		successCount++
+		link := request.Links[i]
+		videoID := scrapedVideoIDs[i]
+
+		// Mark video as downloaded immediately (it's been queued in JD)
+		if videoID != nil {
+			if err := videoScraperSvc.MarkScrapedVideoDownloaded(*videoID); err != nil {
+				log.Printf("[JD] Failed to mark video %d as downloaded: %v", *videoID, err)
+			}
+		}
+
+		// Rename + start in background (3s delay to let JD process the link fully)
+		packageName := link.PackageName
+		videoTitle := link.PackageName // packageName is the video title
+		go func(pkgName, title string) {
+			time.Sleep(3 * time.Second)
+			if err := svc.RenameAndStartLink(pkgName, title); err != nil {
+				log.Printf("[JD] RenameAndStartLink failed for %q: %v", pkgName, err)
+			}
+		}(packageName, videoTitle)
+
+		// Create activity task and poll download progress
+		title := link.PackageName
+		if title == "" {
+			title = link.URL
+		}
+		go func(pkgName, taskTitle string, videoID *int64) {
+			activity, err := activitySvc.StartTask("jdownloader_download",
+				fmt.Sprintf("Downloading: %s", taskTitle),
+				map[string]interface{}{"package_name": pkgName},
+			)
+			if err != nil || activity == nil {
+				log.Printf("[JD] Failed to create activity for %q: %v", pkgName, err)
+				return
+			}
+			activityID := int64(activity.ID)
+
+			// Poll download progress every 5s, timeout after 2h
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			deadline := time.Now().Add(2 * time.Hour)
+			lastProgress := 0
+			nilCount := 0 // consecutive polls where package was not found
+
+			for range ticker.C {
+				if time.Now().After(deadline) {
+					activitySvc.CompleteTask(activityID, fmt.Sprintf("Download timed out: %s", taskTitle))
+					return
+				}
+
+				pp, err := svc.GetDownloadPackageProgress(pkgName)
+				if err != nil {
+					log.Printf("[JD] Progress poll error for %q: %v", pkgName, err)
+					continue
+				}
+
+				if pp == nil {
+					nilCount++
+					// Package not visible in download list — treat as complete if:
+					//   a) download was in progress (lastProgress > 0), or
+					//   b) package absent for 20s (nilCount >= 4) — either it finished fast
+					//      and JD removed it, or moveToDownloadlist failed; either way, done.
+					if lastProgress > 0 || nilCount >= 4 {
+						activitySvc.CompleteTask(activityID, fmt.Sprintf("Downloaded: %s", taskTitle))
+						return
+					}
+					continue
+				}
+				nilCount = 0 // reset on successful lookup
+
+				if pp.Finished {
+					activitySvc.CompleteTask(activityID, fmt.Sprintf("Downloaded: %s", taskTitle))
+					return
+				}
+
+				if pp.BytesTotal > 0 {
+					progress := int(pp.BytesLoaded * 100 / pp.BytesTotal)
+					if progress != lastProgress {
+						lastProgress = progress
+						msg := fmt.Sprintf("Downloading: %s (%d%%)", taskTitle, progress)
+						activitySvc.UpdateProgress(int(activityID), progress, msg)
+					}
+				}
+			}
+		}(packageName, title, videoID)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

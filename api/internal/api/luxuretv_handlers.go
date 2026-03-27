@@ -207,23 +207,44 @@ func getLuxureTVCategoriesHandler(c *gin.Context) {
 
 // getLuxureTVVideosHandler returns scraped LuxureTV videos with pagination
 func getLuxureTVVideosHandler(c *gin.Context) {
-	// Parse query parameters
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "24"))
 	search := c.Query("search")
 	sortBy := c.DefaultQuery("sort", "discovered_at")
 	sortOrder := c.DefaultQuery("order", "desc")
+	performerID, _ := strconv.ParseInt(c.DefaultQuery("performer_id", "0"), 10, 64)
+	tagID, _ := strconv.ParseInt(c.DefaultQuery("tag_id", "0"), 10, 64)
+	durationFilter := c.DefaultQuery("duration_filter", "")
+	category := c.Query("category")
+	onlyDownloaded := c.DefaultQuery("downloaded_only", "false") == "true"
+	var includeTags, excludeTags []string
+	if v := c.Query("include_tags"); v != "" {
+		includeTags = strings.Split(v, ",")
+	}
+	if v := c.Query("exclude_tags"); v != "" {
+		excludeTags = strings.Split(v, ",")
+	}
+	minRating, _ := strconv.Atoi(c.DefaultQuery("min_rating", "0"))
+	minViews, _ := strconv.Atoi(c.DefaultQuery("min_views", "0"))
 
 	videoScraperSvc := ensureVideoScraperService()
 
-	// Use paginated query
 	result, err := videoScraperSvc.GetScrapedVideosPaginated(services.ScrapedVideosQuery{
-		SiteType:  "luxuretv",
-		Search:    search,
-		Page:      page,
-		Limit:     limit,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
+		SiteType:        "luxuretv",
+		Search:          search,
+		Page:            page,
+		Limit:           limit,
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
+		PerformerID:     performerID,
+		TagID:           tagID,
+		DurationFilter:  durationFilter,
+		Category:        category,
+		OnlyDownloaded:  onlyDownloaded,
+		IncludeKeywords: includeTags,
+		ExcludeKeywords: excludeTags,
+		MinRating:       minRating,
+		MinViews:        minViews,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
@@ -244,6 +265,28 @@ func getLuxureTVVideosHandler(c *gin.Context) {
 		},
 		"LuxureTV videos retrieved successfully",
 	))
+}
+
+// getLuxureTVPerformersHandler returns all unique matched performers in LuxureTV videos
+func getLuxureTVPerformersHandler(c *gin.Context) {
+	luxureTVSvc := ensureLuxureTVScraperService()
+	performers, err := luxureTVSvc.GetMatchedPerformers()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get performers", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(performers, "LuxureTV performers retrieved successfully"))
+}
+
+// getLuxureTVTagsHandler returns all unique matched tags in LuxureTV videos
+func getLuxureTVTagsHandler(c *gin.Context) {
+	luxureTVSvc := ensureLuxureTVScraperService()
+	tags, err := luxureTVSvc.GetMatchedTags()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get tags", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(tags, "LuxureTV tags retrieved successfully"))
 }
 
 // getLuxureTVStatsHandler returns statistics about scraped LuxureTV videos

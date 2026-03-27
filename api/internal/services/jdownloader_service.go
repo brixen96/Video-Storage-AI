@@ -341,9 +341,10 @@ func (s *JDownloaderService) sendLinkLocal(config *models.JDownloaderConfig, lin
 	// Build the request body for the deprecated API
 	// The deprecated API expects params as a direct object (not wrapped in arrays)
 	requestParams := map[string]interface{}{
-		"autostart":   link.AutoStart || config.AutoStartDownloads,
-		"links":       link.URL,
-		"packageName": s.resolvePackageName(config, link),
+		"autostart":                  link.AutoStart || config.AutoStartDownloads,
+		"links":                      link.URL,
+		"packageName":                s.resolvePackageName(config, link),
+		"overwritePackagizerEnabled": true,
 	}
 
 	// Add destination folder if specified
@@ -1070,18 +1071,34 @@ func (s *JDownloaderService) doJDMultiParamAction(endpoint string, params ...int
 	return s.doJDAction(endpoint, stringParams)
 }
 
+// ensureNonEmptyArrays ensures neither slice is empty before sending to JDownloader.
+// JD's parseParameters throws ClassCastException when it receives an empty JSON array "[]"
+// for a long[] parameter. When one array is empty, we mirror the other as a fallback —
+// JD silently skips IDs that don't exist in the expected namespace.
+func ensureNonEmptyArrays(linkIDs, packageIDs []int64) ([]int64, []int64) {
+	if len(linkIDs) == 0 && len(packageIDs) > 0 {
+		linkIDs = packageIDs
+	} else if len(packageIDs) == 0 && len(linkIDs) > 0 {
+		packageIDs = linkIDs
+	}
+	return linkIDs, packageIDs
+}
+
 // MoveToDownloads moves links/packages from LinkGrabber to download list
 func (s *JDownloaderService) MoveToDownloads(linkIDs []int64, packageIDs []int64) error {
+	linkIDs, packageIDs = ensureNonEmptyArrays(linkIDs, packageIDs)
 	return s.doJDMultiParamAction("/linkgrabberv2/moveToDownloadlist", linkIDs, packageIDs)
 }
 
 // RemoveLinkGrabberLinks removes links from LinkGrabber
 func (s *JDownloaderService) RemoveLinkGrabberLinks(linkIDs []int64, packageIDs []int64) error {
+	linkIDs, packageIDs = ensureNonEmptyArrays(linkIDs, packageIDs)
 	return s.doJDMultiParamAction("/linkgrabberv2/removeLinks", linkIDs, packageIDs)
 }
 
 // RemoveDownloadLinks removes links from download list
 func (s *JDownloaderService) RemoveDownloadLinks(linkIDs []int64, packageIDs []int64) error {
+	linkIDs, packageIDs = ensureNonEmptyArrays(linkIDs, packageIDs)
 	return s.doJDMultiParamAction("/downloadsV2/removeLinks", linkIDs, packageIDs)
 }
 
@@ -1102,6 +1119,7 @@ func (s *JDownloaderService) SetLinkEnabled(enabled bool, linkIDs []int64, packa
 
 // ForceDownload forces download of specific links
 func (s *JDownloaderService) ForceDownload(linkIDs []int64, packageIDs []int64) error {
+	linkIDs, packageIDs = ensureNonEmptyArrays(linkIDs, packageIDs)
 	return s.doJDMultiParamAction("/downloadsV2/forceDownload", linkIDs, packageIDs)
 }
 
@@ -1189,11 +1207,13 @@ func (s *JDownloaderService) GetSystemInfo() (map[string]interface{}, error) {
 	return info, nil
 }
 
-// CleanupFinished removes finished downloads from the list
+// CleanupFinished removes finished downloads from the list.
+// Uses [0] as dummy arrays — JD throws ClassCastException on empty "[]" or null.
+// With selectionType=ALL, JD processes all finished items; the [0] IDs are skipped.
 func (s *JDownloaderService) CleanupFinished() error {
 	// cleanup(Action action, Mode mode, SelectionType selectionType, long[] linkIds, long[] packageIds)
 	return s.doJDMultiParamAction("/downloadsV2/cleanup",
-		"DELETE_FINISHED", "REMOVE_LINKS_ONLY", "ALL", nil, nil,
+		"DELETE_FINISHED", "REMOVE_LINKS_AND_PACKAGES", "ALL", []int64{0}, []int64{0},
 	)
 }
 
@@ -1220,4 +1240,153 @@ func (s *JDownloaderService) RenamePackage(packageID int64, newName string, isDo
 	}
 
 	return s.doJDMultiParamAction(endpoint, packageID, newName)
+}
+
+// PackageProgress holds progress info for a JDownloader package
+type PackageProgress struct {
+	UUID        int64
+	Name        string
+	BytesLoaded int64
+	BytesTotal  int64
+	Finished    bool
+	Running     bool
+}
+
+// GetDownloadPackageProgress finds a package in the download list by name and returns progress.
+// Returns nil, nil if no matching package is found.
+func (s *JDownloaderService) GetDownloadPackageProgress(packageName string) (*PackageProgress, error) {
+	packages, err := s.GetDownloadPackages()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pkg := range packages {
+		name, _ := pkg["name"].(string)
+		if !strings.EqualFold(name, packageName) {
+			continue
+		}
+
+		pp := &PackageProgress{Name: name}
+		if id, ok := pkg["uuid"].(float64); ok {
+			pp.UUID = int64(id)
+		}
+		if v, ok := pkg["bytesLoaded"].(float64); ok {
+			pp.BytesLoaded = int64(v)
+		}
+		if v, ok := pkg["bytesTotal"].(float64); ok {
+			pp.BytesTotal = int64(v)
+		}
+		// JD may return finished as bool, int, or string — handle all cases
+		switch v := pkg["finished"].(type) {
+		case bool:
+			pp.Finished = v
+		case float64:
+			pp.Finished = v != 0
+		case string:
+			pp.Finished = v == "true" || v == "1"
+		}
+		// Also treat 100% progress as finished
+		if pp.BytesTotal > 0 && pp.BytesLoaded >= pp.BytesTotal {
+			pp.Finished = true
+		}
+		if v, ok := pkg["running"].(bool); ok {
+			pp.Running = v
+		}
+		return pp, nil
+	}
+
+	return nil, nil
+}
+
+// RenameAndStartLink renames the first link in the LinkGrabber that belongs to packageName,
+// using videoTitle as the new filename (preserving the original file extension), then
+// moves all links in that package to the download list to start the download.
+func (s *JDownloaderService) RenameAndStartLink(packageName, videoTitle string) error {
+	config, err := s.getFullConfig()
+	if err != nil {
+		return err
+	}
+	baseURL := fmt.Sprintf("http://%s:%d", config.LocalHost, config.LocalPort)
+
+	// Query linkgrabber links — also request packageUUID so we have both IDs.
+	// JD's parseParameters cannot handle empty arrays, so both params to
+	// moveToDownloadlist must be non-empty [linkUUID] and [pkgUUID].
+	params := map[string]interface{}{
+		"url":         true,
+		"name":        true,
+		"packageName": true,
+		"packageUUID": true,
+		"maxResults":  -1,
+	}
+	jsonBody, _ := json.Marshal(params)
+	req, err := http.NewRequest("POST", baseURL+"/linkgrabberv2/queryLinks", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "identity")
+	if config.LocalUseAuth && config.LocalPassword != "" {
+		req.SetBasicAuth("", config.LocalPassword)
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	links := s.parseJDDataArray(body)
+
+	var linkUUID, pkgUUID int64
+	var origName string
+	for _, link := range links {
+		pkgName, _ := link["packageName"].(string)
+		if !strings.EqualFold(pkgName, packageName) {
+			continue
+		}
+		if id, ok := link["uuid"].(float64); ok {
+			linkUUID = int64(id)
+		}
+		if id, ok := link["packageUUID"].(float64); ok {
+			pkgUUID = int64(id)
+		}
+		origName, _ = link["name"].(string)
+		break
+	}
+
+	if linkUUID == 0 {
+		log.Printf("[JDownloader] No link found in LinkGrabber for package %q", packageName)
+		return nil
+	}
+
+	// Extract extension from original CDN filename
+	ext := ""
+	if idx := strings.LastIndex(origName, "."); idx >= 0 {
+		ext = origName[idx:] // e.g. ".mp4"
+	}
+	newName := sanitizeFilename(videoTitle)
+	if ext != "" {
+		newName += ext
+	}
+
+	// Rename the link — renameLink(long linkid, String name) takes scalar params.
+	// Must pass linkUUID as a scalar int64, NOT []int64{linkUUID}, or JD throws ClassCastException.
+	if err := s.doJDMultiParamAction("/linkgrabberv2/renameLink", linkUUID, newName); err != nil {
+		log.Printf("[JDownloader] renameLink failed (non-fatal): %v", err)
+	}
+
+	// Move to download list — both arrays must be non-empty or JD throws ClassCastException.
+	if pkgUUID == 0 {
+		pkgUUID = linkUUID // fallback if packageUUID not in response
+	}
+	return s.MoveToDownloads([]int64{linkUUID}, []int64{pkgUUID})
+}
+
+// sanitizeFilename replaces characters that are invalid in Windows filenames
+func sanitizeFilename(name string) string {
+	replacer := strings.NewReplacer(
+		"/", "-", "\\", "-", ":", " -", "*", "-",
+		"?", "", "\"", "'", "<", "(", ">", ")", "|", "-",
+	)
+	return strings.TrimSpace(replacer.Replace(name))
 }

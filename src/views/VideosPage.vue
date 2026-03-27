@@ -27,12 +27,31 @@
 						</div>
 					</div>
 					<div class="col-md-4 text-end">
-						<div class="d-flex gap-2 justify-content-end">
+						<div class="d-flex gap-2 justify-content-end flex-wrap align-items-center">
 							<button class="btn btn-outline-secondary" @click="toggleView">
 								<font-awesome-icon :icon="viewMode === 'grid' ? ['fas', 'list'] : ['fas', 'th']" />
 								{{ viewMode === 'grid' ? 'List' : 'Grid' }}
 							</button>
-							<button class="btn btn-outline-secondary" @click="toggleFilters">
+							<!-- Card size controls (grid mode only) -->
+							<div v-if="viewMode === 'grid'" class="vp-card-size-controls">
+								<label>Size</label>
+								<input
+									type="range"
+									class="vp-card-size-slider"
+									min="200"
+									max="600"
+									step="20"
+									:value="cardMinWidth"
+									@input="setCardSize(+$event.target.value)"
+								/>
+								<div class="vp-card-size-presets">
+									<button class="vp-size-preset" :class="{ active: cardMinWidth === 220 }" @click="setCardSize(220)" title="Small">S</button>
+									<button class="vp-size-preset" :class="{ active: cardMinWidth === 300 }" @click="setCardSize(300)" title="Medium">M</button>
+									<button class="vp-size-preset" :class="{ active: cardMinWidth === 400 }" @click="setCardSize(400)" title="Large">L</button>
+									<button class="vp-size-preset" :class="{ active: cardMinWidth === 520 }" @click="setCardSize(520)" title="XL">XL</button>
+								</div>
+							</div>
+														<button class="btn btn-outline-secondary" @click="toggleFilters">
 								<font-awesome-icon :icon="['fas', 'filter']" />
 								Filters
 							</button>
@@ -195,8 +214,8 @@
 								</span>
 							</label>
 							<div class="vp-range-slider">
-								<input v-model.number="filters.minDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-min" @input="loadVideos" />
-								<input v-model.number="filters.maxDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-max" @input="loadVideos" />
+								<input v-model.number="filters.minDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-min" @change="loadVideos" />
+								<input v-model.number="filters.maxDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-max" @change="loadVideos" />
 								<div class="vp-slider-track"></div>
 							</div>
 						</div>
@@ -221,8 +240,8 @@
 								<span v-if="filters.minSize || filters.maxSize" class="vp-filter-value"> {{ filters.minSize || 0 }}MB - {{ filters.maxSize || 10000 }}MB </span>
 							</label>
 							<div class="vp-range-slider">
-								<input v-model.number="filters.minSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-min" @input="loadVideos" />
-								<input v-model.number="filters.maxSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-max" @input="loadVideos" />
+								<input v-model.number="filters.minSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-min" @change="loadVideos" />
+								<input v-model.number="filters.maxSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-max" @change="loadVideos" />
 								<div class="vp-slider-track"></div>
 							</div>
 						</div>
@@ -257,11 +276,11 @@
 					</div>
 
 					<!-- Grid View -->
-					<div v-else-if="viewMode === 'grid'" class="vp-video-grid p-3">
+					<div v-else-if="viewMode === 'grid'" class="vp-video-grid p-3" :style="{ '--card-min-width': cardMinWidth + 'px' }">
 						<VideoCard
 							v-for="video in videos"
 							:key="video.id"
-							v-memo="[video.id, video.title, video.rating, isSelected(video.id)]"
+							v-memo="[video.id, video.title, video.rating, video.is_favorite, isSelected(video.id)]"
 							:video="video"
 							:is-selected="isSelected(video.id)"
 							@toggle-select="(video) => toggleSelection(video.id)"
@@ -271,6 +290,7 @@
 							@edit-metadata="editMetadata"
 							@open-performer="openPerformer"
 							@open-studio="openStudio"
+							@toggle-favorite="quickToggleFavorite"
 						/>
 					</div>
 
@@ -358,6 +378,10 @@
 					<font-awesome-icon :icon="['fas', 'play']" />
 					Play
 				</div>
+				<div class="vp-context-menu-item" @click="quickToggleFavorite(contextMenu.video); hideContextMenu()">
+					<font-awesome-icon :icon="[contextMenu.video?.is_favorite ? 'fas' : 'far', 'heart']" />
+					{{ contextMenu.video?.is_favorite ? 'Unfavorite' : 'Favorite' }}
+				</div>
 				<div class="vp-context-menu-item" @click="editMetadata(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'edit']" />
 					Edit Metadata
@@ -377,6 +401,20 @@
 				<div class="vp-context-menu-item" @click="openInExplorer(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'folder-open']" />
 					Open in Explorer
+				</div>
+				<div class="vp-context-menu-divider"></div>
+				<div class="vp-context-menu-rate">
+					<span class="rate-label">Rate</span>
+					<font-awesome-icon
+						v-for="star in 5"
+						:key="star"
+						:icon="[star <= (contextMenuHoverRating || contextMenu.video?.rating || 0) ? 'fas' : 'far', 'star']"
+						class="ctx-star"
+						:class="{ 'ctx-star-filled': star <= (contextMenuHoverRating || contextMenu.video?.rating || 0) }"
+						@mouseenter="contextMenuHoverRating = star"
+						@mouseleave="contextMenuHoverRating = 0"
+						@click.stop="rateVideo(contextMenu.video, star)"
+					/>
 				</div>
 				<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'trash']" />
@@ -421,7 +459,7 @@
 		<EditMetadataModal :show="showEditMetadata" :video="videoForModal" @close="onEditMetadataClose" @saved="onEditMetadataSaved" />
 
 		<!-- Add Tags Modal -->
-		<AddTagModal :show="showTagModal" :video="videoForModal" @close="onTagModalClose" @saved="onTagModalSaved" />
+		<AddTagModal :show="showTagModal" :video="videoForModal" :videos="bulkTagVideoIds" @close="onTagModalClose" @saved="onTagModalSaved" />
 
 		<!-- Delete Confirmation Modal -->
 		<DeleteConfirmationModal
@@ -501,6 +539,7 @@ export default {
 			},
 			currentPage: 1,
 			pageSize: 60,
+			cardMinWidth: parseInt(localStorage.getItem('vp-card-size') || '300'),
 			totalVideos: 0,
 			...useTableSelectionOptionsAPI().data(),
 			showBulkActions: false,
@@ -510,6 +549,7 @@ export default {
 				y: 0,
 				video: null,
 			},
+			contextMenuHoverRating: 0,
 			addToListModal: {
 				visible: false,
 				video: null,
@@ -525,6 +565,7 @@ export default {
 			showEditMetadata: false,
 			showTagModal: false,
 			videoForModal: null,
+			bulkTagVideoIds: [],
 			previewingPerformer: null,
 			deleteModal: {
 				show: false,
@@ -611,6 +652,17 @@ export default {
 	beforeUnmount() {
 		document.removeEventListener('click', this.hideContextMenu)
 		document.removeEventListener('keydown', this.handleKeyPress)
+
+		// Clean up search debounce timeout
+		if (this.searchTimeout) {
+			clearTimeout(this.searchTimeout)
+		}
+
+		// Clean up all performer preview timeouts
+		if (this.performerPreviewTimeouts) {
+			Object.values(this.performerPreviewTimeouts).forEach((id) => clearTimeout(id))
+			this.performerPreviewTimeouts = {}
+		}
 	},
 	watch: {
 		'filters.contentType'() {
@@ -626,6 +678,10 @@ export default {
 			return this.videos
 		}),
 		getAssetURL,
+		setCardSize(width) {
+			this.cardMinWidth = width
+			localStorage.setItem('vp-card-size', width)
+		},
 		async loadVideos() {
 			this.loading = true
 			try {
@@ -927,6 +983,32 @@ export default {
 		hideContextMenu() {
 			this.contextMenu.show = false
 		},
+		async rateVideo(video, star) {
+			if (!video) return
+			const newRating = star === video.rating ? 0 : star
+			this.hideContextMenu()
+			try {
+				await videosAPI.update(video.id, { rating: newRating })
+				video.rating = newRating
+				this.$toast.success(newRating ? `Rated ${newRating}/5` : 'Rating cleared')
+			} catch (error) {
+				console.error('Failed to rate video:', error)
+				this.$toast.error('Failed to update rating')
+			}
+		},
+
+		async quickToggleFavorite(video) {
+			if (!video) return
+			const newVal = !video.is_favorite
+			try {
+				await videosAPI.update(video.id, { is_favorite: newVal })
+				video.is_favorite = newVal
+			} catch (error) {
+				console.error('Failed to toggle favorite:', error)
+				this.$toast.error('Failed to update favorite')
+			}
+		},
+
 		openAddToListModal(video) {
 			this.addToListModal.video = video
 			this.addToListModal.isScraped = video.is_scraped || false
@@ -998,8 +1080,10 @@ export default {
 			this.$router.push(`/studios/${studio.id}`)
 		},
 		bulkAddTags() {
-			console.log('Bulk add tags to:', this.selectedItems)
-			// Implement bulk tag operation
+			this.videoForModal = null
+			this.bulkTagVideoIds = [...this.selectedItems]
+			this.showTagModal = true
+			this.showBulkActions = false
 		},
 		async bulkFetchMetadata() {
 			try {
@@ -1116,11 +1200,13 @@ export default {
 		onTagModalClose() {
 			this.showTagModal = false
 			this.videoForModal = null
+			this.bulkTagVideoIds = []
 		},
 		onTagModalSaved() {
 			this.loadVideos()
 			this.showTagModal = false
 			this.videoForModal = null
+			this.bulkTagVideoIds = []
 		},
 		startPerformerPreview(performer) {
 			// Delay preview start by 300ms to avoid loading on quick hovers

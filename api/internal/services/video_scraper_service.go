@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +56,17 @@ func HasBlockedTags(tags []string) bool {
 			if lowerTag == blocked || strings.Contains(lowerTag, blocked) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// isPlaceholderURL returns true if the URL looks like a lazy-load placeholder
+func isPlaceholderURL(u string) bool {
+	lower := strings.ToLower(u)
+	for _, ph := range []string{"placeholder", "blank.gif", "blank.png", "lazy.gif", "loading.gif", "transparent.gif", "spacer.gif", "no-image", "noimage", "default.jpg", "nophoto", "noimage.gif", "empty.gif"} {
+		if strings.Contains(lower, ph) {
+			return true
 		}
 	}
 	return false
@@ -118,10 +131,12 @@ type ScrapedVideo struct {
 
 // ScrapeOptions contains scraping configuration
 type ScrapeOptions struct {
-	DownloadVideo    bool `json:"downloadVideo"`
-	ExtractMetadata  bool `json:"extractMetadata"`
-	ScrapeThumbnails bool `json:"scrapeThumbnails"`
-	MaxPages         int  `json:"maxPages"` // For pagination support (0 = unlimited, scrapes all pages)
+	DownloadVideo    bool   `json:"downloadVideo"`
+	ExtractMetadata  bool   `json:"extractMetadata"`
+	ScrapeThumbnails bool   `json:"scrapeThumbnails"`
+	MaxPages         int    `json:"maxPages"`        // 0 = unlimited, scrapes all pages
+	PageUrlTemplate  string `json:"pageUrlTemplate"` // e.g. "https://site.com/page/{page}" — overrides auto-detection
+	PageStartsAt     int    `json:"pageStartsAt"`    // First page number used in template (1 or 2; 2 means page 1 = base URL)
 }
 
 // ScrapeProgress represents the current progress of a scraping operation
@@ -229,6 +244,7 @@ func (s *VideoScraperService) detectSiteType(host string) string {
 	if strings.Contains(host, "vimeo.com") {
 		return "vimeo"
 	}
+	
 
 	return "custom"
 }
@@ -332,8 +348,10 @@ func (s *VideoScraperService) scrapeGenericSite(video *ScrapedVideo, videoURL st
 		return fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	// Try to extract title from various sources
-	if title, exists := doc.Find("meta[property='og:title']").Attr("content"); exists {
+	// Try to extract title from various sources (site-specific first, then OG meta)
+	if title := strings.TrimSpace(doc.Find("h1.main-h1").First().Text()); title != "" {
+		video.Title = title // HQPorner
+	} else if title, exists := doc.Find("meta[property='og:title']").Attr("content"); exists {
 		video.Title = title
 	} else if title, exists := doc.Find("meta[name='title']").Attr("content"); exists {
 		video.Title = title
@@ -353,6 +371,63 @@ func (s *VideoScraperService) scrapeGenericSite(video *ScrapedVideo, videoURL st
 		video.ThumbnailURL = thumb
 	} else if thumb, exists := doc.Find("meta[property='og:image:url']").Attr("content"); exists {
 		video.ThumbnailURL = thumb
+	}
+
+	// Extract duration from video page (site-specific selectors)
+	// HQPorner: li.icon.fa-clock-o inside ul.meta; generic: [class*=duration], time[datetime]
+	if video.Duration == 0 {
+		durationCandidates := []string{
+			"li.fa-clock-o", "li.icon.fa-clock-o",
+			".duration", "[class*='duration']", "[class*='runtime']",
+			"li.fa-clock-o", ".fa-clock-o",
+			"time[datetime]",
+		}
+		for _, sel := range durationCandidates {
+			doc.Find(sel).Each(func(_ int, s *goquery.Selection) {
+				if video.Duration > 0 {
+					return
+				}
+				// For <time datetime="PT37M7S"> extract from attribute
+				if dt, ex := s.Attr("datetime"); ex && dt != "" {
+					if d := parseDuration(dt); d > 0 {
+						video.Duration = d
+						return
+					}
+				}
+				if d := parseDuration(strings.TrimSpace(s.Text())); d > 0 {
+					video.Duration = d
+				}
+			})
+			if video.Duration > 0 {
+				break
+			}
+		}
+	}
+
+	// Extract performers and categories as tags
+	// HQPorner: li.icon.fa-star-o a = performers, a.tag-link = categories
+	tags := []string{}
+	doc.Find("li.fa-star-o a, li.icon.fa-star-o a").Each(func(_ int, s *goquery.Selection) {
+		if name := strings.TrimSpace(s.Text()); name != "" {
+			tags = append(tags, name)
+		}
+	})
+	if len(tags) == 0 {
+		// Generic performer selectors
+		doc.Find(".pornstars a, .performers a, .models a, a[href*='/actress/'], a[href*='/pornstar/'], a[href*='/model/']").Each(func(_ int, s *goquery.Selection) {
+			if name := strings.TrimSpace(s.Text()); name != "" && len(name) < 60 {
+				tags = append(tags, name)
+			}
+		})
+	}
+	// Categories
+	doc.Find("a.tag-link, a[href*='/category/'], a[href*='/categories/'], a[href*='/tag/']").Each(func(_ int, s *goquery.Selection) {
+		if name := strings.TrimSpace(s.Text()); name != "" && len(name) < 40 {
+			tags = append(tags, name)
+		}
+	})
+	if len(tags) > 0 {
+		video.Tags = tags
 	}
 
 	// Try to find video elements and extract resolution
@@ -402,6 +477,18 @@ func (s *VideoScraperService) scrapeGenericSite(video *ScrapedVideo, videoURL st
 		metadata["resolutions"] = resolutions
 		// Store the highest resolution found
 		metadata["max_resolution"] = findHighestResolution(resolutions)
+	}
+
+	// Merge with any pre-existing metadata (e.g., thumbnail_frames from listing page)
+	if video.Metadata != "" {
+		existingMeta := map[string]interface{}{}
+		if err := json.Unmarshal([]byte(video.Metadata), &existingMeta); err == nil {
+			for k, v := range existingMeta {
+				if _, exists := metadata[k]; !exists {
+					metadata[k] = v
+				}
+			}
+		}
 	}
 
 	if len(metadata) > 0 {
@@ -486,13 +573,9 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 		var pageURL string
 		if paginationStyle == "query" {
@@ -518,7 +601,7 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
-		videos, err := s.scrapeListingPage(pageURL, source)
+		videos, err := s.scrapeListingPage(pageURL, source, req.SiteType)
 		if err != nil {
 			fmt.Printf("ERROR scraping page %d: %v\n", page, err)
 			result.Errors = append(result.Errors, fmt.Sprintf("Page %d: %v", page, err))
@@ -591,34 +674,43 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 	// Remove trailing slash for consistency
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	// Detect pagination style:
+	// If an explicit page URL template was provided, skip auto-detection
+	useTemplate := req.Options.PageUrlTemplate != ""
+	templateStartsAt := req.Options.PageStartsAt
+	if useTemplate && templateStartsAt <= 0 {
+		templateStartsAt = 1
+	}
+
+	// Detect pagination style (only when no explicit template is provided):
 	// 1. Query parameter pagination (e.g., ?page=2)
 	// 2. Path-based pagination (e.g., /videos/2)
 	paginationStyle := "path" // default to path-based
 	hasPageNumber := false
 
-	// Check if URL already has query parameter pagination
-	if strings.Contains(baseURL, "?page=") || strings.Contains(baseURL, "&page=") {
-		paginationStyle = "query"
-		// Remove existing page parameter to get base URL
-		if idx := strings.Index(baseURL, "?page="); idx != -1 {
-			baseURL = baseURL[:idx]
-		} else if idx := strings.Index(baseURL, "&page="); idx != -1 {
-			baseURL = baseURL[:idx]
-		}
-	} else if strings.Contains(baseURL, "index.php") || strings.Contains(source, "fapzoo") {
-		// Sites like fapzoo.fun use query parameter pagination
-		paginationStyle = "query"
-	} else {
-		// Check if the URL already ends with a page number (like /extreme-test/1)
-		parts := strings.Split(baseURL, "/")
-		if len(parts) > 0 {
-			lastPart := parts[len(parts)-1]
-			// Check if last part is a number (page number)
-			if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
-				// Remove the page number from the base URL
-				baseURL = strings.Join(parts[:len(parts)-1], "/")
-				hasPageNumber = true
+	if !useTemplate {
+		// Check if URL already has query parameter pagination
+		if strings.Contains(baseURL, "?page=") || strings.Contains(baseURL, "&page=") {
+			paginationStyle = "query"
+			// Remove existing page parameter to get base URL
+			if idx := strings.Index(baseURL, "?page="); idx != -1 {
+				baseURL = baseURL[:idx]
+			} else if idx := strings.Index(baseURL, "&page="); idx != -1 {
+				baseURL = baseURL[:idx]
+			}
+		} else if strings.Contains(baseURL, "index.php") || strings.Contains(source, "fapzoo") {
+			// Sites like fapzoo.fun use query parameter pagination
+			paginationStyle = "query"
+		} else {
+			// Check if the URL already ends with a page number (like /extreme-test/1)
+			parts := strings.Split(baseURL, "/")
+			if len(parts) > 0 {
+				lastPart := parts[len(parts)-1]
+				// Check if last part is a number (page number)
+				if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil {
+					// Remove the page number from the base URL
+					baseURL = strings.Join(parts[:len(parts)-1], "/")
+					hasPageNumber = true
+				}
 			}
 		}
 	}
@@ -636,16 +728,20 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ Scraping paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 		var pageURL string
-		if paginationStyle == "query" {
+		if useTemplate {
+			// Template-based pagination: replace {page} with actual page number.
+			// If templateStartsAt > 1, page 1 uses the raw base URL; later pages use the template.
+			if page == 1 && templateStartsAt > 1 {
+				pageURL = strings.TrimRight(req.URL, "/")
+			} else {
+				pageURL = strings.Replace(req.Options.PageUrlTemplate, "{page}", fmt.Sprintf("%d", page), 1)
+			}
+		} else if paginationStyle == "query" {
 			// Query parameter pagination (e.g., ?page=2)
 			if page == 1 {
 				pageURL = baseURL
@@ -668,7 +764,7 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 		}
 
 		fmt.Printf("\n=== Scraping Page %d: %s ===\n", page, pageURL)
-		videos, err := s.scrapeListingPage(pageURL, source)
+		videos, err := s.scrapeListingPage(pageURL, source, req.SiteType)
 		if err != nil {
 			fmt.Printf("ERROR scraping page %d: %v\n", page, err)
 			result.Errors = append(result.Errors, fmt.Sprintf("Page %d: %v", page, err))
@@ -754,6 +850,9 @@ func (s *VideoScraperService) TestScrapeListingPage(pageURL string) (map[string]
 	}
 
 	selectors := []string{
+		// HQPorner-specific
+		"section.box.feature a.image",
+		"a[href*='/hdporn/']",
 		// Most specific first - for sites with li.video structure
 		"li.video > a.image",
 		"li.video > span.title > a",
@@ -836,19 +935,80 @@ func (s *VideoScraperService) TestScrapeListingPage(pageURL string) (map[string]
 
 				foundLinks[fullURL] = true
 
-				title := sel.Find("img").AttrOr("alt", "")
+				img := sel.Find("img").First()
+				thumbnail := ""
+				if img.Length() > 0 {
+					for _, attr := range []string{"data-mediumthumb", "data-src", "data-original", "data-lazy-src", "data-lazy", "src"} {
+						if v, ex := img.Attr(attr); ex && v != "" && !isPlaceholderURL(v) {
+							thumbnail = v
+							break
+						}
+					}
+					if thumbnail != "" && !strings.HasPrefix(thumbnail, "http") {
+						if turl, err := url.Parse(thumbnail); err == nil {
+							pageBase, _ := url.Parse(pageURL)
+							thumbnail = pageBase.ResolveReference(turl).String()
+						}
+					}
+				}
+				title := ""
+				if img.Length() > 0 {
+					title = img.AttrOr("alt", "")
+				}
 				if title == "" {
 					title = sel.AttrOr("title", "")
 				}
+				// Walk up to 4 levels for sibling title containers (MadnessPorn: .title-thumb a, HQPorner: .meta-data-title a)
 				if title == "" {
-					title = sel.Text()
+					for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+						if container.Length() == 0 || title != "" {
+							break
+						}
+						if titleEl := container.Find(".title-thumb a, .meta-data-title a, .thumbnailTitle, .title > a, .video-title a, h3 > a, h4 > a"); titleEl.Length() > 0 {
+							if t := strings.TrimSpace(titleEl.First().Text()); t != "" {
+								title = t
+							}
+						}
+					}
+				}
+				if title == "" {
+					title = strings.TrimSpace(sel.Text())
+				}
+				// Duration: search up to 4 ancestor levels; use .Each() to skip empty elements
+				duration := ""
+				durationSels := "var.duration, .duration, .time, span.duration, [class*='duration'], [class*='runtime'], [class*='clock'], .fa-clock-o, [class*='meta-data']"
+				for _, c := range []*goquery.Selection{sel, sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+					if c.Length() == 0 || duration != "" {
+						break
+					}
+					c.Find(durationSels).Each(func(_ int, el *goquery.Selection) {
+						if duration != "" {
+							return
+						}
+						if d := strings.TrimSpace(el.Text()); parseDuration(d) > 0 {
+							duration = d
+						}
+					})
+					// MadnessPorn: span.left
+					if duration == "" {
+						c.Find("span.left, .left").Each(func(_ int, s *goquery.Selection) {
+							if duration != "" {
+								return
+							}
+							if t := strings.TrimSpace(s.Text()); parseDuration(t) > 0 {
+								duration = t
+							}
+						})
+					}
 				}
 
-				fmt.Printf("  [TEST] ✓ Accepted: %s (title: %s)\n", fullURL, strings.TrimSpace(title))
+				fmt.Printf("  [TEST] ✓ Accepted: %s (title: %s, thumb: %v)\n", fullURL, strings.TrimSpace(title), thumbnail != "")
 
 				videos = append(videos, map[string]string{
-					"url":   fullURL,
-					"title": strings.TrimSpace(title),
+					"url":       fullURL,
+					"title":     strings.TrimSpace(title),
+					"thumbnail": thumbnail,
+					"duration":  duration,
 				})
 			})
 
@@ -859,13 +1019,138 @@ func (s *VideoScraperService) TestScrapeListingPage(pageURL string) (map[string]
 		}
 	}
 
+	// Broad fallback: if no videos found by specific selectors, try any <a> containing an <img>
+	if len(videos) == 0 {
+		fmt.Printf("[TEST] No specific selector matched, trying broad a:has(img) fallback...\n")
+		fallbackMatches := doc.Find("a:has(img)")
+		fallbackMatches.Each(func(i int, sel *goquery.Selection) {
+			if sel.Closest("header, nav, footer, [class*='nav'], [class*='menu'], [class*='header'], [class*='footer'], [class*='sidebar'], [class*='banner'], [class*='logo']").Length() > 0 {
+				return
+			}
+			href, exists := sel.Attr("href")
+			if !exists || href == "" || href == "#" || strings.HasPrefix(href, "javascript:") {
+				return
+			}
+			videoURL, _ := url.Parse(href)
+			if !videoURL.IsAbs() {
+				baseURL, _ := url.Parse(pageURL)
+				videoURL = baseURL.ResolveReference(videoURL)
+			}
+			fullURL := videoURL.String()
+			if foundLinks[fullURL] {
+				return
+			}
+			if fullURL == pageURL || strings.TrimSuffix(fullURL, "/") == strings.TrimSuffix(pageURL, "/") {
+				return
+			}
+			normalizedURL := strings.TrimSuffix(fullURL, "/")
+			if strings.HasSuffix(normalizedURL, "/videos") ||
+				strings.Contains(normalizedURL, "/category") ||
+				strings.Contains(normalizedURL, "/categories") ||
+				strings.Contains(normalizedURL, "/tag") ||
+				strings.Contains(normalizedURL, "/tags") {
+				return
+			}
+			urlPath := videoURL.Path
+			if urlPath == "/" || urlPath == "" {
+				return
+			}
+			if strings.Contains(urlPath, "/login") || strings.Contains(urlPath, "/register") ||
+				strings.Contains(urlPath, "/signup") || strings.Contains(urlPath, "/search") ||
+				strings.Contains(urlPath, "/about") || strings.Contains(urlPath, "/contact") ||
+				strings.Contains(urlPath, "/privacy") || strings.Contains(urlPath, "/terms") {
+				return
+			}
+			foundLinks[fullURL] = true
+			thumbnail := ""
+			title := ""
+			img := sel.Find("img").First()
+			if img.Length() > 0 {
+				for _, attr := range []string{"data-mediumthumb", "data-src", "data-original", "data-lazy-src", "data-lazy", "src"} {
+					if v, ex := img.Attr(attr); ex && v != "" && !isPlaceholderURL(v) {
+						thumbnail = v
+						break
+					}
+				}
+				if thumbnail != "" && !strings.HasPrefix(thumbnail, "http") {
+					if turl, err := url.Parse(thumbnail); err == nil {
+						pageBase, _ := url.Parse(pageURL)
+						thumbnail = pageBase.ResolveReference(turl).String()
+					}
+				}
+				title, _ = img.Attr("alt")
+			}
+			if title == "" {
+				title, _ = sel.Attr("title")
+			}
+			// Walk up to 4 levels for sibling title containers
+			if title == "" {
+				for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+					if container.Length() == 0 || title != "" {
+						break
+					}
+					if titleEl := container.Find(".title-thumb a, .meta-data-title a, .thumbnailTitle, .title > a, .video-title a, h3 > a, h4 > a"); titleEl.Length() > 0 {
+						if t := strings.TrimSpace(titleEl.First().Text()); t != "" {
+							title = t
+						}
+					}
+				}
+			}
+			if title == "" {
+				title = strings.TrimSpace(sel.Text())
+			}
+			// Duration: search up to 4 ancestor levels; use .Each() to skip empty elements
+			duration := ""
+			durationSels2 := "var.duration, .duration, .time, span.duration, [class*='duration'], [class*='runtime'], [class*='clock'], .fa-clock-o, [class*='meta-data']"
+			for _, c := range []*goquery.Selection{sel, sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if c.Length() == 0 || duration != "" {
+					break
+				}
+				c.Find(durationSels2).Each(func(_ int, el *goquery.Selection) {
+					if duration != "" {
+						return
+					}
+					if d := strings.TrimSpace(el.Text()); parseDuration(d) > 0 {
+						duration = d
+					}
+				})
+				if duration == "" {
+					c.Find("span.left, .left").Each(func(_ int, s *goquery.Selection) {
+						if duration != "" {
+							return
+						}
+						if t := strings.TrimSpace(s.Text()); parseDuration(t) > 0 {
+							duration = t
+						}
+					})
+				}
+			}
+			fmt.Printf("  [TEST fallback] ✓ Accepted: %s (title: %s, thumb: %v)\n", fullURL, strings.TrimSpace(title), thumbnail != "")
+			videos = append(videos, map[string]string{
+				"url":       fullURL,
+				"title":     strings.TrimSpace(title),
+				"thumbnail": thumbnail,
+				"duration":  duration,
+			})
+		})
+		if len(videos) > 0 {
+			result["selectors_tried"] = append(result["selectors_tried"].([]map[string]interface{}), map[string]interface{}{
+				"selector": "a:has(img) [broad fallback]",
+				"matches":  len(videos),
+			})
+		}
+	}
+
 	result["videos_found"] = videos
 	result["total_found"] = len(videos)
 	return result, nil
 }
 
 // scrapeListingPage extracts video links from a listing page
-func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*ScrapedVideo, error) {
+func (s *VideoScraperService) scrapeListingPage(pageURL, source, siteType string) ([]*ScrapedVideo, error) {
+	if siteType == "" {
+		siteType = "custom"
+	}
 	resp, err := http.Get(pageURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch page: %w", err)
@@ -889,6 +1174,9 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 		// FapZoo-specific selectors (video-card-wrapper with a.video-card)
 		".video-card-wrapper a.video-card",
 		".video-grid a.video-card",
+		// HQPorner-specific: section.box.feature contains a.image.featured with img inside
+		"section.box.feature a.image",
+		"a[href*='/hdporn/']",
 		// Most specific first - for sites with li.video structure
 		"li.video > a.image",
 		"li.video > span.title > a",
@@ -996,22 +1284,58 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 				if mediumThumb, exists := img.Attr("data-mediumthumb"); exists && mediumThumb != "" {
 					thumbnail = mediumThumb
 				}
-				// Try various image source attributes
+				// Try various image source attributes — prioritize lazy-load attrs over src
+				// (most sites use src=placeholder.gif and store the real thumbnail in data-src etc.)
 				if thumbnail == "" {
-					if src, exists := img.Attr("src"); exists && src != "" && !strings.Contains(src, "placeholder") {
+					for _, attr := range []string{"data-src", "data-original", "data-lazy-src", "data-lazy", "data-srcset"} {
+						if v, ex := img.Attr(attr); ex && v != "" && !isPlaceholderURL(v) {
+							thumbnail = strings.Fields(v)[0] // take first URL if srcset
+							break
+						}
+					}
+				}
+				// Fall back to src only if no lazy-load attr found
+				if thumbnail == "" {
+					if src, ex := img.Attr("src"); ex && src != "" && !isPlaceholderURL(src) {
 						thumbnail = src
-					} else if dataSrc, exists := img.Attr("data-src"); exists && dataSrc != "" {
-						thumbnail = dataSrc
-					} else if dataOriginal, exists := img.Attr("data-original"); exists && dataOriginal != "" {
-						thumbnail = dataOriginal
-					} else if dataLazySrc, exists := img.Attr("data-lazy-src"); exists && dataLazySrc != "" {
-						thumbnail = dataLazySrc
 					}
 				}
 
-				// Extract video preview URL (PornHub uses data-mediabook for webm preview)
-				if mediabook, exists := img.Attr("data-mediabook"); exists && mediabook != "" {
-					videoPreviewURL = mediabook
+				// Extract video preview URL — check <a>, <img>, and sibling <video> elements
+				previewAttrs := []string{"data-mediabook", "data-preview", "data-webm", "data-mp4",
+					"data-video", "data-video-preview", "data-src-preview", "data-hover",
+					"data-animated", "data-trailer", "data-preview-url", "data-videopreview"}
+				for _, attr := range previewAttrs {
+					if v, ex := sel.Attr(attr); ex && v != "" {
+						videoPreviewURL = v
+						break
+					}
+					if v, ex := img.Attr(attr); ex && v != "" {
+						videoPreviewURL = v
+						break
+					}
+				}
+				// Also check any <video> element inside the link (e.g. FapZoo: <video data-preview-url="...">)
+				if videoPreviewURL == "" {
+					if vidEl := sel.Find("video[data-preview-url]"); vidEl.Length() > 0 {
+						if v, ex := vidEl.Attr("data-preview-url"); ex && v != "" {
+							videoPreviewURL = v
+						}
+					}
+					if videoPreviewURL == "" {
+						if vidEl := sel.Find("video.video-preview"); vidEl.Length() > 0 {
+							if v, ex := vidEl.Attr("src"); ex && v != "" && !isPlaceholderURL(v) {
+								videoPreviewURL = v
+							}
+						}
+					}
+				}
+				// Make preview URL absolute if needed
+				if videoPreviewURL != "" && !strings.HasPrefix(videoPreviewURL, "http") {
+					if previewParsed, err := url.Parse(videoPreviewURL); err == nil {
+						pageBase, _ := url.Parse(pageURL)
+						videoPreviewURL = pageBase.ResolveReference(previewParsed).String()
+					}
 				}
 
 				// Convert relative thumbnail URL to absolute URL
@@ -1052,6 +1376,37 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 				}
 			}
 
+			// MadnessPorn: extract animated preview frames from onmouseover="startm(id,base_url,.ext)"
+			// onmouseover is on the <img> element, not the <a>, so check both sel and its img child
+			if len(thumbnailFrames) == 0 {
+				for _, attrEl := range []*goquery.Selection{sel, sel.Find("img").First()} {
+					if attrEl.Length() == 0 {
+						continue
+					}
+					if onover, ex := attrEl.Attr("onmouseover"); ex && strings.Contains(onover, "startm(") {
+						qParts := strings.Split(onover, `"`)
+						if len(qParts) >= 6 {
+							baseURL := qParts[3]
+							ext := strings.TrimSuffix(strings.TrimSuffix(qParts[5], ")"), ";")
+							if strings.HasPrefix(baseURL, "http") {
+								for i := 1; i <= 10; i++ {
+									thumbnailFrames = append(thumbnailFrames, fmt.Sprintf("%s%d%s", baseURL, i, ext))
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+
+			// HQPorner: thumbnail xxx_main.jpg -> frames xxx_1.jpg through xxx_10.jpg
+			if len(thumbnailFrames) == 0 && strings.Contains(thumbnail, "_main.jpg") {
+				base := strings.Replace(thumbnail, "_main.jpg", "", 1)
+				for i := 1; i <= 10; i++ {
+					thumbnailFrames = append(thumbnailFrames, fmt.Sprintf("%s_%d.jpg", base, i))
+				}
+			}
+
 			// Extract title - try multiple sources
 			title := ""
 			// First try data-title attribute (PornHub uses this)
@@ -1086,12 +1441,17 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 					title = titleAttr
 				}
 			}
-			// Try finding a title/heading element within the selection or parent
+			// Try finding a title/heading element within parent containers
 			if title == "" {
-				// Look in parent container for title elements (PornHub has .thumbnailTitle in sibling)
-				if parent := sel.Parent().Parent(); parent.Length() > 0 {
-					if titleEl := parent.Find(".thumbnailTitle, .title a, .video-title"); titleEl.Length() > 0 {
-						title = strings.TrimSpace(titleEl.First().Text())
+				// Walk up to 4 levels to find title in sibling containers (MadnessPorn: .title-thumb a, HQPorner: .meta-data-title a)
+				for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+					if container.Length() == 0 || title != "" {
+						break
+					}
+					if titleEl := container.Find(".title-thumb a, .meta-data-title a, .thumbnailTitle, .title > a, .video-title a, h3 > a, h4 > a"); titleEl.Length() > 0 {
+						if t := strings.TrimSpace(titleEl.First().Text()); t != "" {
+							title = t
+						}
 					}
 				}
 			}
@@ -1111,114 +1471,78 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 
 			fmt.Printf("  ✓ Accepted video URL: %s (title: %s)\n", fullURL, strings.TrimSpace(title))
 
-			// Extract duration if available
+			// Extract duration — search up to 4 ancestor levels with broad selectors
+			// Use .Each() not .First() to skip empty elements (e.g. HQPorner has empty fa-circle-o.meta-data before fa-clock-o.meta-data)
 			duration := 0
-			if durationEl := sel.Find(".duration, .time, [class*='duration']"); durationEl.Length() > 0 {
-				durationText := strings.TrimSpace(durationEl.First().Text())
-				if durationText != "" {
-					duration = parseDuration(durationText)
+			durationSelectors := "var.duration, .duration, .time, span.duration, [class*='duration'], [class*='runtime'], [class*='clock'], .fa-clock-o, [class*='meta-data']"
+			for _, container := range []*goquery.Selection{sel, sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || duration > 0 {
+					break
 				}
-			}
-			// Also try looking for duration in parent or sibling elements
-			if duration == 0 {
-				if parent := sel.Parent(); parent.Length() > 0 {
-					// PornHub uses var.duration, also check standard duration classes
-					if durationEl := parent.Find("var.duration, .duration, .time, span.duration"); durationEl.Length() > 0 {
-						durationText := strings.TrimSpace(durationEl.First().Text())
-						if durationText != "" {
-							duration = parseDuration(durationText)
+				container.Find(durationSelectors).Each(func(_ int, el *goquery.Selection) {
+					if duration > 0 {
+						return
+					}
+					if d := parseDuration(strings.TrimSpace(el.Text())); d > 0 {
+						duration = d
+					}
+				})
+				// MadnessPorn uses span.left for duration — only accept if text parses as a valid time
+				if duration == 0 {
+					container.Find("span.left, .left").Each(func(_ int, s *goquery.Selection) {
+						if duration > 0 {
+							return
 						}
-					}
-				}
-			}
-			// Also search in grandparent for PornHub's deeper nested structure
-			if duration == 0 {
-				if grandparent := sel.Parent().Parent(); grandparent.Length() > 0 {
-					if durationEl := grandparent.Find("var.duration, .duration"); durationEl.Length() > 0 {
-						durationText := strings.TrimSpace(durationEl.First().Text())
-						if durationText != "" {
-							duration = parseDuration(durationText)
+						if d := parseDuration(strings.TrimSpace(s.Text())); d > 0 {
+							duration = d
 						}
-					}
+					})
 				}
 			}
-
-			// Extract resolution if available (look for quality indicators or extract from URL)
-			resolution := ""
-
-			// Check if duration element contains HD/quality indicators (e.g., "<strong>HD</strong> 00:03")
-			if durationEl := sel.Find(".duration, .time, [class*='duration']"); durationEl.Length() > 0 {
-				// Check for <strong> tag inside duration
-				if strongEl := durationEl.Find("strong"); strongEl.Length() > 0 {
-					qualityText := strings.TrimSpace(strongEl.First().Text())
-					resolution = extractResolutionFromText(qualityText)
-				}
-				// Also check the full duration text
-				if resolution == "" {
-					durationFullText := strings.TrimSpace(durationEl.First().Text())
-					resolution = extractResolutionFromText(durationFullText)
-				}
-			}
-
-			// Look for quality/resolution elements
-			if resolution == "" {
-				if qualityEl := sel.Find(".quality, .hd, [class*='quality'], [class*='resolution']"); qualityEl.Length() > 0 {
-					qualityText := strings.TrimSpace(qualityEl.First().Text())
-					resolution = extractResolutionFromText(qualityText)
-				}
-			}
-
-			// Also try parent element
-			if resolution == "" {
-				if parent := sel.Parent(); parent.Length() > 0 {
-					// Check duration in parent
-					if durationEl := parent.Find(".duration strong"); durationEl.Length() > 0 {
-						qualityText := strings.TrimSpace(durationEl.First().Text())
-						resolution = extractResolutionFromText(qualityText)
-					}
-					// Check other quality elements in parent
-					if resolution == "" {
-						if qualityEl := parent.Find(".quality, .hd, span.quality"); qualityEl.Length() > 0 {
-							qualityText := strings.TrimSpace(qualityEl.First().Text())
-							resolution = extractResolutionFromText(qualityText)
-						}
-					}
-				}
-			}
-
-			// Try to extract from video URL itself
-			if resolution == "" {
-				resolution = extractResolutionFromURL(fullURL)
-			}
-
-			// Extract view count from parent element
+			// Extract view count — search up to 4 ancestor levels + raw text scan
 			viewCount := 0
-			if parent := sel.Parent(); parent.Length() > 0 {
-				// Look for views element: <span class="views">148164 views</span>
-				if viewsEl := parent.Find(".views, span.views, [class*='views']"); viewsEl.Length() > 0 {
-					viewsText := strings.TrimSpace(viewsEl.First().Text())
-					viewCount = parseViewCount(viewsText)
+			for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || viewCount > 0 {
+					break
 				}
-			}
-			// Also search in grandparent for PornHub's structure
-			if viewCount == 0 {
-				if grandparent := sel.Parent().Parent(); grandparent.Length() > 0 {
-					if viewsEl := grandparent.Find(".views var, span.views var, .views"); viewsEl.Length() > 0 {
-						viewsText := strings.TrimSpace(viewsEl.First().Text())
-						viewCount = parseViewCount(viewsText)
-					}
+				if viewsEl := container.Find(".views, span.views, [class*='views'], [class*='view-count']"); viewsEl.Length() > 0 {
+					viewCount = parseViewCount(strings.TrimSpace(viewsEl.First().Text()))
+				}
+				// Raw text scan: MadnessPorn keeps "642 views" as a text node in div.text
+				if viewCount == 0 {
+					container.Find(".text, .info, .meta, .details, .data").Each(func(_ int, s *goquery.Selection) {
+						if viewCount > 0 {
+							return
+						}
+						words := strings.Fields(strings.ToLower(s.Text()))
+						for i, w := range words {
+							if (w == "views" || w == "view") && i > 0 {
+								if v := parseViewCount(words[i-1] + " views"); v > 0 {
+									viewCount = v
+								}
+							}
+						}
+					})
 				}
 			}
 
-			// Extract rating from parent element
+			// Extract rating — search up to 4 ancestor levels
 			rating := 0
-			if parent := sel.Parent(); parent.Length() > 0 {
-				// Look for rating element: <span class="rating up"><i class="fa fa-thumbs-up"></i> 86%</span>
-				if ratingEl := parent.Find(".rating, span.rating, [class*='rating']"); ratingEl.Length() > 0 {
-					ratingText := strings.TrimSpace(ratingEl.First().Text())
-					rating = parseRating(ratingText)
+			for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || rating > 0 {
+					break
 				}
+				container.Find(".rating, span.rating, [class*='rating'], .score, [class*='score']").Each(func(_ int, r *goquery.Selection) {
+					if rating > 0 {
+						return
+					}
+					if v := parseRating(strings.TrimSpace(r.Text())); v > 0 {
+						rating = v
+					}
+				})
 			}
+
+			resolution := extractResolutionFromURL(fullURL)
 
 			// Build metadata with resolution, thumbnail frames, and video preview if found
 			metadata := "{}"
@@ -1246,7 +1570,7 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 
 			video := &ScrapedVideo{
 				Source:       source,
-				SiteType:     "custom",
+				SiteType:     siteType,
 				URL:          fullURL,
 				Title:        strings.TrimSpace(title),
 				ThumbnailURL: thumbnail,
@@ -1258,6 +1582,7 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 				Tags:         []string{},
 				Metadata:     metadata,
 			}
+
 
 			// Save to database
 			saveErr := s.saveVideo(video)
@@ -1279,6 +1604,333 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source string) ([]*Scra
 		// If we found videos with this selector, stop trying others
 		if len(videos) > 0 {
 			break
+		}
+	}
+
+	// Broad fallback: if no videos found by specific selectors, try any <a> containing an <img>
+	// that is not inside a header/nav/footer element (catches sites like HQPorner with non-standard HTML)
+	if len(videos) == 0 {
+		fmt.Printf("No videos found with specific selectors, trying broad a:has(img) fallback...\n")
+		fallbackMatches := doc.Find("a:has(img)")
+		fallbackMatches.Each(func(i int, sel *goquery.Selection) {
+			// Skip links inside nav/header/footer/menu elements
+			if sel.Closest("header, nav, footer, [class*='nav'], [class*='menu'], [class*='header'], [class*='footer'], [class*='sidebar'], [class*='banner'], [class*='logo']").Length() > 0 {
+				return
+			}
+
+			href, exists := sel.Attr("href")
+			if !exists || href == "" || href == "#" || strings.HasPrefix(href, "javascript:") {
+				return
+			}
+
+			videoURL, err := url.Parse(href)
+			if err != nil {
+				return
+			}
+			if !videoURL.IsAbs() {
+				baseURL, _ := url.Parse(pageURL)
+				videoURL = baseURL.ResolveReference(videoURL)
+			}
+			fullURL := videoURL.String()
+
+			if foundLinks[fullURL] {
+				return
+			}
+			if fullURL == pageURL || strings.TrimSuffix(fullURL, "/") == strings.TrimSuffix(pageURL, "/") {
+				return
+			}
+
+			normalizedURL := strings.TrimSuffix(fullURL, "/")
+			if strings.HasSuffix(normalizedURL, "/videos") ||
+				strings.Contains(normalizedURL, "/videos/page") ||
+				strings.Contains(normalizedURL, "/category") ||
+				strings.Contains(normalizedURL, "/categories") ||
+				strings.Contains(normalizedURL, "/tag") ||
+				strings.Contains(normalizedURL, "/tags") {
+				return
+			}
+
+			urlPath := videoURL.Path
+			if urlPath == "/" || urlPath == "" {
+				return
+			}
+			if strings.Contains(urlPath, "/login") || strings.Contains(urlPath, "/register") ||
+				strings.Contains(urlPath, "/signup") || strings.Contains(urlPath, "/search") ||
+				strings.Contains(urlPath, "/about") || strings.Contains(urlPath, "/contact") ||
+				strings.Contains(urlPath, "/privacy") || strings.Contains(urlPath, "/terms") ||
+				strings.HasPrefix(urlPath, "/cdn-cgi/") || strings.Contains(urlPath, ".css") ||
+				strings.Contains(urlPath, ".js") {
+				return
+			}
+
+			if strings.Contains(urlPath, "/videos/") {
+				parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+				if len(parts) >= 2 {
+					lastPart := parts[len(parts)-1]
+					if _, err := fmt.Sscanf(lastPart, "%d", new(int)); err == nil && parts[len(parts)-2] == "videos" {
+						return
+					}
+				}
+			}
+
+			foundLinks[fullURL] = true
+
+			// --- Full metadata extraction (same quality as main selector loop) ---
+			thumbnail := ""
+			videoPreviewURL := ""
+			img := sel.Find("img").First()
+			if img.Length() > 0 {
+				// Thumbnail: prioritize lazy-load attrs; src is last resort (often a placeholder)
+				for _, attr := range []string{"data-mediumthumb", "data-src", "data-original", "data-lazy-src", "data-lazy", "data-srcset", "src"} {
+					if v, ex := img.Attr(attr); ex && v != "" && !isPlaceholderURL(v) {
+						thumbnail = strings.Fields(v)[0] // take first URL if srcset
+						break
+					}
+				}
+				// Animated preview URL — check <a>, <img>, and sibling <video> elements
+				previewAttrs := []string{"data-mediabook", "data-preview", "data-webm", "data-mp4",
+					"data-video", "data-video-preview", "data-src-preview", "data-hover",
+					"data-animated", "data-trailer", "data-preview-url", "data-videopreview"}
+				for _, attr := range previewAttrs {
+					if v, ex := sel.Attr(attr); ex && v != "" {
+						videoPreviewURL = v
+						break
+					}
+					if v, ex := img.Attr(attr); ex && v != "" {
+						videoPreviewURL = v
+						break
+					}
+				}
+				if videoPreviewURL == "" {
+					if vidEl := sel.Find("video[data-preview-url]"); vidEl.Length() > 0 {
+						if v, ex := vidEl.Attr("data-preview-url"); ex && v != "" {
+							videoPreviewURL = v
+						}
+					}
+					if videoPreviewURL == "" {
+						if vidEl := sel.Find("video.video-preview"); vidEl.Length() > 0 {
+							if v, ex := vidEl.Attr("src"); ex && v != "" && !isPlaceholderURL(v) {
+								videoPreviewURL = v
+							}
+						}
+					}
+				}
+				// Make URLs absolute
+				if thumbnail != "" && !strings.HasPrefix(thumbnail, "http") {
+					if turl, err := url.Parse(thumbnail); err == nil {
+						pageBase, _ := url.Parse(pageURL)
+						thumbnail = pageBase.ResolveReference(turl).String()
+					}
+				}
+				if videoPreviewURL != "" && !strings.HasPrefix(videoPreviewURL, "http") {
+					if purl, err := url.Parse(videoPreviewURL); err == nil {
+						pageBase, _ := url.Parse(pageURL)
+						videoPreviewURL = pageBase.ResolveReference(purl).String()
+					}
+				}
+			}
+
+			// Title: try various attribute sources first
+			title := ""
+			if v, ex := sel.Attr("data-title"); ex && v != "" {
+				title = v
+			}
+			if title == "" {
+				if v, ex := img.Attr("data-title"); ex && v != "" {
+					title = v
+				}
+			}
+			if title == "" {
+				if v, ex := img.Attr("alt"); ex && v != "" {
+					title = v
+				}
+			}
+			if title == "" {
+				if v, ex := sel.Attr("aria-label"); ex && v != "" {
+					title = v
+				}
+			}
+			if title == "" {
+				if v, ex := sel.Attr("title"); ex && v != "" {
+					title = v
+				}
+			}
+			// Walk up to 4 levels to find title in sibling containers (MadnessPorn: .title-thumb a, HQPorner: .meta-data-title a)
+			if title == "" {
+				for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+					if container.Length() == 0 || title != "" {
+						break
+					}
+					if titleEl := container.Find(".title-thumb a, .meta-data-title a, .thumbnailTitle, .title > a, .video-title a, h3 > a, h4 > a"); titleEl.Length() > 0 {
+						if t := strings.TrimSpace(titleEl.First().Text()); t != "" {
+							title = t
+						}
+					}
+				}
+			}
+			if title == "" {
+				if h := sel.Find("h1, h2, h3, h4, h5, h6, .title, .video-title"); h.Length() > 0 {
+					title = strings.TrimSpace(h.First().Text())
+				}
+			}
+			if title == "" {
+				title = strings.TrimSpace(sel.Text())
+			}
+			if title == "" {
+				title = "Video from " + source
+			}
+
+			// Duration: search up to 4 ancestor levels; use .Each() to skip empty elements
+			duration := 0
+			durationSelectors := "var.duration, .duration, .time, span.duration, [class*='duration'], [class*='runtime'], [class*='clock'], .fa-clock-o, [class*='meta-data']"
+			for _, container := range []*goquery.Selection{sel, sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || duration > 0 {
+					break
+				}
+				container.Find(durationSelectors).Each(func(_ int, el *goquery.Selection) {
+					if duration > 0 {
+						return
+					}
+					if d := parseDuration(strings.TrimSpace(el.Text())); d > 0 {
+						duration = d
+					}
+				})
+				// MadnessPorn uses span.left for duration — only accept if text parses as a valid time
+				if duration == 0 {
+					container.Find("span.left, .left").Each(func(_ int, s *goquery.Selection) {
+						if duration > 0 {
+							return
+						}
+						if d := parseDuration(strings.TrimSpace(s.Text())); d > 0 {
+							duration = d
+						}
+					})
+				}
+			}
+
+			// View count: search up to 4 ancestor levels + raw text scan
+			viewCount := 0
+			for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || viewCount > 0 {
+					break
+				}
+				if viewsEl := container.Find(".views, span.views, [class*='views'], [class*='view-count']"); viewsEl.Length() > 0 {
+					viewCount = parseViewCount(strings.TrimSpace(viewsEl.First().Text()))
+				}
+				// Raw text scan: MadnessPorn keeps "642 views" as a text node in div.text
+				if viewCount == 0 {
+					container.Find(".text, .info, .meta, .details, .data").Each(func(_ int, s *goquery.Selection) {
+						if viewCount > 0 {
+							return
+						}
+						words := strings.Fields(strings.ToLower(s.Text()))
+						for i, w := range words {
+							if (w == "views" || w == "view") && i > 0 {
+								if v := parseViewCount(words[i-1] + " views"); v > 0 {
+									viewCount = v
+								}
+							}
+						}
+					})
+				}
+			}
+
+			// Rating: search up to 4 ancestor levels
+			rating := 0
+			for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
+				if container.Length() == 0 || rating > 0 {
+					break
+				}
+				container.Find(".rating, span.rating, [class*='rating'], .score, [class*='score']").Each(func(_ int, r *goquery.Selection) {
+					if rating > 0 {
+						return
+					}
+					if v := parseRating(strings.TrimSpace(r.Text())); v > 0 {
+						rating = v
+					}
+				})
+			}
+
+			// Animated preview frames (MadnessPorn startm / HQPorner _main.jpg)
+			// MadnessPorn puts onmouseover on the <img>, so check both sel (<a>) and its img child
+			thumbnailFrames := []string{}
+			for _, attrEl := range []*goquery.Selection{sel, sel.Find("img").First()} {
+				if len(thumbnailFrames) > 0 || attrEl.Length() == 0 {
+					break
+				}
+				if onover, ex := attrEl.Attr("onmouseover"); ex && strings.Contains(onover, "startm(") {
+					qParts := strings.Split(onover, `"`)
+					if len(qParts) >= 6 {
+						baseURL := qParts[3]
+						ext := strings.TrimSuffix(strings.TrimSuffix(qParts[5], ")"), ";")
+						if strings.HasPrefix(baseURL, "http") {
+							for i := 1; i <= 10; i++ {
+								thumbnailFrames = append(thumbnailFrames, fmt.Sprintf("%s%d%s", baseURL, i, ext))
+							}
+						}
+					}
+				}
+			}
+			if len(thumbnailFrames) == 0 && strings.Contains(thumbnail, "_main.jpg") {
+				base := strings.Replace(thumbnail, "_main.jpg", "", 1)
+				for i := 1; i <= 10; i++ {
+					thumbnailFrames = append(thumbnailFrames, fmt.Sprintf("%s_%d.jpg", base, i))
+				}
+			}
+
+			// Build metadata JSON
+			resolution := extractResolutionFromURL(fullURL)
+			metadataMap := make(map[string]interface{})
+			if resolution != "" {
+				metadataMap["max_resolution"] = resolution
+				metadataMap["resolutions"] = []string{resolution}
+			}
+			if len(thumbnailFrames) > 0 {
+				metadataMap["thumbnail_frames"] = thumbnailFrames
+			}
+			if videoPreviewURL != "" {
+				metadataMap["video_preview_url"] = videoPreviewURL
+			}
+			metadata := "{}"
+			if len(metadataMap) > 0 {
+				if b, err := json.Marshal(metadataMap); err == nil {
+					metadata = string(b)
+				}
+			}
+
+			fmt.Printf("  [fallback] ✓ Accepted: %s (title: %s, duration: %d, preview: %v)\n",
+				fullURL, strings.TrimSpace(title), duration, videoPreviewURL != "")
+
+			video := &ScrapedVideo{
+				Source:       source,
+				SiteType:     siteType,
+				URL:          fullURL,
+				Title:        strings.TrimSpace(title),
+				ThumbnailURL: thumbnail,
+				Duration:     duration,
+				ViewCount:    viewCount,
+				Rating:       rating,
+				Status:       "discovered",
+				DiscoveredAt: time.Now(),
+				Tags:         []string{},
+				Metadata:     metadata,
+			}
+
+
+			saveErr := s.saveVideo(video)
+			if saveErr != nil {
+				if strings.Contains(saveErr.Error(), "Updated existing") {
+					updatedCount++
+				} else {
+					errorCount++
+				}
+			} else {
+				newCount++
+			}
+			videos = append(videos, video)
+		})
+		if len(videos) > 0 {
+			fmt.Printf("  [fallback] Found %d video links\n", len(videos))
 		}
 	}
 
@@ -1319,8 +1971,7 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 				thumbnail_url = COALESCE(?, thumbnail_url),
 				duration = CASE WHEN ? > 0 THEN ? ELSE duration END,
 				view_count = CASE WHEN ? > 0 THEN ? ELSE view_count END,
-				rating = CASE WHEN ? > 0 THEN ? ELSE rating END,
-				discovered_at = ?
+				rating = CASE WHEN ? > 0 THEN ? ELSE rating END
 			WHERE id = ?
 		`
 		_, err := s.db.Exec(
@@ -1330,7 +1981,6 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 			video.Duration, video.Duration,
 			video.ViewCount, video.ViewCount,
 			video.Rating, video.Rating,
-			video.DiscoveredAt,
 			existingID,
 		)
 		if err != nil {
@@ -1481,16 +2131,27 @@ func (s *VideoScraperService) GetScrapedVideos() ([]*ScrapedVideo, error) {
 
 // ScrapedVideosQuery represents query parameters for paginated scraped video retrieval
 type ScrapedVideosQuery struct {
-	Source      string // Filter by source (e.g., "www.pornhub.com", "luxuretv.com")
-	SourceLike  string // Filter by source using LIKE (e.g., "sexuria%" to match both "sexuria" and "sexuria.net")
-	SiteType    string // Filter by site_type (e.g., "pornhub", "luxuretv", "sexuria")
-	ContentType string // Filter by content_type (e.g., "regular", "zoo")
-	Keyword     string // Filter by tag/keyword
-	Search      string // Search in title
-	Page        int    // Page number (1-indexed)
-	Limit       int    // Items per page
-	SortBy      string // Sort field (discovered_at, title, view_count, rating, duration)
-	SortOrder   string // Sort order (asc, desc)
+	Source          string   // Filter by source (e.g., "www.pornhub.com", "luxuretv.com")
+	SourceLike      string   // Filter by source using LIKE (e.g., "sexuria%" to match both "sexuria" and "sexuria.net")
+	SiteType        string   // Filter by site_type (e.g., "pornhub", "luxuretv", "sexuria")
+	ContentType     string   // Filter by content_type (e.g., "regular", "zoo")
+	Category        string   // Exact match on category column
+	CategorySearch  string   // LIKE search on category column (partial match)
+	Keyword         string   // Filter by tag/keyword (LIKE in tags)
+	IncludeKeywords []string // All must be present in tags (AND conditions)
+	ExcludeKeywords []string // None may be present in tags (AND NOT conditions)
+	AuthorSearch    string   // LIKE search on author/artist column
+	Search          string   // Search in title
+	Page            int      // Page number (1-indexed)
+	Limit           int      // Items per page
+	SortBy          string   // Sort field (discovered_at, title, view_count, rating, duration)
+	SortOrder       string   // Sort order (asc, desc)
+	PerformerID     int64    // Filter to videos containing this performer (matched via metadata JSON)
+	TagID           int64    // Filter to videos containing this tag (matched via metadata JSON)
+	DurationFilter  string   // "short" (<5 min), "medium" (5-20 min), "long" (>20 min), or ""
+	OnlyDownloaded  bool     // Only return videos that have been downloaded
+	MinRating       int      // Minimum rating (0–100); 0 means no filter
+	MinViews        int      // Minimum view count; 0 means no filter
 }
 
 // ScrapedVideosResult represents a paginated result of scraped videos
@@ -1510,8 +2171,8 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 	}
 	if q.Limit < 1 {
 		q.Limit = 24
-	} else if q.Limit > 50000 {
-		q.Limit = 50000 // Cap at 50000 for performance
+	} else if q.Limit > 500000 {
+		q.Limit = 500000 // Safety cap to prevent unbounded queries
 	}
 	if q.SortBy == "" {
 		q.SortBy = "discovered_at"
@@ -1556,14 +2217,70 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 		conditions = append(conditions, "COALESCE(content_type, 'regular') = ?")
 		args = append(args, q.ContentType)
 	}
+	if q.Category != "" {
+		conditions = append(conditions, "category = ?")
+		args = append(args, q.Category)
+	}
+	if q.CategorySearch != "" {
+		conditions = append(conditions, "category LIKE ?")
+		args = append(args, "%"+q.CategorySearch+"%")
+	}
 	if q.Search != "" {
 		conditions = append(conditions, "title LIKE ?")
 		args = append(args, "%"+q.Search+"%")
 	}
 	if q.Keyword != "" {
-		// Search for keyword in tags JSON array
 		conditions = append(conditions, "tags LIKE ?")
 		args = append(args, "%\""+q.Keyword+"\"%")
+	}
+	for _, kw := range q.IncludeKeywords {
+		if kw != "" {
+			conditions = append(conditions, "tags LIKE ?")
+			args = append(args, "%\""+kw+"\"%")
+		}
+	}
+	for _, kw := range q.ExcludeKeywords {
+		if kw != "" {
+			conditions = append(conditions, "tags NOT LIKE ?")
+			args = append(args, "%\""+kw+"\"%")
+		}
+	}
+	if q.AuthorSearch != "" {
+		conditions = append(conditions, "author LIKE ?")
+		args = append(args, "%"+q.AuthorSearch+"%")
+	}
+	if q.PerformerID > 0 {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1 FROM json_each(json_extract(metadata, '$.performers')) p
+			WHERE CAST(json_extract(p.value, '$.id') AS INTEGER) = ?
+		)`)
+		args = append(args, q.PerformerID)
+	}
+	if q.TagID > 0 {
+		conditions = append(conditions, `EXISTS (
+			SELECT 1 FROM json_each(json_extract(metadata, '$.matched_tags')) t
+			WHERE CAST(json_extract(t.value, '$.id') AS INTEGER) = ?
+		)`)
+		args = append(args, q.TagID)
+	}
+	switch q.DurationFilter {
+	case "short":
+		conditions = append(conditions, "duration > 0 AND duration < 300")
+	case "medium":
+		conditions = append(conditions, "duration >= 300 AND duration <= 1200")
+	case "long":
+		conditions = append(conditions, "duration > 1200")
+	}
+	if q.OnlyDownloaded {
+		conditions = append(conditions, "downloaded_at IS NOT NULL")
+	}
+	if q.MinRating > 0 {
+		conditions = append(conditions, "COALESCE(rating,0) >= ?")
+		args = append(args, q.MinRating)
+	}
+	if q.MinViews > 0 {
+		conditions = append(conditions, "COALESCE(view_count,0) >= ?")
+		args = append(args, q.MinViews)
 	}
 
 	whereClause := ""
@@ -1662,6 +2379,81 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 		// Unmarshal tags
 		if err := json.Unmarshal([]byte(tagsJSON), &video.Tags); err != nil {
 			video.Tags = []string{}
+		}
+
+		// On-the-fly thumbnail_frames derivation for scrapers that don't store frames
+		metaJSON := video.Metadata
+		if metaJSON == "" {
+			metaJSON = "{}"
+		}
+		if !strings.Contains(metaJSON, "thumbnail_frames") && video.ThumbnailURL != "" {
+			var frames []string
+			switch video.SiteType {
+			case "motherless":
+				// Thumbnails stored as {hash}-strip.jpg or {hash}-small-{N}.jpg.
+				// Derive 8 individual frames: {hash}-small-1.jpg through {hash}-small-8.jpg
+				reMotherless := regexp.MustCompile(`-(strip|small-\d+)\.(jpg|jpeg|png|webp)$`)
+				if reMotherless.MatchString(video.ThumbnailURL) {
+					motherlessM := reMotherless.FindStringSubmatch(video.ThumbnailURL)
+					ext := motherlessM[2]
+					base := reMotherless.ReplaceAllString(video.ThumbnailURL, "")
+					for n := 1; n <= 8; n++ {
+						frames = append(frames, base+"-small-"+strconv.Itoa(n)+"."+ext)
+					}
+				}
+			case "leakvids", "rule34video":
+				// Pattern: .../N.jpg (last path segment is a frame number)
+				// LeakVids:    https://leakvids.com/contents/videos_screenshots/{a}/{id}/{res}/{N}.jpg
+				// Rule34Video: https://rule34video.com/contents/videos_screenshots/{a}/{id}/{res}/{N}.jpg
+				reLeakVids := regexp.MustCompile(`/(\d+)\.(jpg|jpeg|png|webp)$`)
+				if reLeakVids.MatchString(video.ThumbnailURL) {
+					m := reLeakVids.FindStringSubmatch(video.ThumbnailURL)
+					ext := m[2]
+					base := video.ThumbnailURL[:strings.LastIndex(video.ThumbnailURL, "/")]
+					for n := 1; n <= 10; n++ {
+						frames = append(frames, base+"/"+strconv.Itoa(n)+"."+ext)
+					}
+				}
+			case "luxuretv":
+				// Pattern: https://thumb.luxuretv.com/.../filename.mp4-{N}.jpg
+				// The startm() JS on the listing page cycles -1.jpg, -2.jpg, ... for animation.
+				reLuxure := regexp.MustCompile(`-(\d+)\.(jpg|jpeg|png|webp)$`)
+				if reLuxure.MatchString(video.ThumbnailURL) {
+					m := reLuxure.FindStringSubmatch(video.ThumbnailURL)
+					ext := m[2]
+					base := reLuxure.ReplaceAllString(video.ThumbnailURL, "")
+					for n := 1; n <= 10; n++ {
+						frames = append(frames, base+"-"+strconv.Itoa(n)+"."+ext)
+					}
+				}
+			case "pornhub":
+				// Pattern: https://ei.phncdn.com/.../original/(m=...)(mh=...)N.jpg
+				// The frame number follows the closing ")" of the quality params.
+				rePH := regexp.MustCompile(`\)(\d+)\.(jpg|jpeg|png|webp)$`)
+				if rePH.MatchString(video.ThumbnailURL) {
+					m := rePH.FindStringSubmatch(video.ThumbnailURL)
+					ext := m[2]
+					maxFrame, _ := strconv.Atoi(m[1])
+					if maxFrame > 20 {
+						maxFrame = 20
+					}
+					closingParen := strings.LastIndex(video.ThumbnailURL, ")")
+					base := video.ThumbnailURL[:closingParen+1]
+					for n := 0; n <= maxFrame; n++ {
+						frames = append(frames, base+strconv.Itoa(n)+"."+ext)
+					}
+				}
+			}
+			if len(frames) > 0 {
+				var meta map[string]interface{}
+				if json.Unmarshal([]byte(metaJSON), &meta) != nil {
+					meta = map[string]interface{}{}
+				}
+				meta["thumbnail_frames"] = frames
+				if b, err2 := json.Marshal(meta); err2 == nil {
+					video.Metadata = string(b)
+				}
+			}
 		}
 
 		// Filter out blocked content
@@ -2030,6 +2822,24 @@ func (s *VideoScraperService) GetScrapedVideoByID(id int64) (*ScrapedVideo, erro
 	return video, nil
 }
 
+// MarkScrapedVideoDownloaded sets downloaded_at on a scraped video
+func (s *VideoScraperService) MarkScrapedVideoDownloaded(id int64) error {
+	_, err := s.db.Exec(
+		`UPDATE scraped_videos SET downloaded_at = ? WHERE id = ?`,
+		time.Now(), id,
+	)
+	return err
+}
+
+// UnmarkScrapedVideoDownloaded clears downloaded_at on a scraped video
+func (s *VideoScraperService) UnmarkScrapedVideoDownloaded(id int64) error {
+	_, err := s.db.Exec(
+		`UPDATE scraped_videos SET downloaded_at = NULL WHERE id = ?`,
+		id,
+	)
+	return err
+}
+
 // parseDuration converts duration strings like "01:21", "12:34", "1:23:45" to seconds
 // Also handles "HD 00:03" by stripping out quality indicators
 func parseDuration(durationStr string) int {
@@ -2046,14 +2856,44 @@ func parseDuration(durationStr string) int {
 	}
 	durationStr = strings.TrimSpace(durationStr)
 
+	// Handle "NNm NNs" or "NNm" format (e.g., HQPorner: "35m 21s", "37m 7s", "1h 23m 45s")
+	if strings.Contains(durationStr, "m") || (strings.Contains(durationStr, "h") && strings.Contains(durationStr, "s")) {
+		totalSeconds := 0
+		remaining := durationStr
+		if hIdx := strings.Index(remaining, "h"); hIdx > 0 {
+			var hours int
+			if _, err := fmt.Sscanf(strings.TrimSpace(remaining[:hIdx]), "%d", &hours); err == nil {
+				totalSeconds += hours * 3600
+			}
+			remaining = strings.TrimSpace(remaining[hIdx+1:])
+		}
+		if mIdx := strings.Index(remaining, "m"); mIdx >= 0 {
+			var mins int
+			if _, err := fmt.Sscanf(strings.TrimSpace(remaining[:mIdx]), "%d", &mins); err == nil {
+				totalSeconds += mins * 60
+			}
+			remaining = strings.TrimSpace(remaining[mIdx+1:])
+		}
+		if sIdx := strings.Index(remaining, "s"); sIdx >= 0 {
+			var secs int
+			if _, err := fmt.Sscanf(strings.TrimSpace(remaining[:sIdx]), "%d", &secs); err == nil {
+				totalSeconds += secs
+			}
+		}
+		if totalSeconds > 0 {
+			return totalSeconds
+		}
+	}
+
 	parts := strings.Split(durationStr, ":")
 	totalSeconds := 0
 
 	switch len(parts) {
 	case 1:
 		// Just seconds: "45"
-		if seconds, err := fmt.Sscanf(parts[0], "%d", new(int)); err == nil {
-			totalSeconds = seconds
+		var s int
+		if _, err := fmt.Sscanf(parts[0], "%d", &s); err == nil {
+			totalSeconds = s
 		}
 	case 2:
 		// MM:SS format: "12:34"
@@ -2804,7 +3644,7 @@ func (s *VideoScraperService) CheckForNewVideos(scraperType string, baseURL stri
 
 		log.Printf("Checking page %d: %s", page, pageURL)
 
-		videos, err := s.scrapeListingPage(pageURL, source)
+		videos, err := s.scrapeListingPage(pageURL, source, "custom")
 		if err != nil {
 			log.Printf("Error scraping page %d: %v", page, err)
 			break
@@ -2829,10 +3669,10 @@ func (s *VideoScraperService) CheckForNewVideos(scraperType string, baseURL stri
 				break
 			}
 
-			// This is a new video - save it
+			// Try to save the video
 			saveErr := s.saveVideo(video)
-			// saveVideo returns error for updates too, so we check if it's a real error
-			if saveErr == nil || strings.HasPrefix(saveErr.Error(), "Updated existing video") {
+			if saveErr == nil {
+				// Genuine new insert — count it
 				totalNewVideos++
 				if len(result.NewItems) < 10 {
 					result.NewItems = append(result.NewItems, models.NewItemInfo{
@@ -2844,6 +3684,11 @@ func (s *VideoScraperService) CheckForNewVideos(scraperType string, baseURL stri
 						Views:     video.ViewCount,
 					})
 				}
+			} else if strings.Contains(saveErr.Error(), "Updated existing") {
+				// Video already in DB — caught up to known content, stop scanning
+				foundCheckpoint = true
+				log.Printf("Hit existing video, stopping at page %d (caught up)", page)
+				break
 			}
 		}
 
@@ -2855,7 +3700,7 @@ func (s *VideoScraperService) CheckForNewVideos(scraperType string, baseURL stri
 	}
 
 	// Update checkpoint with newest video
-	if firstVideoURL != "" && totalNewVideos > 0 {
+	if firstVideoURL != "" {
 		autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
 			ScraperType:     scraperType,
 			CheckpointType:  "last_video_url",

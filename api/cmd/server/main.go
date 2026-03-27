@@ -76,6 +76,33 @@ func main() {
 		}
 	}
 
+	// Verify performer categories after startup
+	performerSvc := services.NewPerformerService()
+	allPerformers, err := performerSvc.GetAll()
+	if err == nil {
+		catCounts := map[string]int{}
+		missingThumbnails := 0
+		for _, p := range allPerformers {
+			catCounts[p.Category]++
+			if p.PreviewPath.Valid && p.PreviewPath.String != "" && (!p.ThumbnailPath.Valid || p.ThumbnailPath.String == "") {
+				missingThumbnails++
+			}
+		}
+		log.Printf("Performer categories: %v", catCounts)
+
+		// Auto-generate thumbnails for performers missing them (async, non-blocking)
+		if missingThumbnails > 0 {
+			log.Printf("Found %d performers with previews but no thumbnails - generating in background...", missingThumbnails)
+			mediaSvc := services.NewMediaService()
+			thumbSvc := services.NewPerformerThumbnailService(mediaSvc, activityService)
+			go func() {
+				if err := thumbSvc.GenerateAllThumbnails(); err != nil {
+					log.Printf("Warning: Auto thumbnail generation failed: %v", err)
+				}
+			}()
+		}
+	}
+
 	// Setup router
 	router := api.SetupRouter(cfg)
 
@@ -86,8 +113,22 @@ func main() {
 
 	// Initialize AI Companion Service
 	log.Println("Initializing AI Companion...")
-	api.InitAICompanion()
+	companionSvc := api.InitAICompanion()
 	log.Println("AI Companion initialized successfully")
+
+	// Bridge AI Companion events to WebSocket for proactive messages
+	if companionSvc != nil {
+		eventChan, _ := companionSvc.SubscribeToEvents()
+		go func() {
+			for event := range eventChan {
+				hub.BroadcastCompanionEvent(event.Type, event.Source, event.Message, event.Severity, event.Data)
+			}
+		}()
+		log.Println("AI Companion events bridged to WebSocket")
+	}
+
+	// Initialize and start the scheduler (auto-update scrapers, scheduled jobs)
+	api.InitScheduler()
 
 	// Create HTTP server
 	srv := &http.Server{

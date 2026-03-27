@@ -382,6 +382,64 @@
 							</div>
 						</div>
 					</div>
+
+					<!-- LM Studio AI Settings Card -->
+					<div class="card bg-dark mb-4">
+						<div class="card-header d-flex justify-content-between align-items-center">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'robot']" class="me-2 text-info" />
+								LM Studio (AI Companion)
+							</h5>
+							<div class="d-flex align-items-center gap-2">
+								<span :class="['badge', aiConfigStatus.connected ? 'bg-success' : 'bg-secondary']">
+									{{ aiConfigStatus.connected ? 'Connected' : 'Disconnected' }}
+								</span>
+								<div class="form-check form-switch mb-0">
+									<input v-model="aiConfig.enabled" class="form-check-input" type="checkbox" id="aiEnabledSwitch" @change="saveAIConfig" />
+								</div>
+							</div>
+						</div>
+						<div class="card-body">
+							<div class="row g-3 mb-3">
+								<div class="col-md-8">
+									<label class="form-label text-muted small">LM Studio URL</label>
+									<input v-model="aiConfig.lmStudioUrl" type="text" class="form-control bg-dark text-white border-secondary" placeholder="http://localhost:1234" />
+								</div>
+								<div class="col-md-4">
+									<label class="form-label text-muted small">Max Tokens</label>
+									<input v-model.number="aiConfig.maxTokens" type="number" class="form-control bg-dark text-white border-secondary" min="100" max="8192" />
+								</div>
+							</div>
+							<div class="row g-3 mb-3">
+								<div class="col-md-8">
+									<label class="form-label text-muted small">Model Name (leave blank for default)</label>
+									<input v-model="aiConfig.modelName" type="text" class="form-control bg-dark text-white border-secondary" placeholder="Auto-detect loaded model" />
+								</div>
+								<div class="col-md-4">
+									<label class="form-label text-muted small">Temperature ({{ aiConfig.temperature }})</label>
+									<input v-model.number="aiConfig.temperature" type="range" class="form-range" min="0" max="1" step="0.1" />
+								</div>
+							</div>
+							<div class="d-flex gap-2">
+								<button class="btn btn-outline-info btn-sm" @click="testAIConnection" :disabled="aiTestingConnection">
+									<font-awesome-icon :icon="['fas', aiTestingConnection ? 'spinner' : 'plug']" :spin="aiTestingConnection" class="me-1" />
+									Test Connection
+								</button>
+								<button class="btn btn-primary btn-sm" @click="saveAIConfig" :disabled="aiSavingConfig">
+									<font-awesome-icon :icon="['fas', 'save']" class="me-1" />
+									Save
+								</button>
+							</div>
+							<div v-if="aiConfigStatus.message" class="mt-2">
+								<small :class="aiConfigStatus.connected ? 'text-success' : 'text-warning'">
+									{{ aiConfigStatus.message }}
+								</small>
+							</div>
+							<div v-if="aiConfigStatus.models && aiConfigStatus.models.length > 0" class="mt-2">
+								<small class="text-muted">Available models: {{ aiConfigStatus.models.join(', ') }}</small>
+							</div>
+						</div>
+					</div>
 				</div>
 
 				<!-- About -->
@@ -476,7 +534,7 @@
 
 <script>
 import settingsService from '@/services/settingsService'
-import { jdownloaderAPI } from '@/services/api'
+import { jdownloaderAPI, aiAPI } from '@/services/api'
 
 export default {
 	name: 'SettingsPage',
@@ -503,6 +561,21 @@ export default {
 			showJDPassword: false,
 			testingJD: false,
 			savingJD: false,
+			// AI / LM Studio settings
+			aiConfig: {
+				lmStudioUrl: 'http://localhost:1234',
+				modelName: '',
+				temperature: 0.7,
+				maxTokens: 2000,
+				enabled: true,
+			},
+			aiConfigStatus: {
+				connected: false,
+				message: '',
+				models: [],
+			},
+			aiTestingConnection: false,
+			aiSavingConfig: false,
 		}
 	},
 	watch: {
@@ -511,10 +584,11 @@ export default {
 			settingsService.updateSetting('theme', newTheme)
 			settingsService.applyTheme()
 		},
-		// Load JDownloader config when tab is active
+		// Load configs when integrations tab is active
 		activeTab(newTab) {
 			if (newTab === 'integrations') {
 				this.loadJDConfig()
+				this.loadAIConfig()
 			}
 		},
 	},
@@ -608,6 +682,62 @@ export default {
 				}
 			} finally {
 				this.testingJD = false
+			}
+		},
+		// AI / LM Studio methods
+		async loadAIConfig() {
+			try {
+				const response = await aiAPI.getConfig()
+				const data = response.data?.data || response.data || {}
+				this.aiConfig = {
+					lmStudioUrl: data.lmStudioUrl || 'http://localhost:1234',
+					modelName: data.modelName || '',
+					temperature: data.temperature || 0.7,
+					maxTokens: data.maxTokens || 2000,
+					enabled: data.enabled !== false,
+				}
+			} catch (error) {
+				console.error('Failed to load AI config:', error)
+			}
+		},
+		async saveAIConfig() {
+			this.aiSavingConfig = true
+			try {
+				await aiAPI.updateConfig(this.aiConfig)
+				this.$toast.success('AI config saved!')
+			} catch (error) {
+				console.error('Failed to save AI config:', error)
+				this.$toast.error('Failed to save AI configuration')
+			} finally {
+				this.aiSavingConfig = false
+			}
+		},
+		async testAIConnection() {
+			this.aiTestingConnection = true
+			try {
+				// Save config first
+				await aiAPI.updateConfig(this.aiConfig)
+				const response = await aiAPI.testConnection()
+				const data = response.data?.data || response.data || {}
+				this.aiConfigStatus = {
+					connected: data.connected || false,
+					message: data.message || (data.connected ? 'Connected!' : 'Not connected'),
+					models: data.models || [],
+				}
+				if (data.connected) {
+					this.$toast.success('LM Studio connected!')
+				} else {
+					this.$toast.warning(data.error || 'Could not connect to LM Studio')
+				}
+			} catch (error) {
+				console.error('Failed to test AI connection:', error)
+				this.aiConfigStatus = {
+					connected: false,
+					message: 'Connection test failed: ' + (error.message || 'Unknown error'),
+					models: [],
+				}
+			} finally {
+				this.aiTestingConnection = false
 			}
 		},
 	},

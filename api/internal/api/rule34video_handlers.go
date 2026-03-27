@@ -29,8 +29,14 @@ func ensureRule34VideoScraperService() *services.Rule34VideoScraperService {
 
 // Rule34VideoScrapeRequestBody represents the request body for Rule34Video scraping
 type Rule34VideoScrapeRequestBody struct {
-	MaxPages int    `json:"maxPages"`
-	SortBy   string `json:"sortBy"` // post_date, video_viewed, rating, etc.
+	MaxPages     int      `json:"maxPages"`
+	SortBy       string   `json:"sortBy"`       // post_date, video_viewed, rating, duration, pseudo_rand
+	DateFilter   string   `json:"dateFilter"`   // post_date_past_24_hours, etc.
+	CategorySlug string   `json:"categorySlug"` // e.g. "3d"
+	ModelSlug    string   `json:"modelSlug"`    // e.g. "anianiboy"
+	IncludeTags  []string `json:"includeTags"`
+	ExcludeTags  []string `json:"excludeTags"`
+	FetchDetails bool     `json:"fetchDetails"` // fetch detail page per video
 }
 
 // startRule34VideoScrapeHandler starts a Rule34Video scrape job
@@ -46,12 +52,20 @@ func startRule34VideoScrapeHandler(c *gin.Context) {
 	scraperTabsSvc := ensureScraperTabsService()
 	activitySvc := ensureActivityService()
 
+	// Build job URL based on filters
+	jobURL := "https://rule34video.com/"
+	if request.CategorySlug != "" {
+		jobURL = "https://rule34video.com/categories/" + request.CategorySlug + "/"
+	} else if request.ModelSlug != "" {
+		jobURL = "https://rule34video.com/models/" + request.ModelSlug + "/"
+	}
+
 	// Create a new job to track progress
 	job := &services.ScraperJob{
 		TabID:         nil,
 		JobType:       "rule34video",
 		Status:        "pending",
-		URL:           "https://rule34video.com/videos/?flag1=2109",
+		URL:           jobURL,
 		ErrorMessages: []string{},
 	}
 
@@ -103,9 +117,15 @@ func startRule34VideoScrapeHandler(c *gin.Context) {
 		// Execute scrape with progress callback
 		result, err := rule34Svc.ScrapeWithProgress(
 			services.Rule34VideoScrapeRequest{
-				MaxPages:   request.MaxPages,
-				SortBy:     request.SortBy,
-				ActivityID: activityID,
+				MaxPages:     request.MaxPages,
+				SortBy:       request.SortBy,
+				DateFilter:   request.DateFilter,
+				CategorySlug: request.CategorySlug,
+				ModelSlug:    request.ModelSlug,
+				IncludeTags:  request.IncludeTags,
+				ExcludeTags:  request.ExcludeTags,
+				FetchDetails: request.FetchDetails,
+				ActivityID:   activityID,
 			},
 			func(progress services.ScrapeProgress) {
 				// Update job progress
@@ -209,17 +229,49 @@ func getRule34VideoVideosHandler(c *gin.Context) {
 	search := c.Query("search")
 	sortBy := c.DefaultQuery("sort", "discovered_at")
 	sortOrder := c.DefaultQuery("order", "desc")
+	durationFilter := c.DefaultQuery("duration_filter", "")
+	onlyDownloaded := c.DefaultQuery("downloaded_only", "false") == "true"
+	authorSearch := c.Query("author")
+	categorySearch := c.Query("category")
+	includeTagsStr := c.Query("include_tags")
+	excludeTagsStr := c.Query("exclude_tags")
+
+	var includeTags, excludeTags []string
+	if includeTagsStr != "" {
+		for _, t := range strings.Split(includeTagsStr, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				includeTags = append(includeTags, t)
+			}
+		}
+	}
+	if excludeTagsStr != "" {
+		for _, t := range strings.Split(excludeTagsStr, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				excludeTags = append(excludeTags, t)
+			}
+		}
+	}
+	minRating, _ := strconv.Atoi(c.DefaultQuery("min_rating", "0"))
+	minViews, _ := strconv.Atoi(c.DefaultQuery("min_views", "0"))
 
 	videoScraperSvc := ensureVideoScraperService()
 
 	// Use paginated query
 	result, err := videoScraperSvc.GetScrapedVideosPaginated(services.ScrapedVideosQuery{
-		Source:    "rule34video.com",
-		Search:    search,
-		Page:      page,
-		Limit:     limit,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
+		Source:          "rule34video.com",
+		Search:          search,
+		Page:            page,
+		Limit:           limit,
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
+		DurationFilter:  durationFilter,
+		OnlyDownloaded:  onlyDownloaded,
+		AuthorSearch:    authorSearch,
+		CategorySearch:  categorySearch,
+		IncludeKeywords: includeTags,
+		ExcludeKeywords: excludeTags,
+		MinRating:       minRating,
+		MinViews:        minViews,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
@@ -286,4 +338,80 @@ func getRule34VideoDownloadURLHandler(c *gin.Context) {
 		},
 		"Download URL retrieved successfully",
 	))
+}
+
+// getRule34VideoDetailsHandler fetches full details (download URLs, tags, categories) for a video
+func getRule34VideoDetailsHandler(c *gin.Context) {
+	videoURL := c.Query("url")
+	if videoURL == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Missing parameter", "url is required"))
+		return
+	}
+
+	rule34Svc := ensureRule34VideoScraperService()
+	details, err := rule34Svc.FetchVideoDetails(videoURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to fetch video details", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(details, "Video details retrieved"))
+}
+
+// getRule34VideoCategoriesHandler returns top categories from Rule34Video
+func getRule34VideoCategoriesHandler(c *gin.Context) {
+	rule34Svc := ensureRule34VideoScraperService()
+	categories, err := rule34Svc.GetTopCategories()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to fetch categories", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(categories, "Categories retrieved"))
+}
+
+// getRule34VideoModelsHandler returns top models/artists from Rule34Video
+func getRule34VideoModelsHandler(c *gin.Context) {
+	rule34Svc := ensureRule34VideoScraperService()
+	models2, err := rule34Svc.GetTopModels()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to fetch models", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(models2, "Models retrieved"))
+}
+
+// getRule34VideoFilterOptionsHandler returns all filter/sort options
+func getRule34VideoFilterOptionsHandler(c *gin.Context) {
+	rule34Svc := ensureRule34VideoScraperService()
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{
+		"sort_options":        rule34Svc.GetSortOptions(),
+		"date_filter_options": rule34Svc.GetDateFilterOptions(),
+	}, "Filter options retrieved"))
+}
+
+// getRule34VideoLocalCategoriesHandler returns distinct categories from locally scraped Rule34Video videos
+func getRule34VideoLocalCategoriesHandler(c *gin.Context) {
+	db := database.GetDB()
+	rows, err := db.Query(`
+		SELECT DISTINCT category FROM scraped_videos
+		WHERE source = 'rule34video.com' AND category != '' AND category IS NOT NULL
+		ORDER BY category ASC
+	`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get local categories", err.Error()))
+		return
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var cat string
+		if err := rows.Scan(&cat); err == nil && cat != "" {
+			categories = append(categories, cat)
+		}
+	}
+	if categories == nil {
+		categories = []string{}
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(categories, "Local categories retrieved"))
 }

@@ -1,5 +1,14 @@
 <template>
-	<div class="stat-card" :class="color">
+	<router-link v-if="to" :to="to" class="stat-card" :class="color">
+		<div class="stat-icon">
+			<font-awesome-icon :icon="['fas', icon]" />
+		</div>
+		<div class="stat-content">
+			<div class="stat-value">{{ formattedValue }}</div>
+			<div class="stat-label">{{ label }}</div>
+		</div>
+	</router-link>
+	<div v-else class="stat-card" :class="color">
 		<div class="stat-icon">
 			<font-awesome-icon :icon="['fas', icon]" />
 		</div>
@@ -30,6 +39,10 @@ export default {
 			type: String,
 			default: 'blue',
 		},
+		to: {
+			type: String,
+			default: null,
+		},
 	},
 	computed: {
 		formattedValue() {
@@ -45,28 +58,30 @@ export default {
 <style scoped>
 .stat-card {
 	background: rgba(30, 30, 40, 0.6);
-	border-radius: 12px;
+	border-radius: 10px;
 	border: 1px solid rgba(255, 255, 255, 0.1);
-	padding: 1.25rem;
+	padding: 0.75rem 1rem;
 	display: flex;
 	align-items: center;
-	gap: 1rem;
+	gap: 0.75rem;
 	transition: all 0.3s;
+	text-decoration: none;
+	color: inherit;
 }
 
 .stat-card:hover {
-	transform: translateY(-2px);
-	box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
 .stat-icon {
-	width: 48px;
-	height: 48px;
-	border-radius: 12px;
+	width: 36px;
+	height: 36px;
+	border-radius: 8px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	font-size: 1.25rem;
+	font-size: 1rem;
 }
 
 .stat-card.blue .stat-icon {
@@ -109,14 +124,14 @@ export default {
 }
 
 .stat-value {
-	font-size: 1.5rem;
+	font-size: 1.25rem;
 	font-weight: 700;
 	color: rgba(255, 255, 255, 0.95);
 	line-height: 1.2;
 }
 
 .stat-label {
-	font-size: 0.8125rem;
+	font-size: 0.75rem;
 	color: rgba(255, 255, 255, 0.5);
 	margin-top: 0.125rem;
 }

@@ -96,7 +96,7 @@ func getThreadLinkStats(c *gin.Context) {
 		return
 	}
 
-	stats, err := svc.GetThreadLinkStats(threadID)
+	result, err := svc.GetThreadLinkStats(threadID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to get thread link stats",
@@ -105,7 +105,35 @@ func getThreadLinkStats(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(stats, "Thread link statistics retrieved successfully"))
+	total := 0
+	activeCount := 0
+	deadCount := 0
+	expiredCount := 0
+	unknownCount := 0
+	for status, count := range result.Stats {
+		total += count
+		switch status {
+		case "active":
+			activeCount = count
+		case "dead":
+			deadCount = count
+		case "expired":
+			expiredCount = count
+		default:
+			unknownCount += count
+		}
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"total":        total,
+		"active":       activeCount,
+		"working":      activeCount, // backward compat with SimpcityTab
+		"dead":         deadCount,
+		"expired":      expiredCount,
+		"unknown":      unknownCount,
+		"unchecked":    unknownCount, // backward compat
+		"last_checked": result.LastChecked,
+	}, "Thread link statistics retrieved successfully"))
 }
 
 // verifyAllLinks verifies all links in the database (with optional limit)

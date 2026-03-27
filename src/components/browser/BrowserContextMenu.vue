@@ -84,6 +84,12 @@
 				</div>
 			</div>
 			<div class="context-menu-divider"></div>
+			<!-- Assign Performer (folder or video) -->
+			<button class="context-menu-item" @click="$emit('assign-performer')">
+				<font-awesome-icon :icon="['fas', 'user-tag']" class="me-2" />
+				{{ item.type === 'folder' ? 'Assign Performer to Folder...' : 'Assign Performer...' }}
+			</button>
+			<div class="context-menu-divider"></div>
 			<button class="context-menu-item" @click="$emit('copy-path')">
 				<font-awesome-icon :icon="['fas', 'copy']" class="me-2" />
 				Copy Path
@@ -113,7 +119,7 @@ defineProps({
 	},
 })
 
-defineEmits(['play', 'open', 'toggle-not-interested', 'add-to-list', 'remove-from-list', 'copy-path', 'close', 'set-content-type'])
+defineEmits(['play', 'open', 'toggle-not-interested', 'add-to-list', 'remove-from-list', 'copy-path', 'close', 'set-content-type', 'assign-performer'])
 </script>
 
 <style>

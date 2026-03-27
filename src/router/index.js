@@ -82,11 +82,6 @@ const routes = [
 		component: () => import(/* webpackChunkName: "scraper-thread" */ '@/views/ScraperThreadPage.vue'),
 	},
 	{
-		path: '/scheduler',
-		name: 'Scheduler',
-		component: () => import(/* webpackChunkName: "scheduler" */ '@/views/SchedulerPage.vue'),
-	},
-	{
 		path: '/system-health',
 		name: 'SystemHealth',
 		component: () => import(/* webpackChunkName: "system-health" */ '@/views/SystemHealthPage.vue'),
@@ -97,14 +92,36 @@ const routes = [
 		component: () => import(/* webpackChunkName: "backups" */ '@/views/BackupsPage.vue'),
 	},
 	{
-		path: '/link-health',
-		name: 'LinkHealth',
-		component: () => import(/* webpackChunkName: "link-health" */ '@/views/LinkHealthPage.vue'),
-	},
-	{
 		path: '/jdownloader',
 		name: 'JDownloader',
 		component: () => import(/* webpackChunkName: "jdownloader" */ '@/views/JDownloaderPage.vue'),
+	},
+	{
+		path: '/ai',
+		name: 'AI',
+		component: () => import(/* webpackChunkName: "ai" */ '@/views/AIPage.vue'),
+	},
+	{
+		path: '/redirect',
+		name: 'Redirect',
+		beforeEnter: (to) => {
+			const encodedUrl = to.query.to
+			const method = to.query.m
+			if (encodedUrl) {
+				let targetUrl = encodedUrl
+				if (method === 'b64') {
+					try {
+						targetUrl = atob(encodedUrl)
+					} catch (e) {
+						return '/'
+					}
+				}
+				window.location.href = targetUrl
+				return false // Prevent navigation
+			}
+			return '/'
+		},
+		component: { template: '<div>Redirecting...</div>' },
 	},
 ]
 

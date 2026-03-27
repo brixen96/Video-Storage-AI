@@ -195,6 +195,7 @@ func (s *PerformerService) Update(id int64, update *models.PerformerUpdate) (*mo
 		performer.FolderPath = sql.NullString{String: *update.FolderPath, Valid: *update.FolderPath != ""}
 	}
 	if update.Category != nil {
+		log.Printf("Updating performer %d category: %s → %s", id, performer.Category, *update.Category)
 		performer.Category = *update.Category
 	}
 	if update.Metadata != nil {

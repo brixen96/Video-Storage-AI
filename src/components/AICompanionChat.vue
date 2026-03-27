@@ -22,6 +22,9 @@
 						</div>
 					</div>
 					<div class="chat-header-actions">
+						<button class="btn-header-action" :class="{ active: proactiveEnabled }" @click="toggleProactive" :title="proactiveEnabled ? 'Disable Proactive Alerts' : 'Enable Proactive Alerts'">
+							<font-awesome-icon :icon="['fas', proactiveEnabled ? 'bell' : 'bell-slash']" />
+						</button>
 						<button class="btn-header-action" @click="toggleSearch" title="Search Messages">
 							<font-awesome-icon :icon="['fas', 'search']" />
 						</button>
@@ -69,26 +72,86 @@
 					</div>
 
 					<!-- Chat Messages -->
-					<div v-for="(message, index) in displayedMessages" :key="index" class="chat-message" :class="message.role">
-						<div class="message-avatar">
-							<font-awesome-icon :icon="['fas', message.role === 'user' ? 'user' : 'robot']" />
-						</div>
-						<div class="message-content">
-							<div class="message-text">
-								<!-- Use plain text for user messages -->
-								<template v-if="message.role === 'user'">{{ message.content }}</template>
-								<!-- Use markdown rendering for AI responses -->
-								<MarkdownMessage v-else :content="message.content" />
+					<template v-for="(message, index) in displayedMessages" :key="index">
+						<!-- Inline video cards -->
+						<div v-if="message.role === 'cards'" class="video-cards-row">
+							<div
+								v-for="video in message.videos"
+								:key="video.id"
+								class="video-mini-card"
+								@click="navigateToVideo(video.id)"
+								:title="video.title"
+							>
+								<div class="mini-thumb-wrap">
+									<img
+										v-if="video.thumbnail_path"
+										:src="getVideoThumbURL(video.thumbnail_path)"
+										class="mini-thumb"
+										@error="(e) => e.target.style.display = 'none'"
+									/>
+									<div class="mini-thumb-fallback">
+										<font-awesome-icon :icon="['fas', 'film']" />
+									</div>
+									<!-- Favorite overlay -->
+									<button
+										class="mini-fav-btn"
+										:class="{ active: video.is_favorite }"
+										@click="toggleCardFavorite(video, $event)"
+										title="Toggle favorite"
+									>
+										<font-awesome-icon :icon="['fas', 'heart']" />
+									</button>
+								</div>
+								<div class="mini-info">
+									<div class="mini-title">{{ video.title.length > 42 ? video.title.slice(0, 42) + '…' : video.title }}</div>
+									<div class="mini-performers" v-if="video.performers">{{ video.performers.split(', ').slice(0, 2).join(', ') }}</div>
+									<div class="mini-meta">
+										<span class="mini-stars">
+											<span
+												v-for="n in 5"
+												:key="n"
+												:class="n <= (video.rating || 0) ? 'star-filled' : 'star-empty'"
+												@click.stop="rateCardVideo(video, n, $event)"
+												class="star-btn"
+												title="Rate"
+											>★</span>
+										</span>
+									</div>
+									<div class="mini-actions">
+										<button class="mini-action-btn" @click="askAboutCard(video, $event)" title="Suggest tags">
+											<font-awesome-icon :icon="['fas', 'tags']" />
+										</button>
+									</div>
+								</div>
 							</div>
-							<div class="message-footer">
-								<div class="message-time">{{ formatMessageTime(message.timestamp) }}</div>
-								<button class="btn-copy-message" @click="copyMessage(message.content)" title="Copy message">
-									<font-awesome-icon :icon="['fas', 'copy']" />
-								</button>
+						</div>
+
+						<!-- Regular text messages -->
+						<div v-else class="chat-message" :class="[message.role, message.severity, { 'daily-briefing': message.source === 'daily_briefing', 'library-insights': message.source === 'library_insights' }]">
+							<div class="message-avatar" :class="{ 'proactive-avatar': message.role === 'proactive' }">
+								<font-awesome-icon :icon="['fas', message.role === 'user' ? 'user' : message.role === 'proactive' ? (message.source === 'daily_briefing' ? 'sun' : message.source === 'library_insights' ? 'heartbeat' : message.source === 'analysis_engine' ? 'lightbulb' : 'bell') : 'robot']" />
+							</div>
+							<div class="message-content">
+								<div class="message-text" :class="{ 'streaming-text': message.streaming }">
+									<!-- Use plain text for user messages -->
+									<template v-if="message.role === 'user'">{{ message.content }}</template>
+									<!-- Use markdown rendering for AI responses -->
+									<MarkdownMessage v-else :content="message.content" />
+								</div>
+								<div class="message-footer">
+									<div class="message-time">{{ formatMessageTime(message.timestamp) }}</div>
+									<span v-if="message.source && message.role === 'assistant'" class="message-source" :class="message.source">
+										<font-awesome-icon :icon="['fas', message.source === 'llm' ? 'brain' : 'cog']" />
+										{{ message.source === 'llm' ? 'LLM' : 'Rule' }}
+									</span>
+									<button class="btn-copy-message" @click="copyMessage(message.content)" title="Copy message">
+										<font-awesome-icon :icon="['fas', 'copy']" />
+									</button>
+								</div>
 							</div>
 						</div>
-					</div>
-					<div v-if="isCompanionThinking" class="chat-message assistant thinking">
+					</template>
+					<div v-if="isCompanionThinking && !isStreaming" class="chat-message assistant thinking">
 						<div class="message-avatar">
 							<font-awesome-icon :icon="['fas', 'robot']" spin />
 						</div>
@@ -165,26 +228,23 @@
 
 				<!-- Quick Actions -->
 				<div class="quick-actions-bar">
-					<button class="btn-quick-action" @click="showStats = !showStats" :class="{ active: showStats }" title="Toggle Stats">
-						<font-awesome-icon :icon="['fas', 'chart-line']" />
+					<button class="btn-quick-action" @click="askQuickQuestion('What\'s happening right now?')" title="Current Status">
+						<font-awesome-icon :icon="['fas', 'bolt']" />
 					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('How many videos do I have?')" title="Library Stats">
+					<button class="btn-quick-action" @click="askQuickQuestion('JDownloader status')" title="JDownloader">
+						<font-awesome-icon :icon="['fas', 'download']" />
+					</button>
+					<button class="btn-quick-action" @click="askQuickQuestion('Scraper summary')" title="Scrapers">
+						<font-awesome-icon :icon="['fas', 'spider']" />
+					</button>
+					<button class="btn-quick-action" @click="askQuickQuestion('Library overview')" title="Library">
 						<font-awesome-icon :icon="['fas', 'chart-bar']" />
 					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('What are my top performers?')" title="Top Performers">
-						<font-awesome-icon :icon="['fas', 'star']" />
-					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('Show me videos with issues')" title="Issues">
+					<button class="btn-quick-action" @click="askQuickQuestion('Check for errors')" title="Errors">
 						<font-awesome-icon :icon="['fas', 'exclamation-triangle']" />
 					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('Find duplicates in my library')" title="Find Duplicates">
-						<font-awesome-icon :icon="['fas', 'clone']" />
-					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('Suggest tags for untagged videos')" title="Smart Tagging">
-						<font-awesome-icon :icon="['fas', 'tags']" />
-					</button>
-					<button class="btn-quick-action" @click="askQuickQuestion('Show library insights')" title="AI Insights">
-						<font-awesome-icon :icon="['fas', 'lightbulb']" />
+					<button class="btn-quick-action" @click="showStats = !showStats" :class="{ active: showStats }" title="Chat Stats">
+						<font-awesome-icon :icon="['fas', 'chart-line']" />
 					</button>
 					<button class="btn-quick-action btn-danger" @click="clearChatHistory" title="Clear Chat">
 						<font-awesome-icon :icon="['fas', 'trash']" />
@@ -217,30 +277,75 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, getCurrentInstance } from 'vue'
-import { aiCompanionAPI } from '@/services/api'
+import { ref, computed, nextTick, onMounted, onUnmounted, getCurrentInstance } from 'vue'
+import { useRouter } from 'vue-router'
+import { aiCompanionAPI, aiAPI, getAssetURL, videoAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 import MarkdownMessage from './MarkdownMessage.vue'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
+const router = useRouter()
+
+// Video card helpers
+const getVideoThumbURL = (thumbnailPath) => {
+	if (!thumbnailPath) return null
+	return getAssetURL(thumbnailPath)
+}
+const navigateToVideo = (videoId) => {
+	router.push({ path: '/videos', query: { highlight: videoId } })
+	isOpen.value = false
+}
+const rateCardVideo = async (video, rating, event) => {
+	event.stopPropagation()
+	const newRating = video.rating === rating ? 0 : rating // click same star = clear rating
+	try {
+		await videoAPI.update(video.id, { rating: newRating })
+		video.rating = newRating
+	} catch {
+		toast.error('Error', 'Failed to update rating')
+	}
+}
+const toggleCardFavorite = async (video, event) => {
+	event.stopPropagation()
+	const newFav = !video.is_favorite
+	try {
+		await videoAPI.update(video.id, { is_favorite: newFav })
+		video.is_favorite = newFav
+	} catch {
+		toast.error('Error', 'Failed to update favorite')
+	}
+}
+const askAboutCard = (video, event) => {
+	event.stopPropagation()
+	companionInput.value = `Suggest tags for video ID ${video.id}: "${video.title}"`
+	nextTick(() => sendCompanionMessage())
+}
 
 // State
 const isOpen = ref(false)
 const companionInput = ref('')
 const chatHistory = ref([])
 const isCompanionThinking = ref(false)
+const isStreaming = ref(false)
 const companionConnected = ref(false)
 const chatMessages = ref(null)
 const hasNewMessage = ref(false)
 const showSearch = ref(false)
 const searchQuery = ref('')
 const searchInput = ref(null)
-const filteredMessageCount = ref(0)
+const filteredMessageCount = computed(() => {
+	if (!searchQuery.value) return 0
+	const q = searchQuery.value.toLowerCase()
+	return chatHistory.value.filter(m => m.content.toLowerCase().includes(q)).length
+})
 const isListening = ref(false)
 const recognition = ref(null)
 const typingText = ref('')
 const isTyping = ref(false)
 const showStats = ref(false)
+const proactiveEnabled = ref(localStorage.getItem('ai_companion_proactive') !== 'false')
+let unsubscribeCompanionEvent = null
 
 // Conversation statistics
 const chatStats = computed(() => {
@@ -287,75 +392,124 @@ const displayedMessages = computed(() => {
 		}))
 		.filter((msg) => msg.highlighted)
 
-	// eslint-disable-next-line vue/no-async-in-computed-properties
-	setTimeout(() => {
-		filteredMessageCount.value = filtered.length
-	}, 0)
-
 	return filtered.length > 0 ? filtered : chatHistory.value
 })
 
-// Suggested prompts for new users
+// Suggested prompts - context-aware
 const suggestedPrompts = ref([
 	{
-		text: 'How many videos do I have?',
-		icon: ['fas', 'video'],
+		text: "What's happening right now?",
+		icon: ['fas', 'bolt'],
 	},
 	{
-		text: 'Show library health score',
-		icon: ['fas', 'heart'],
+		text: 'JDownloader status',
+		icon: ['fas', 'download'],
 	},
 	{
-		text: 'Predict library growth',
-		icon: ['fas', 'chart-line'],
+		text: 'Scraper summary',
+		icon: ['fas', 'spider'],
 	},
 	{
-		text: 'Find duplicates',
-		icon: ['fas', 'copy'],
-	},
-	{
-		text: 'Performer quality analysis',
-		icon: ['fas', 'star'],
-	},
-	{
-		text: 'Show insights',
-		icon: ['fas', 'lightbulb'],
+		text: 'Library overview',
+		icon: ['fas', 'chart-bar'],
 	},
 	{
 		text: 'Check for errors',
 		icon: ['fas', 'exclamation-triangle'],
 	},
 	{
+		text: 'Show insights',
+		icon: ['fas', 'lightbulb'],
+	},
+	{
 		text: 'What are my top performers?',
 		icon: ['fas', 'users'],
 	},
+	{
+		text: 'Show my favorite videos',
+		icon: ['fas', 'heart'],
+	},
+	{
+		text: 'Show my top rated videos',
+		icon: ['fas', 'star'],
+	},
+	{
+		text: 'Find duplicate videos in my library',
+		icon: ['fas', 'copy'],
+	},
+	{
+		text: "What's in my Downloads library?",
+		icon: ['fas', 'download'],
+	},
+	{
+		text: 'Help me organize my downloads into Backup',
+		icon: ['fas', 'folder-open'],
+	},
+	{
+		text: "Give me today's briefing",
+		icon: ['fas', 'sun'],
+	},
+	{
+		text: 'What should I watch next?',
+		icon: ['fas', 'play-circle'],
+	},
+	{
+		text: 'Tell me about my top performer',
+		icon: ['fas', 'user-circle'],
+	},
+	{
+		text: 'Scan for orphaned files in my library',
+		icon: ['fas', 'exclamation-triangle'],
+	},
+	{
+		text: "How's my library doing?",
+		icon: ['fas', 'heartbeat'],
+	},
+	{
+		text: 'Auto-tag my untagged videos',
+		icon: ['fas', 'tags'],
+	},
+	{
+		text: 'Rate a video for me',
+		icon: ['fas', 'star'],
+	},
 ])
 
-// Load chat history from localStorage
-const loadChatHistory = () => {
+// Load chat history from backend DB (fallback to localStorage for legacy data)
+const loadChatHistory = async () => {
+	try {
+		const { data: res } = await aiAPI.getChatHistory(100)
+		if (res.data && res.data.length > 0) {
+			chatHistory.value = res.data.map((m) => ({
+				role: m.role,
+				content: m.content,
+				timestamp: new Date(m.created_at),
+				source: m.source !== 'user' ? m.source : undefined,
+			}))
+			// Clear any stale localStorage copy
+			localStorage.removeItem('ai_chat_history')
+			return
+		}
+	} catch {
+		// Backend unavailable — fall back to localStorage
+	}
+	// Legacy localStorage fallback
 	try {
 		const saved = localStorage.getItem('ai_chat_history')
 		if (saved) {
 			const parsed = JSON.parse(saved)
-			// Only load recent history (last 50 messages)
 			chatHistory.value = parsed.slice(-50).map((msg) => ({
 				...msg,
 				timestamp: new Date(msg.timestamp),
 			}))
 		}
-	} catch (error) {
-		console.error('Failed to load chat history:', error)
+	} catch {
+		// ignore
 	}
 }
 
-// Save chat history to localStorage
-const saveChatHistory = () => {
-	try {
-		localStorage.setItem('ai_chat_history', JSON.stringify(chatHistory.value))
-	} catch (error) {
-		console.error('Failed to save chat history:', error)
-	}
-}
+// No-op kept for call sites that predate DB persistence
+const saveChatHistory = () => {}
 
 // Functions
 const toggleChat = () => {
@@ -403,60 +557,123 @@ const sendCompanionMessage = async () => {
 		timestamp: new Date(),
 	})
 
-	// Save to localStorage
 	saveChatHistory()
-
 	companionInput.value = ''
 	isCompanionThinking.value = true
 
-	// Scroll to bottom
 	await nextTick()
 	scrollToBottom()
 
 	try {
-		// ALWAYS use backend AI with direct database access
-		// This ensures we query YOUR data, not external knowledge
-		const { aiAPI } = await import('@/services/api')
-		const response = await aiAPI.chat({
-			message: userMessage,
-			history: chatHistory.value.slice(-5).map((msg) => ({
-				role: msg.role,
-				content: msg.content,
-			})),
+		const historyPayload = chatHistory.value
+			.slice(0, -1) // exclude the user message we just pushed
+			.filter((msg) => msg.role === 'user' || msg.role === 'assistant')
+			.slice(-10)
+			.map((msg) => ({ role: msg.role, content: msg.content }))
+
+		const response = await fetch('http://localhost:8080/api/v1/ai/chat/stream', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message: userMessage, history: historyPayload }),
 		})
 
-		// Handle response - backend returns { success: true, message: "..." }
-		const aiResponse = response.data?.message || response.message || 'I processed your request.'
+		if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
+		// Push a placeholder message that will grow as chunks arrive
+		const msgIndex = chatHistory.value.length
 		chatHistory.value.push({
 			role: 'assistant',
-			content: aiResponse,
+			content: '',
 			timestamp: new Date(),
+			source: 'llm',
+			streaming: true,
 		})
+		isCompanionThinking.value = false
+		isStreaming.value = true
 
-		saveChatHistory()
+		await nextTick()
+		scrollToBottom()
 
-		// Show notification if chat is minimized
-		if (!isOpen.value) {
-			hasNewMessage.value = true
+		const reader = response.body.getReader()
+		const decoder = new TextDecoder()
+		let buffer = ''
+		let scrollThrottle = 0
+		let streamDone = false
+		let currentEventType = ''
+
+		while (!streamDone) {
+			const { done, value } = await reader.read()
+			if (done) break
+			buffer += decoder.decode(value, { stream: true })
+			const lines = buffer.split('\n')
+			buffer = lines.pop() // keep any incomplete line
+
+			for (const line of lines) {
+				if (line.startsWith('event: ')) {
+					currentEventType = line.slice(7).trim()
+					continue
+				}
+				if (!line.startsWith('data: ')) {
+					if (line === '') currentEventType = ''
+					continue
+				}
+				const data = line.slice(6)
+				if (data === '[DONE]') { streamDone = true; break }
+
+				if (currentEventType === 'video_cards') {
+					try {
+						const { videos } = JSON.parse(data)
+						if (videos && videos.length > 0) {
+							chatHistory.value.push({
+								role: 'cards',
+								source: 'video_cards',
+								videos,
+								timestamp: new Date(),
+							})
+							await nextTick()
+							scrollToBottom()
+						}
+					} catch { /* ignore */ }
+					currentEventType = ''
+					continue
+				}
+
+				try {
+					const chunk = JSON.parse(data)
+					chatHistory.value[msgIndex].content += chunk
+					// Throttle scroll to every ~100ms to avoid layout thrash
+					const now = Date.now()
+					if (now - scrollThrottle > 100) {
+						scrollThrottle = now
+						await nextTick()
+						scrollToBottom()
+					}
+				} catch {
+					// ignore malformed chunk
+				}
+			}
 		}
 
-		// Scroll to bottom
+		chatHistory.value[msgIndex].streaming = false
+		isStreaming.value = false
+		saveChatHistory()
+
+		if (!isOpen.value) hasNewMessage.value = true
 		await nextTick()
 		scrollToBottom()
 	} catch (error) {
 		console.error('Backend AI failed:', error)
-
-		// Add error message
+		isCompanionThinking.value = false
+		isStreaming.value = false
 		chatHistory.value.push({
 			role: 'assistant',
 			content: "I'm currently unavailable. Please check that the backend server is running and try again.",
 			timestamp: new Date(),
 		})
-
 		toast.error('AI Unavailable', 'Could not connect to AI Companion service. Please check the backend server.')
 	} finally {
 		isCompanionThinking.value = false
+		isStreaming.value = false
 	}
 }
 
@@ -465,14 +682,17 @@ const askQuickQuestion = (question) => {
 	sendCompanionMessage()
 }
 
-const clearChatHistory = () => {
+const clearChatHistory = async () => {
 	if (chatHistory.value.length === 0) return
-
-	if (confirm('Are you sure you want to clear the chat history?')) {
-		chatHistory.value = []
-		saveChatHistory()
-		toast.info('Chat Cleared', 'Chat history has been cleared')
+	if (!confirm('Are you sure you want to clear the chat history?')) return
+	try {
+		await aiAPI.clearChatHistory()
+	} catch {
+		// best-effort
 	}
+	chatHistory.value = []
+	localStorage.removeItem('ai_chat_history')
+	toast.info('Chat Cleared', 'Chat history has been cleared')
 }
 
 // Search functions
@@ -494,7 +714,6 @@ const filterMessages = () => {
 
 const clearSearch = () => {
 	searchQuery.value = ''
-	filteredMessageCount.value = 0
 }
 
 // Export chat
@@ -624,6 +843,33 @@ const typeMessage = async (message, speed = 30) => {
 	return message
 }
 
+// eslint-disable-next-line no-unused-vars
+const toggleProactive = () => {
+	proactiveEnabled.value = !proactiveEnabled.value
+	localStorage.setItem('ai_companion_proactive', proactiveEnabled.value ? 'true' : 'false')
+}
+
+const handleCompanionEvent = (event) => {
+	if (!proactiveEnabled.value) return
+
+	// Add proactive message to chat
+	chatHistory.value.push({
+		role: 'proactive',
+		content: event.message,
+		timestamp: new Date(),
+		severity: event.type || event.severity || 'info',
+		source: event.source || 'system',
+	})
+	saveChatHistory()
+
+	// Show notification badge if chat is closed
+	if (!isOpen.value) {
+		hasNewMessage.value = true
+	}
+
+	nextTick(() => scrollToBottom())
+}
+
 const formatMessageTime = (timestamp) => {
 	const date = new Date(timestamp)
 	return date.toLocaleTimeString('en-US', {
@@ -638,12 +884,32 @@ const scrollToBottom = () => {
 	}
 }
 
+// Handler for the global open-ai-chat event (from ScraperPage Ask AI button)
+const handleOpenAIChat = (event) => {
+	isOpen.value = true
+	hasNewMessage.value = false
+	const msg = event.detail?.message
+	if (msg) {
+		companionInput.value = msg
+		nextTick(() => {
+			sendCompanionMessage()
+		})
+	}
+	nextTick(() => scrollToBottom())
+}
+
 // Initialize on mount
 onMounted(async () => {
-	// Load saved chat history
-	loadChatHistory()
+	// Load persistent chat history from backend
+	await loadChatHistory()
 
 	await checkCompanionConnection()
+
+	// Subscribe to proactive companion events via WebSocket
+	unsubscribeCompanionEvent = websocketService.on('companion_event', handleCompanionEvent)
+
+	// Listen for external requests to open with a pre-filled message
+	window.addEventListener('open-ai-chat', handleOpenAIChat)
 
 	// Add welcome message only if no chat history exists
 	if (companionConnected.value && chatHistory.value.length === 0) {
@@ -656,6 +922,7 @@ I'm the **intelligent core** of Video Storage AI with advanced capabilities:
 ## 🎯 What I Can Do:
 - 📊 **Analyze** your video library health and statistics
 - 🔍 **Find** duplicates, performers, and specific content
+- ❤️ **List** your favorites and top-rated videos
 - 📈 **Predict** library growth and provide insights
 - ⭐ **Evaluate** performer quality and metadata completeness
 - 🚨 **Monitor** for errors and issues
@@ -672,6 +939,13 @@ Try one of the suggested prompts above, or ask me anything about your library!`,
 		})
 		saveChatHistory()
 	}
+})
+
+onUnmounted(() => {
+	if (unsubscribeCompanionEvent) {
+		unsubscribeCompanionEvent()
+	}
+	window.removeEventListener('open-ai-chat', handleOpenAIChat)
 })
 </script>
 

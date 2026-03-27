@@ -386,6 +386,12 @@ func startScraperJobHandler(c *gin.Context) {
 		if opts, ok := tab.ScrapeOptions["scrapeThumbnails"].(bool); ok {
 			scrapeRequest.Options.ScrapeThumbnails = opts
 		}
+		if v, ok := tab.ScrapeOptions["pageUrlTemplate"].(string); ok && v != "" {
+			scrapeRequest.Options.PageUrlTemplate = v
+		}
+		if v, ok := tab.ScrapeOptions["pageStartsAt"].(float64); ok {
+			scrapeRequest.Options.PageStartsAt = int(v)
+		}
 
 		// Execute the scrape with progress callback
 		result, err := videoScraperSvc.ScrapePageWithProgress(scrapeRequest, func(progress services.ScrapeProgress) {

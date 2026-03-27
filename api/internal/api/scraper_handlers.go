@@ -4,12 +4,32 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
 )
+
+// extractEmbeddedNumber finds the single digit sequence inside a path segment (e.g. "page2.html" → 2, "page{page}.html").
+// Returns (number, template, true) if exactly one number is found; otherwise (0, "", false).
+var reDigits = regexp.MustCompile(`\d+`)
+
+func extractEmbeddedNumber(seg string) (number int, template string, ok bool) {
+	matches := reDigits.FindAllStringIndex(seg, -1)
+	if len(matches) != 1 {
+		return 0, "", false
+	}
+	start, end := matches[0][0], matches[0][1]
+	n, err := strconv.Atoi(seg[start:end])
+	if err != nil {
+		return 0, "", false
+	}
+	return n, seg[:start] + "{page}" + seg[end:], true
+}
 
 var scraperService *services.ScraperService
 
@@ -88,6 +108,8 @@ func getScrapedThreads(c *gin.Context) {
 	sortBy := c.DefaultQuery("sort", "date_desc")
 	provider := c.Query("provider")
 	filter := c.Query("filter")
+	author := c.Query("author")
+	category := c.Query("category")
 
 	if limit < 1 || limit > 200 {
 		limit = 20
@@ -98,7 +120,7 @@ func getScrapedThreads(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	threads, total, err := svc.GetAllThreads(limit, offset, sortBy, provider, filter)
+	threads, total, err := svc.GetAllThreads(limit, offset, sortBy, provider, filter, author, category)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to retrieve threads",
@@ -179,6 +201,11 @@ func searchScrapedThreads(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	sortBy := c.DefaultQuery("sort", "date_desc")
+	provider := c.Query("provider")
+	filter := c.Query("filter")
+	author := c.Query("author")
+	category := c.Query("category")
 
 	if limit < 1 || limit > 200 {
 		limit = 20
@@ -189,7 +216,7 @@ func searchScrapedThreads(c *gin.Context) {
 
 	offset := (page - 1) * limit
 
-	threads, total, err := svc.SearchThreads(query, limit, offset)
+	threads, total, err := svc.SearchThreads(query, limit, offset, sortBy, provider, filter, author, category)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to search threads",
@@ -607,4 +634,268 @@ func deleteAllThreads(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Successfully deleted all scraped threads"))
+}
+
+// getWatchedThreads returns all watched threads for the tab interface
+func getWatchedThreads(c *gin.Context) {
+	svc := ensureScraperService()
+
+	threads, err := svc.GetWatchedThreads()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get watched threads", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(threads, fmt.Sprintf("Found %d watched threads", len(threads))))
+}
+
+// getThreadRecentPosts returns recent posts for a thread (for hover preview)
+func getThreadRecentPosts(c *gin.Context) {
+	svc := ensureScraperService()
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid thread ID", err.Error()))
+		return
+	}
+
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+
+	posts, err := svc.GetRecentPostsByThreadID(id, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get posts", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(posts, fmt.Sprintf("Found %d posts", len(posts))))
+}
+
+// markPostAsRead marks a post as read
+func markPostAsRead(c *gin.Context) {
+	svc := ensureScraperService()
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid post ID", err.Error()))
+		return
+	}
+
+	if err := svc.MarkPostAsRead(id); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to mark as read", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Post marked as read"))
+}
+
+// paginationDetectResult holds the result of pagination analysis
+type paginationDetectResult struct {
+	PageUrlTemplate string `json:"page_url_template"`
+	PageStartsAt    int    `json:"page_starts_at"`
+	SiteType        string `json:"site_type"`
+	Confidence      string `json:"confidence"` // "high" or "low"
+	Notes           string `json:"notes"`
+}
+
+// detectPaginationConfig compares two page URLs to detect the pagination pattern and site type
+func detectPaginationConfig(c *gin.Context) {
+	var req struct {
+		Page1URL string `json:"page1_url" binding:"required"`
+		Page2URL string `json:"page2_url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+	result := analyzePaginationURLs(req.Page1URL, req.Page2URL)
+	c.JSON(http.StatusOK, models.SuccessResponse(result, "Pagination config detected"))
+}
+
+// analyzePaginationURLs compares two page URLs and returns the detected pagination template + site type
+func analyzePaginationURLs(rawURL1, rawURL2 string) paginationDetectResult {
+	u1, err1 := url.Parse(rawURL1)
+	u2, err2 := url.Parse(rawURL2)
+	if err1 != nil || err2 != nil {
+		return paginationDetectResult{SiteType: "generic", Confidence: "low", Notes: "Could not parse URLs"}
+	}
+
+	siteType := detectSiteTypeFromURL(u1.Hostname())
+
+	// --- Check query parameter changes ---
+	q1 := u1.Query()
+	q2 := u2.Query()
+
+	// Case A: same param exists in both with sequential numeric values
+	for key := range q1 {
+		vals1 := q1[key]
+		vals2 := q2[key]
+		if len(vals1) > 0 && len(vals2) > 0 {
+			n1, e1 := strconv.Atoi(vals1[0])
+			n2, e2 := strconv.Atoi(vals2[0])
+			if e1 == nil && e2 == nil && n2 == n1+1 {
+				template := strings.Replace(rawURL1, key+"="+vals1[0], key+"={page}", 1)
+				return paginationDetectResult{
+					PageUrlTemplate: template,
+					PageStartsAt:    n1,
+					SiteType:        siteType,
+					Confidence:      "high",
+					Notes:           fmt.Sprintf("Query parameter '%s' increments per page (starting at %d)", key, n1),
+				}
+			}
+		}
+	}
+
+	// Case B: page param appears in URL2 only (page 1 = base URL, page 2+ = ?param=N)
+	for key := range q2 {
+		if _, exists := q1[key]; !exists {
+			vals2 := q2[key]
+			if len(vals2) > 0 {
+				n2, e2 := strconv.Atoi(vals2[0])
+				if e2 == nil {
+					sep := "?"
+					if strings.Contains(rawURL1, "?") {
+						sep = "&"
+					}
+					template := strings.TrimRight(rawURL1, "/") + sep + key + "={page}"
+					return paginationDetectResult{
+						PageUrlTemplate: template,
+						PageStartsAt:    n2,
+						SiteType:        siteType,
+						Confidence:      "high",
+						Notes:           fmt.Sprintf("Page 1 uses base URL; pages %d+ add ?%s=N", n2, key),
+					}
+				}
+			}
+		}
+	}
+
+	// --- Check path segment changes ---
+	path1 := strings.TrimRight(u1.Path, "/")
+	path2 := strings.TrimRight(u2.Path, "/")
+	parts1 := strings.Split(path1, "/")
+	parts2 := strings.Split(path2, "/")
+
+	// Case C: same number of segments, one segment changes (pure number or embedded number)
+	// e.g. /page/1 → /page/2  OR  /page-1.html → /page-2.html
+	if len(parts1) == len(parts2) {
+		for i, p1 := range parts1 {
+			p2 := parts2[i]
+			if p1 != p2 {
+				// Try pure numeric segment
+				n1, e1 := strconv.Atoi(p1)
+				n2, e2 := strconv.Atoi(p2)
+				if e1 == nil && e2 == nil && n2 == n1+1 {
+					templateParts := make([]string, len(parts1))
+					copy(templateParts, parts1)
+					templateParts[i] = "{page}"
+					template := u1.Scheme + "://" + u1.Host + strings.Join(templateParts, "/")
+					if u1.RawQuery != "" {
+						template += "?" + u1.RawQuery
+					}
+					return paginationDetectResult{
+						PageUrlTemplate: template,
+						PageStartsAt:    n1,
+						SiteType:        siteType,
+						Confidence:      "high",
+						Notes:           fmt.Sprintf("Page number in URL path, starting at %d", n1),
+					}
+				}
+				// Try embedded number (e.g. "page-1.html" → "page-2.html")
+				num1, _, ok1 := extractEmbeddedNumber(p1)
+				num2, tmpl2, ok2 := extractEmbeddedNumber(p2)
+				if ok1 && ok2 && num2 == num1+1 {
+					templateParts := make([]string, len(parts1))
+					copy(templateParts, parts1)
+					templateParts[i] = tmpl2
+					template := u1.Scheme + "://" + u1.Host + strings.Join(templateParts, "/")
+					if u1.RawQuery != "" {
+						template += "?" + u1.RawQuery
+					}
+					return paginationDetectResult{
+						PageUrlTemplate: template,
+						PageStartsAt:    num1,
+						SiteType:        siteType,
+						Confidence:      "high",
+						Notes:           fmt.Sprintf("Embedded page number in '%s', starting at %d", tmpl2, num1),
+					}
+				}
+			}
+		}
+	}
+
+	// Case D: URL2 has one extra segment at end — pure number or embedded number
+	// e.g. /videos → /videos/2  OR  / → /page2.html
+	if len(parts2) == len(parts1)+1 {
+		lastPart := parts2[len(parts2)-1]
+		// D1: pure numeric segment (e.g. /videos/2)
+		n2, e2 := strconv.Atoi(lastPart)
+		if e2 == nil {
+			template := u1.Scheme + "://" + u1.Host + path1 + "/{page}"
+			if u1.RawQuery != "" {
+				template += "?" + u1.RawQuery
+			}
+			return paginationDetectResult{
+				PageUrlTemplate: template,
+				PageStartsAt:    n2,
+				SiteType:        siteType,
+				Confidence:      "high",
+				Notes:           fmt.Sprintf("Page 1 uses base URL; pages %d+ append /%d to path", n2, n2),
+			}
+		}
+		// D2: embedded number in segment (e.g. /page2.html or /page-2/)
+		num2, segTemplate, ok2 := extractEmbeddedNumber(lastPart)
+		if ok2 {
+			basePath := path1
+			if basePath == "" {
+				template := u1.Scheme + "://" + u1.Host + "/" + segTemplate
+				if u1.RawQuery != "" {
+					template += "?" + u1.RawQuery
+				}
+				return paginationDetectResult{
+					PageUrlTemplate: template,
+					PageStartsAt:    num2,
+					SiteType:        siteType,
+					Confidence:      "high",
+					Notes:           fmt.Sprintf("Page 1 uses base URL; pages %d+ use pattern '%s'", num2, segTemplate),
+				}
+			}
+			template := u1.Scheme + "://" + u1.Host + basePath + "/" + segTemplate
+			if u1.RawQuery != "" {
+				template += "?" + u1.RawQuery
+			}
+			return paginationDetectResult{
+				PageUrlTemplate: template,
+				PageStartsAt:    num2,
+				SiteType:        siteType,
+				Confidence:      "high",
+				Notes:           fmt.Sprintf("Page 1 uses base URL; pages %d+ use pattern '%s'", num2, segTemplate),
+			}
+		}
+	}
+
+	return paginationDetectResult{
+		PageUrlTemplate: "",
+		PageStartsAt:    1,
+		SiteType:        siteType,
+		Confidence:      "low",
+		Notes:           "Could not auto-detect pagination pattern from the two URLs provided. Please check that both URLs differ only by page number.",
+	}
+}
+
+// detectSiteTypeFromURL returns the appropriate site type based on the hostname
+func detectSiteTypeFromURL(hostname string) string {
+	hostname = strings.ToLower(strings.TrimPrefix(hostname, "www."))
+	customDomains := []string{"pornhub.com", "luxuretv.com", "sexuria.com", "rule34video.com", "xhamster.com", "xvideos.com"}
+	for _, d := range customDomains {
+		if strings.Contains(hostname, d) {
+			return "custom"
+		}
+	}
+	if strings.Contains(hostname, "youtube.com") || hostname == "youtu.be" {
+		return "youtube"
+	}
+	if strings.Contains(hostname, "vimeo.com") {
+		return "vimeo"
+	}
+	return "generic"
 }

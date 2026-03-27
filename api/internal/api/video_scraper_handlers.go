@@ -2,10 +2,13 @@ package api
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
@@ -207,7 +210,18 @@ func deleteScrapedVideosBySiteTypeHandler(c *gin.Context) {
 		return
 	}
 
-	result, err := db.Exec("DELETE FROM scraped_videos WHERE site_type = ?", siteType)
+	// Use source LIKE for sexuria since it stores multiple site_types ("sexuria" and "advanced_search")
+	// This matches how items are loaded (source LIKE 'sexuria%')
+	deleteQuery := "DELETE FROM scraped_videos WHERE site_type = ?"
+	deleteArg := siteType
+	if siteType == "sexuria" {
+		// Delete related download links first
+		db.Exec("DELETE FROM sexuria_download_links WHERE video_id IN (SELECT id FROM scraped_videos WHERE source LIKE 'sexuria%')")
+		deleteQuery = "DELETE FROM scraped_videos WHERE source LIKE ?"
+		deleteArg = "sexuria%"
+	}
+
+	result, err := db.Exec(deleteQuery, deleteArg)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to delete scraped videos",
@@ -221,6 +235,29 @@ func deleteScrapedVideosBySiteTypeHandler(c *gin.Context) {
 		"deleted":   rowsAffected,
 		"site_type": siteType,
 	}, fmt.Sprintf("Deleted %d %s videos", rowsAffected, siteType)))
+}
+
+// deleteScrapedVideosBySourceHandler deletes all scraped videos from a specific source hostname
+func deleteScrapedVideosBySourceHandler(c *gin.Context) {
+	db := database.GetDB()
+
+	source := c.Param("source")
+	if source == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Source is required", ""))
+		return
+	}
+
+	result, err := db.Exec("DELETE FROM scraped_videos WHERE source = ?", source)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to delete scraped videos", err.Error()))
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{
+		"deleted": rowsAffected,
+		"source":  source,
+	}, fmt.Sprintf("Deleted %d videos from %s", rowsAffected, source)))
 }
 
 // bulkDeleteScrapedVideosHandler deletes multiple scraped videos by IDs
@@ -349,4 +386,243 @@ func getScrapedVideoHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(video, "Video retrieved successfully"))
+}
+
+// fetchAndParseVideoPage fetches a URL and extracts a direct video URL and any player iframe URL from the HTML.
+func fetchAndParseVideoPage(pageURL string) (directURL, contentType, iframeURL string, doc *goquery.Document, err error) {
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.5")
+	req.Header.Set("Referer", pageURL)
+
+	resp, fetchErr := client.Do(req)
+	if fetchErr != nil {
+		err = fetchErr
+		return
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		err = readErr
+		return
+	}
+
+	doc, err = goquery.NewDocumentFromReader(strings.NewReader(string(body)))
+	if err != nil {
+		return
+	}
+
+	// Try og:video meta tags first (most reliable)
+	if u, ok := doc.Find("meta[property='og:video:url']").Attr("content"); ok && u != "" {
+		directURL = u
+		contentType = "video/mp4"
+	} else if u, ok := doc.Find("meta[property='og:video']").Attr("content"); ok && u != "" {
+		directURL = u
+		contentType = "video/mp4"
+	}
+
+	// Try <video src="..."> or <video><source src="...">
+	if directURL == "" {
+		doc.Find("video").Each(func(_ int, s *goquery.Selection) {
+			if directURL != "" {
+				return
+			}
+			if src, ok := s.Attr("src"); ok && src != "" && !strings.HasPrefix(src, "blob:") {
+				directURL = src
+				contentType = "video/mp4"
+				return
+			}
+			s.Find("source").Each(func(_ int, src *goquery.Selection) {
+				if directURL != "" {
+					return
+				}
+				if u, ok := src.Attr("src"); ok && u != "" && !strings.HasPrefix(u, "blob:") {
+					directURL = u
+					if ct, ok := src.Attr("type"); ok {
+						contentType = ct
+					} else {
+						contentType = "video/mp4"
+					}
+				}
+			})
+		})
+	}
+
+	// Try iframes inside known player containers (e.g. MyZooWife embeds via <iframe>)
+	if directURL == "" {
+		playerSelectors := []string{
+			"#player iframe", "#player-container iframe", ".player iframe",
+			"div[id*='player'] iframe", ".video-player iframe", "#content iframe",
+		}
+		for _, sel := range playerSelectors {
+			if src, ok := doc.Find(sel).First().Attr("src"); ok && src != "" && !strings.HasPrefix(src, "about:") {
+				iframeURL = src
+				break
+			}
+		}
+	}
+
+	return
+}
+
+// extractVideoURLHandler fetches a video page and extracts the direct MP4/video URL.
+// If the page embeds via an <iframe>, it follows the iframe and extracts from there too.
+// GET /api/v1/scraper/extract-video-url?url=<page_url>
+func extractVideoURLHandler(c *gin.Context) {
+	pageURL := c.Query("url")
+	if pageURL == "" {
+		respondBadRequest(c, "url query param required", nil)
+		return
+	}
+
+	directURL, contentType, iframeURL, doc, err := fetchAndParseVideoPage(pageURL)
+	if err != nil {
+		respondInternalError(c, "failed to fetch page", err)
+		return
+	}
+
+	// If no direct URL found but there's an iframe, follow it to get the real video URL
+	if directURL == "" && iframeURL != "" {
+		embedDirect, embedType, _, _, embedErr := fetchAndParseVideoPage(iframeURL)
+		if embedErr == nil && embedDirect != "" {
+			directURL = embedDirect
+			contentType = embedType
+			iframeURL = "" // resolved — no need to expose the intermediate iframe URL
+		}
+		// If embed page also failed to yield a direct URL, keep iframeURL as fallback
+	}
+
+	// Extract title: h1 → og:title → <title>
+	var title string
+	if doc != nil {
+		if h1 := strings.TrimSpace(doc.Find("h1").First().Text()); h1 != "" {
+			title = h1
+		} else if t, ok := doc.Find("meta[property='og:title']").Attr("content"); ok {
+			title = t
+		} else {
+			title = strings.TrimSpace(doc.Find("title").Text())
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"direct_url":   directURL,
+		"content_type": contentType,
+		"iframe_url":   iframeURL,
+		"title":        title,
+		"page_url":     pageURL,
+	})
+}
+
+// markScrapedVideoDownloadedHandler marks a scraped video as downloaded
+// POST /api/v1/scraper/videos/:id/mark-downloaded
+func markScrapedVideoDownloadedHandler(c *gin.Context) {
+	svc := ensureVideoScraperService()
+
+	id := c.Param("id")
+	var videoID int64
+	if _, err := fmt.Sscanf(id, "%d", &videoID); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid video ID", err.Error()))
+		return
+	}
+
+	if err := svc.MarkScrapedVideoDownloaded(videoID); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to mark video as downloaded", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{"id": videoID}, "Video marked as downloaded"))
+}
+
+// unmarkScrapedVideoDownloadedHandler clears the downloaded mark on a scraped video
+// DELETE /api/v1/scraper/videos/:id/mark-downloaded
+func unmarkScrapedVideoDownloadedHandler(c *gin.Context) {
+	svc := ensureVideoScraperService()
+
+	id := c.Param("id")
+	var videoID int64
+	if _, err := fmt.Sscanf(id, "%d", &videoID); err != nil {
+		respondBadRequest(c, "invalid video ID", err)
+		return
+	}
+
+	if err := svc.UnmarkScrapedVideoDownloaded(videoID); err != nil {
+		respondInternalError(c, "failed to unmark video", err)
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(map[string]interface{}{"id": videoID}, "Downloaded mark removed"))
+}
+
+// proxyScraperImageHandler proxies scraped thumbnail images to bypass CDN hotlink protection.
+// GET /api/v1/scraper/proxy-image?url=<encoded-url>
+func proxyScraperImageHandler(c *gin.Context) {
+	rawURL := c.Query("url")
+	if rawURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url parameter required"})
+		return
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid url"})
+		return
+	}
+
+	referer := inferImageReferer(parsed.Host)
+
+	req, err := http.NewRequest("GET", rawURL, nil)
+	if err != nil {
+		c.Status(http.StatusBadGateway)
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.Status(http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(contentType, "image/") && !strings.HasPrefix(contentType, "video/") {
+		contentType = "image/jpeg"
+	}
+
+	c.Header("Cache-Control", "public, max-age=3600")
+	c.Header("Content-Type", contentType)
+	c.Status(resp.StatusCode)
+	io.Copy(c.Writer, resp.Body)
+}
+
+// inferImageReferer maps CDN hosts to the parent site's Referer for hotlink bypass.
+func inferImageReferer(host string) string {
+	switch {
+	case strings.Contains(host, "hqporner") || strings.Contains(host, "fastporndelivery"):
+		return "https://www.hqporner.com"
+	case strings.Contains(host, "motherlessmedia") || strings.Contains(host, "motherless"):
+		return "https://motherless.com"
+	case strings.Contains(host, "leakvids"):
+		return "https://leakvids.com"
+	case strings.Contains(host, "phncdn") || strings.Contains(host, "pornhub"):
+		return "https://www.pornhub.com"
+	case strings.Contains(host, "r34xyz") || strings.Contains(host, "rule34video"):
+		return "https://rule34video.com"
+	case strings.Contains(host, "luxuretv"):
+		return "https://luxuretv.com"
+	case strings.Contains(host, "sexuria"):
+		return "https://sexuria.com"
+	default:
+		return ""
+	}
 }

@@ -210,6 +210,15 @@ func (s *NotificationService) Delete(id int64) error {
 	return err
 }
 
+// DeleteAll deletes all notifications
+func (s *NotificationService) DeleteAll() (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM notifications`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // DeleteOld deletes old archived notifications
 func (s *NotificationService) DeleteOld(daysToKeep int) (int64, error) {
 	result, err := s.db.Exec(`

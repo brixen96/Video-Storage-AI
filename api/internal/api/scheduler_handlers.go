@@ -24,6 +24,19 @@ func ensureSchedulerService() *services.SchedulerService {
 			activitySvc := ensureActivityService()
 			if scraperSvc != nil && activitySvc != nil {
 				schedulerService = services.NewSchedulerService(dbInstance, scraperSvc, activitySvc)
+
+				// Wire up the auto-update handler to use triggerAutoUpdateCheck
+				// which has access to all scraper service singletons
+				schedulerService.SetAutoUpdateHandler(func(scraperType string, configJSON string, maxPages int) {
+					autoUpdateSvc := ensureAutoUpdateService()
+					config, err := autoUpdateSvc.GetOrCreateConfig(scraperType)
+					if err != nil {
+						log.Printf("Failed to get auto-update config for %s: %v\n", scraperType, err)
+						return
+					}
+					triggerAutoUpdateCheck(scraperType, config)
+				})
+
 				// Auto-start scheduler
 				if err := schedulerService.Start(); err != nil {
 					log.Printf("Failed to start scheduler: %v\n", err)
@@ -32,6 +45,17 @@ func ensureSchedulerService() *services.SchedulerService {
 		}
 	}
 	return schedulerService
+}
+
+// InitScheduler ensures the scheduler is started on app launch.
+// Call this from main.go after router and services are initialized.
+func InitScheduler() {
+	svc := ensureSchedulerService()
+	if svc != nil {
+		log.Println("⏰ Scheduler initialized and running")
+	} else {
+		log.Println("⚠️ Failed to initialize scheduler")
+	}
 }
 
 // getSchedulerStatus returns the scheduler status

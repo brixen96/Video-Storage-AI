@@ -411,21 +411,32 @@ func getSexuriaItemsHandler(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "24"))
 	search := c.Query("search")
-	host := c.Query("host") // Filter by file host
+	host := c.Query("host")         // Filter by file host
+	category := c.Query("category") // Filter by category (e.g., "Movies", "Videos")
 	sortBy := c.DefaultQuery("sort", "discovered_at")
 	sortOrder := c.DefaultQuery("order", "desc")
+	var includeTags, excludeTags []string
+	if v := c.Query("include_tags"); v != "" {
+		includeTags = strings.Split(v, ",")
+	}
+	if v := c.Query("exclude_tags"); v != "" {
+		excludeTags = strings.Split(v, ",")
+	}
 
 	videoScraperSvc := ensureVideoScraperService()
 
 	// Use paginated query - Sexuria items are identified by source (match both "sexuria" and "sexuria.net")
 	result, err := videoScraperSvc.GetScrapedVideosPaginated(services.ScrapedVideosQuery{
-		SourceLike: "sexuria%",
-		Keyword:    host, // File hosts are stored as tags
-		Search:     search,
-		Page:       page,
-		Limit:      limit,
-		SortBy:     sortBy,
-		SortOrder:  sortOrder,
+		SourceLike:      "sexuria%",
+		Keyword:         host, // File hosts are stored as tags
+		Category:        category,
+		Search:          search,
+		Page:            page,
+		Limit:           limit,
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
+		IncludeKeywords: includeTags,
+		ExcludeKeywords: excludeTags,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
@@ -462,6 +473,38 @@ func getSexuriaStatsHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(stats, "Sexuria stats retrieved successfully"))
+}
+
+// getSexuriaItemCategoriesHandler returns distinct categories for Sexuria items
+func getSexuriaItemCategoriesHandler(c *gin.Context) {
+	db := database.GetDB()
+
+	rows, err := db.Query(`
+		SELECT COALESCE(category, '') as cat, COUNT(*) as cnt
+		FROM scraped_videos
+		WHERE source LIKE 'sexuria%' AND category IS NOT NULL AND category != ''
+		GROUP BY category
+		ORDER BY cnt DESC
+	`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get categories",
+			err.Error(),
+		))
+		return
+	}
+	defer rows.Close()
+
+	categories := make(map[string]int)
+	for rows.Next() {
+		var cat string
+		var cnt int
+		if rows.Scan(&cat, &cnt) == nil && cat != "" {
+			categories[cat] = cnt
+		}
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(categories, "Categories retrieved"))
 }
 
 // SexuriaItemDetailsRequest represents the request body for fetching item details

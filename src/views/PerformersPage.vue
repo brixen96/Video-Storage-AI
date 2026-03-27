@@ -5,12 +5,12 @@
 			<div class="controls-bar mb-2">
 				<div class="row g-3">
 					<!-- Search -->
-					<div class="col-md-4">
+					<div class="col-md-3">
 						<SearchBox v-model="searchQuery" placeholder="Search performers..." />
 					</div>
 
 					<!-- Sort -->
-					<div class="col-md-3">
+					<div class="col-md-1">
 						<select v-model="sortBy" class="form-select">
 							<option value="name">Sort by Name</option>
 							<option value="age">Sort by Age</option>
@@ -150,6 +150,23 @@
 				</div>
 			</div>
 
+			<!-- Results / Pagination Bar -->
+			<div v-if="!loading && !error && filteredPerformers.length > 0" class="results-bar d-flex justify-content-between align-items-center mb-2">
+				<span class="text-muted small">
+					Showing {{ (currentPage - 1) * pageSize + 1 }}–{{ Math.min(currentPage * pageSize, filteredPerformers.length) }}
+					of {{ filteredPerformers.length }} performers
+				</span>
+				<div v-if="totalPages > 1" class="d-flex align-items-center gap-2">
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">
+						<font-awesome-icon :icon="['fas', 'chevron-left']" />
+					</button>
+					<span class="text-muted small">Page {{ currentPage }} / {{ totalPages }}</span>
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="goToPage(currentPage + 1)">
+						<font-awesome-icon :icon="['fas', 'chevron-right']" />
+					</button>
+				</div>
+			</div>
+
 			<!-- Loading State -->
 			<div v-if="loading" class="loading-state">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin size="3x" />
@@ -177,9 +194,8 @@
 			<!-- Performers Grid View -->
 			<div v-else-if="viewMode === 'grid'" class="performers-grid">
 				<div
-					v-for="performer in filteredPerformers"
+					v-for="performer in pagedPerformers"
 					:key="performer.id"
-					v-memo="[performer.id, performer.name, performer.video_count]"
 					class="performer-card text-center"
 					@click="openDetails(performer)"
 					@contextmenu.prevent="openContextMenu($event, performer)"
@@ -195,22 +211,19 @@
 							:alt="performer.name"
 							loading="lazy"
 						/>
-						<!-- Video Preview (loads only on hover) -->
+						<!-- Video Preview (only created on hover to avoid hundreds of video elements in DOM) -->
 						<video
-							v-if="performer.preview_path"
-							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
-							:ref="`video-${performer.id}`"
-							:key="`preview-${performer.id}-${videoRefreshKey}`"
+							v-if="performer.preview_path && hoveredPerformer[performer.id]"
 							class="preview-video"
 							:src="getPreviewUrl(performer.preview_path)"
+							autoplay
 							loop
 							muted
 							playsinline
-							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
-						<div v-if="!performer.preview_path && !performer.thumbnail_path" class="no-preview">
+						<div v-if="!performer.preview_path && !performer.thumbnail_path && !hoveredPerformer[performer.id]" class="no-preview">
 							<font-awesome-icon :icon="['fas', 'user']" size="3x" />
 						</div>
 
@@ -259,7 +272,7 @@
 			<!-- Performers List View -->
 			<div v-else class="performers-list">
 				<div
-					v-for="performer in filteredPerformers"
+					v-for="performer in pagedPerformers"
 					:key="performer.id"
 					class="list-item"
 					@click="openDetails(performer)"
@@ -275,22 +288,19 @@
 							:alt="performer.name"
 							loading="lazy"
 						/>
-						<!-- Video Preview (always loaded, visibility toggled) -->
+						<!-- Video Preview (only created on hover) -->
 						<video
-							v-if="performer.preview_path"
-							v-show="performer.thumbnail_path ? hoveredPerformer[performer.id] : true"
-							:ref="`video-${performer.id}`"
-							:key="`preview-${performer.id}-${videoRefreshKey}`"
+							v-if="performer.preview_path && hoveredPerformer[performer.id]"
 							class="preview-video-small"
 							:src="getPreviewUrl(performer.preview_path)"
+							autoplay
 							loop
 							muted
 							playsinline
-							preload="none"
 							@error="handleVideoError"
 						></video>
 						<!-- Fallback for No Preview -->
-						<div v-if="!performer.preview_path && !performer.thumbnail_path" class="no-preview-small">
+						<div v-if="!performer.preview_path && !performer.thumbnail_path && !hoveredPerformer[performer.id]" class="no-preview-small">
 							<font-awesome-icon :icon="['fas', 'user']" />
 						</div>
 					</div>
@@ -317,6 +327,25 @@
 							<font-awesome-icon :icon="['fas', 'eye']" />
 						</button>
 					</div>
+				</div>
+			</div>
+
+			<!-- Bottom Pagination -->
+			<div v-if="!loading && !error && totalPages > 1" class="d-flex justify-content-center mt-3 mb-2">
+				<div class="d-flex align-items-center gap-2">
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="goToPage(1)">
+						<font-awesome-icon :icon="['fas', 'angle-double-left']" />
+					</button>
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === 1" @click="goToPage(currentPage - 1)">
+						<font-awesome-icon :icon="['fas', 'chevron-left']" />
+					</button>
+					<span class="px-2 text-muted">Page {{ currentPage }} / {{ totalPages }}</span>
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="goToPage(currentPage + 1)">
+						<font-awesome-icon :icon="['fas', 'chevron-right']" />
+					</button>
+					<button class="btn btn-sm btn-outline-secondary" :disabled="currentPage === totalPages" @click="goToPage(totalPages)">
+						<font-awesome-icon :icon="['fas', 'angle-double-right']" />
+					</button>
 				</div>
 			</div>
 		</div>
@@ -752,6 +781,8 @@ export default {
 			performerTags: {}, // Cache for performer tags: { performerId: [tags] }
 			// Two-tier loading
 			hoveredPerformer: {}, // Track which performers are being hovered: { performerId: boolean }
+		currentPage: 1,
+		pageSize: 48,
 		}
 	},
 
@@ -856,6 +887,27 @@ export default {
 			const assignedTagIds = new Set(this.performerMasterTags.map((t) => t.id))
 			return (this.allTags || []).filter((tag) => tag.category === performerCategory && !assignedTagIds.has(tag.id))
 		},
+		pagedPerformers() {
+			const start = (this.currentPage - 1) * this.pageSize
+			return this.filteredPerformers.slice(start, start + this.pageSize)
+		},
+		totalPages() {
+			return Math.max(1, Math.ceil(this.filteredPerformers.length / this.pageSize))
+		},
+	},
+	watch: {
+		searchQuery() {
+			this.currentPage = 1
+		},
+		sortBy() {
+			this.currentPage = 1
+		},
+		filters: {
+			deep: true,
+			handler() {
+				this.currentPage = 1
+			},
+		},
 	},
 	methods: {
 		// Get category icon
@@ -904,38 +956,15 @@ export default {
 		},
 
 		// Two-tier loading: Start video preview on hover
+		// Video element is created via v-if and has autoplay, so it plays automatically
 		startVideoPreview(performer) {
-			// Set hover state to true to show video
 			this.hoveredPerformer[performer.id] = true
-
-			// Load and play the video on hover (since preload="none")
-			this.$nextTick(() => {
-				const videoRef = this.$refs[`video-${performer.id}`]
-				if (videoRef && videoRef[0]) {
-					const video = videoRef[0]
-					// Load the video if not already loaded
-					if (video.readyState === 0) {
-						video.load()
-					}
-					video.play().catch((err) => {
-						// Ignore play errors (can happen if video not loaded yet)
-						console.debug('Video play error:', err)
-					})
-				}
-			})
 		},
 
 		// Two-tier loading: Stop video preview on mouse leave
+		// Video element is destroyed via v-if, no manual cleanup needed
 		stopVideoPreview(performer) {
-			// Set hover state to false to show thumbnail again
 			this.hoveredPerformer[performer.id] = false
-
-			// Pause the video if it exists
-			const videoRef = this.$refs[`video-${performer.id}`]
-			if (videoRef && videoRef[0]) {
-				videoRef[0].pause()
-				videoRef[0].currentTime = 0 // Reset to beginning
-			}
 		},
 
 		async loadPerformers() {
@@ -964,8 +993,8 @@ export default {
 				// Note: Previews are now loaded on-demand when opening details panel
 				// This prevents API spam and improves initial page load performance
 
-				// Load tags for all performers
-				this.loadAllPerformerTags()
+				// Load tags for current page performers only
+				this.loadTagsForPage(this.pagedPerformers)
 			} catch (err) {
 				console.error('Failed to load performers:', err)
 				this.error = 'Failed to load performers. Please try again.'
@@ -999,6 +1028,28 @@ export default {
 					await new Promise((resolve) => setTimeout(resolve, 100))
 				}
 			}
+		},
+
+		async loadTagsForPage(performers) {
+			const toLoad = performers.filter((p) => !Object.prototype.hasOwnProperty.call(this.performerTags, p.id))
+			if (toLoad.length === 0) return
+			await Promise.all(
+				toLoad.map(async (performer) => {
+					try {
+						const response = await performersAPI.getTags(performer.id)
+						this.performerTags[performer.id] = response.data || []
+					} catch {
+						this.performerTags[performer.id] = []
+					}
+				})
+			)
+		},
+
+		goToPage(page) {
+			if (page < 1 || page > this.totalPages) return
+			this.currentPage = page
+			this.loadTagsForPage(this.pagedPerformers)
+			window.scrollTo({ top: 0, behavior: 'smooth' })
 		},
 
 		getPreviewUrl(path) {
@@ -1105,6 +1156,14 @@ export default {
 			this.contextMenu.x = event.clientX
 			this.contextMenu.y = event.clientY
 			this.contextMenu.performer = performer
+		},
+		handleDocumentClick() {
+			if (this.contextMenu.visible) {
+				this.closeContextMenu()
+			}
+			if (this.carouselContextMenu.visible) {
+				this.closeCarouselContextMenu()
+			}
 		},
 		closeContextMenu() {
 			this.contextMenu.visible = false
@@ -1235,7 +1294,7 @@ export default {
 			this.isCleaningUp = true
 			try {
 				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', {
-					method: 'POST'
+					method: 'POST',
 				})
 				const data = await response.json()
 
@@ -1456,14 +1515,7 @@ export default {
 		this.loadAllTags()
 
 		// Close context menus on click outside
-		document.addEventListener('click', () => {
-			if (this.contextMenu.visible) {
-				this.closeContextMenu()
-			}
-			if (this.carouselContextMenu.visible) {
-				this.closeCarouselContextMenu()
-			}
-		})
+		document.addEventListener('click', this.handleDocumentClick)
 	},
 	activated() {
 		// Called when component is activated (navigated to) in keep-alive
@@ -1499,7 +1551,7 @@ export default {
 		)
 	},
 	beforeUnmount() {
-		// Cleanup if needed
+		document.removeEventListener('click', this.handleDocumentClick)
 	},
 }
 </script>

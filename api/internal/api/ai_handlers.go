@@ -1,10 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
@@ -476,6 +480,117 @@ func GetAICompanionService() *services.AICompanionService {
 	return aiCompanionService
 }
 
+// aiCompanionChatStream handles chat messages with SSE streaming of the final response
+func aiCompanionChatStream(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", "The AI Companion service is not running"))
+		return
+	}
+
+	var request struct {
+		Message string              `json:"message"`
+		History []map[string]string `json:"history"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Streaming unsupported", ""))
+		return
+	}
+
+	clientGone := c.Request.Context().Done()
+
+	var fullResponse strings.Builder
+	source := "llm"
+	var videoCards []map[string]interface{}
+
+	err := aiCompanionService.ChatLLMStream(request.Message, request.History, func(chunk string) bool {
+		select {
+		case <-clientGone:
+			return false
+		default:
+		}
+		fullResponse.WriteString(chunk)
+		chunkJSON, _ := json.Marshal(chunk)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", chunkJSON)
+		flusher.Flush()
+		return true
+	}, func(cards []map[string]interface{}) {
+		videoCards = cards
+	})
+
+	if err != nil {
+		// LLM unavailable — fall back to rule-based and send as a single chunk
+		log.Printf("[AI] Stream LLM unavailable (%v), falling back to rule-based", err)
+		source = "rule-based"
+		response, rbErr := aiCompanionService.Chat(request.Message, request.History)
+		if rbErr != nil {
+			response = "Sorry, I\u2019m currently unavailable."
+		}
+		fullResponse.WriteString(response)
+		chunkJSON, _ := json.Marshal(response)
+		fmt.Fprintf(c.Writer, "data: %s\n\n", chunkJSON)
+		flusher.Flush()
+	}
+
+	// Persist the exchange to the database
+	if fullResponse.Len() > 0 {
+		aiCompanionService.SaveChatMessage("user", request.Message, "user")
+		aiCompanionService.SaveChatMessage("assistant", fullResponse.String(), source)
+	}
+
+	// Send video cards event before [DONE] so frontend can render inline cards
+	if len(videoCards) > 0 {
+		cardsJSON, _ := json.Marshal(map[string]interface{}{"videos": videoCards})
+		fmt.Fprintf(c.Writer, "event: video_cards\ndata: %s\n\n", string(cardsJSON))
+		flusher.Flush()
+	}
+
+	// Signal end of stream
+	fmt.Fprintf(c.Writer, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+// getChatHistory returns persisted chat messages
+func getChatHistory(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	limit := 100
+	if l := c.Query("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	messages, err := aiCompanionService.GetChatHistory(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get chat history", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": messages, "count": len(messages)})
+}
+
+// clearChatHistory deletes all persisted chat messages
+func clearChatHistory(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	if err := aiCompanionService.ClearChatHistory(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to clear chat history", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Chat history cleared"})
+}
+
 // aiCompanionChat handles chat messages to the AI Companion
 func aiCompanionChat(c *gin.Context) {
 	if aiCompanionService == nil {
@@ -499,18 +614,26 @@ func aiCompanionChat(c *gin.Context) {
 		return
 	}
 
-	response, err := aiCompanionService.Chat(request.Message, request.History)
+	// Try LLM (LM Studio) first, fall back to rule-based
+	source := "llm"
+	response, err := aiCompanionService.ChatLLM(request.Message, request.History)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
-			"Chat failed",
-			err.Error(),
-		))
-		return
+		log.Printf("[AI] LLM unavailable (%v), falling back to rule-based", err)
+		source = "rule-based"
+		response, err = aiCompanionService.Chat(request.Message, request.History)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+				"Chat failed",
+				err.Error(),
+			))
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": response,
+		"source":  source,
 	})
 }
 
@@ -707,5 +830,81 @@ func deleteAIMemory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Memory deleted successfully",
+	})
+}
+
+// getAIConfig returns the AI/LM Studio configuration
+func getAIConfig(c *gin.Context) {
+	db := database.GetDB()
+	var config models.AIConfig
+	err := db.QueryRow(`SELECT id, lm_studio_url, model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.LMStudioURL, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
+	)
+	if err != nil {
+		// Return defaults if not found
+		config = models.AIConfig{
+			ID:          1,
+			LMStudioURL: "http://localhost:1234",
+			ModelName:   "",
+			Temperature: 0.7,
+			MaxTokens:   2000,
+			Enabled:     true,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    config,
+	})
+}
+
+// updateAIConfig updates the AI/LM Studio configuration
+func updateAIConfig(c *gin.Context) {
+	var config models.AIConfig
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid request",
+			err.Error(),
+		))
+		return
+	}
+
+	db := database.GetDB()
+	_, err := db.Exec(`
+		UPDATE ai_config SET
+			lm_studio_url = ?, model_name = ?, temperature = ?, max_tokens = ?, enabled = ?, updated_at = ?
+		WHERE id = 1`,
+		config.LMStudioURL, config.ModelName, config.Temperature, config.MaxTokens, config.Enabled, time.Now(),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to update AI config",
+			err.Error(),
+		))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "AI config updated successfully",
+	})
+}
+
+// testAIConnection tests the LM Studio connection
+func testAIConnection(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
+			"AI Companion not initialized",
+			"The AI Companion service is not running",
+		))
+		return
+	}
+
+	result := aiCompanionService.TestLMStudioConnection()
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
 	})
 }

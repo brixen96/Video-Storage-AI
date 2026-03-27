@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
@@ -51,7 +52,17 @@ func getDashboardFeed(c *gin.Context) {
 		offset = 0
 	}
 
-	items, total, err := svc.GetFeedItems(limit, offset)
+	scraperType := c.Query("scraper_type")
+
+	// Get enabled scraper types for filtering
+	autoUpdateSvc := ensureAutoUpdateService()
+	enabledConfigs, _ := autoUpdateSvc.GetEnabledConfigs()
+	var enabledTypes []string
+	for _, cfg := range enabledConfigs {
+		enabledTypes = append(enabledTypes, cfg.ScraperType)
+	}
+
+	items, total, err := svc.GetFeedItems(limit, offset, scraperType, enabledTypes)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to get feed items",
@@ -59,6 +70,20 @@ func getDashboardFeed(c *gin.Context) {
 		))
 		return
 	}
+
+	// Resolve display names for enabled scraper types that have feed items
+	scraperTypes, _ := svc.GetDistinctScraperTypes()
+	enabledSet := make(map[string]bool)
+	for _, t := range enabledTypes {
+		enabledSet[t] = true
+	}
+	var filteredTypes []string
+	for _, t := range scraperTypes {
+		if enabledSet[t] {
+			filteredTypes = append(filteredTypes, t)
+		}
+	}
+	scraperTypeInfos := models.ResolveScraperTypeNames(database.DB, filteredTypes)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -69,6 +94,7 @@ func getDashboardFeed(c *gin.Context) {
 			"offset": offset,
 			"total":  total,
 		},
+		"scraper_types": scraperTypeInfos,
 	})
 }
 
@@ -135,6 +161,17 @@ func executeDashboardQuickAction(c *gin.Context) {
 			"Action '"+action+"' is not recognized",
 		))
 	}
+}
+
+// clearDashboardFeed deletes all activity feed items
+func clearDashboardFeed(c *gin.Context) {
+	svc := ensureDashboardService()
+	deleted, err := svc.ClearAllFeedItems()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to clear feed", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"deleted": deleted}, "Feed cleared"))
 }
 
 // addDashboardFeedItem manually adds a feed item (for testing/internal use)

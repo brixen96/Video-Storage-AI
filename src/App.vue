@@ -2,12 +2,13 @@
 	<div id="app">
 		<NavBar />
 		<router-view v-slot="{ Component }">
-			<keep-alive>
+			<keep-alive :max="5">
 				<component :is="Component" />
 			</keep-alive>
 		</router-view>
 		<ActivityTracker />
 		<AICompanionChat />
+		<GlobalSearch />
 	</div>
 </template>
 
@@ -15,6 +16,7 @@
 import { defineAsyncComponent } from 'vue'
 import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
+import GlobalSearch from '@/components/GlobalSearch.vue'
 
 // Lazy load heavy component
 const AICompanionChat = defineAsyncComponent(() => import('@/components/AICompanionChat.vue'))
@@ -25,6 +27,7 @@ export default {
 		NavBar,
 		ActivityTracker,
 		AICompanionChat,
+		GlobalSearch,
 	},
 }
 </script>

@@ -36,14 +36,12 @@ export function debounce(func, wait = 300, immediate = false) {
  */
 export function throttle(func, wait = 300) {
 	let inThrottle
-	let lastTime
 
 	return function executedFunction(...args) {
 		const context = this
 
 		if (!inThrottle) {
 			func.apply(context, args)
-			lastTime = Date.now()
 			inThrottle = true
 
 			setTimeout(() => {

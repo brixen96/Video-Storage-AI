@@ -124,6 +124,18 @@ func (s *PerformerThumbnailService) GenerateThumbnailForPerformer(performerID in
 		return "", nil // Skip performers without preview videos
 	}
 
+	// Skip if thumbnail already exists in DB and on disk
+	if performer.ThumbnailPath.Valid && performer.ThumbnailPath.String != "" {
+		thumbPath := performer.ThumbnailPath.String
+		if len(thumbPath) > 8 && thumbPath[:8] == "/assets/" {
+			thumbPath = thumbPath[8:]
+		}
+		thumbFullPath := filepath.Join(s.assetsBaseDir, filepath.FromSlash(thumbPath))
+		if _, err := os.Stat(thumbFullPath); err == nil {
+			return "", nil // Thumbnail already exists, skip
+		}
+	}
+
 	// Convert preview path URL to filesystem path
 	// PreviewPath is like "/assets/performers/Name/preview.mp4"
 	// Remove "/assets/" prefix and join with assetsBaseDir

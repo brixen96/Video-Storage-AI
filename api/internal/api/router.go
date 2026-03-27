@@ -91,6 +91,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
 			videos.PATCH("/content-type/folder", updateFolderContentType) // Update content type for folder recursively
+			videos.PATCH("/performer/folder", linkPerformerToFolder)       // Link performer to all videos in a folder
 			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
 		}
 
@@ -215,12 +216,18 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 			// AI Companion endpoints
 			ai.POST("/chat", aiCompanionChat)                // Chat with AI Companion
+			ai.POST("/chat/stream", aiCompanionChatStream)   // Chat with streaming SSE response
+			ai.GET("/chat/history", getChatHistory)          // Get persistent chat history
+			ai.DELETE("/chat/history", clearChatHistory)     // Clear chat history
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories
 			ai.GET("/memories/search", searchAIMemories)     // Search memories
 			ai.PUT("/memories/:id", updateAIMemory)          // Update memory
 			ai.DELETE("/memories/:id", deleteAIMemory)       // Delete memory
+			ai.GET("/config", getAIConfig)                   // Get AI/LM Studio config
+			ai.PUT("/config", updateAIConfig)                // Update AI/LM Studio config
+			ai.POST("/test-connection", testAIConnection)    // Test LM Studio connection
 		}
 
 		// Scraper endpoints
@@ -228,11 +235,14 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		{
 			scraper.GET("/stats", getScraperStats)                 // Get scraper statistics
 			scraper.GET("/threads", getScrapedThreads)             // List all scraped threads
+			scraper.GET("/threads/watched", getWatchedThreads)     // List watched threads only
 			scraper.GET("/threads/search", searchScrapedThreads)   // Search threads
 			scraper.GET("/threads/:id", getScrapedThread)          // Get single thread
 			scraper.POST("/threads/scrape", scrapeThread)          // Scrape a thread
 			scraper.POST("/threads/:id/rescrape", rescrapeThread)  // Rescrape an existing thread
 			scraper.POST("/threads/:id/watch", toggleThreadWatch)  // Toggle watch status for thread
+			scraper.GET("/threads/:id/recent-posts", getThreadRecentPosts) // Get recent posts for thread hover
+			scraper.POST("/posts/:id/mark-read", markPostAsRead)          // Mark a post as read
 			scraper.DELETE("/threads/:id", deleteThread)           // Delete a thread
 			scraper.DELETE("/threads", deleteMultipleThreads)      // Delete multiple threads
 			scraper.DELETE("/threads/all", deleteAllThreads)       // Delete all threads
@@ -262,13 +272,18 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.GET("/links/export-all", exportAllThreadsLinks)        // Export links from all threads
 
 			// Video scraper endpoints
+			scraper.GET("/extract-video-url", extractVideoURLHandler)      // Extract direct video URL from a page
 			scraper.POST("/video", scrapeVideoHandler)                     // Scrape a video from URL
 			scraper.GET("/video/test", testScraperHandler)                 // Test scraper without saving (GET /video/test?url=...)
 			scraper.GET("/videos", getScrapedVideosHandler)                // Get all scraped videos
 			scraper.DELETE("/videos", deleteAllScrapedVideosHandler)       // Delete all scraped videos
-			scraper.DELETE("/videos/site/:siteType", deleteScrapedVideosBySiteTypeHandler) // Delete videos by site type
+			scraper.DELETE("/videos/site/:siteType", deleteScrapedVideosBySiteTypeHandler)    // Delete videos by site type
+			scraper.DELETE("/videos/source/:source", deleteScrapedVideosBySourceHandler)      // Delete videos by source hostname
 			scraper.POST("/videos/bulk-delete", bulkDeleteScrapedVideosHandler) // Bulk delete scraped videos by IDs
 			scraper.GET("/videos/:id", getScrapedVideoHandler)             // Get single scraped video
+			scraper.POST("/videos/:id/mark-downloaded", markScrapedVideoDownloadedHandler)     // Mark video as downloaded
+			scraper.DELETE("/videos/:id/mark-downloaded", unmarkScrapedVideoDownloadedHandler) // Remove downloaded mark
+			scraper.GET("/proxy-image", proxyScraperImageHandler)             // Proxy CDN image with correct Referer
 			scraper.GET("/videos/duplicates", findDuplicatesHandler)       // Find duplicate scraped videos
 			scraper.DELETE("/videos/duplicates", deleteDuplicatesHandler)  // Delete duplicate scraped videos
 
@@ -278,6 +293,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/tabs", createScraperTabHandler)                 // Create scraper tab
 			scraper.PUT("/tabs/:id", updateScraperTabHandler)              // Update scraper tab
 			scraper.DELETE("/tabs/:id", deleteScraperTabHandler)           // Delete scraper tab
+			scraper.POST("/detect-pagination", detectPaginationConfig)     // Detect pagination pattern from two page URLs
 
 			// Scraper jobs endpoints
 			scraper.GET("/jobs", getScraperJobsHandler)                    // Get scraper jobs (all or by tabId query param)
@@ -295,6 +311,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/luxuretv/scrape", startLuxureTVScrapeHandler)       // Start LuxureTV scrape by category
 			scraper.GET("/luxuretv/categories", getLuxureTVCategoriesHandler)  // Get available categories
 			scraper.GET("/luxuretv/videos", getLuxureTVVideosHandler)          // Get scraped LuxureTV videos
+			scraper.GET("/luxuretv/performers", getLuxureTVPerformersHandler)  // Get matched performers
+			scraper.GET("/luxuretv/tags", getLuxureTVTagsHandler)              // Get matched tags
 			scraper.GET("/luxuretv/stats", getLuxureTVStatsHandler)            // Get LuxureTV scraping stats
 			scraper.POST("/luxuretv/fetch-embeds", fetchLuxureTVEmbedIDsHandler) // Fetch embed IDs for videos
 
@@ -303,6 +321,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.GET("/sexuria/categories", getSexuriaCategoriesHandler)              // Get available categories
 			scraper.GET("/sexuria/items", getSexuriaItemsHandler)                        // Get scraped Sexuria items
 			scraper.GET("/sexuria/stats", getSexuriaStatsHandler)                        // Get Sexuria scraping stats
+			scraper.GET("/sexuria/item-categories", getSexuriaItemCategoriesHandler)      // Get distinct item categories
 			scraper.POST("/sexuria/item-details", getSexuriaItemDetailsHandler)          // Get detailed info for an item
 			scraper.GET("/sexuria/search-options", getSexuriaSearchOptionsHandler)       // Get advanced search options
 			scraper.POST("/sexuria/advanced-search", startSexuriaAdvancedSearchHandler)  // Start advanced search scrape
@@ -315,11 +334,34 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.POST("/sexuria/links/verify-all", verifyAllSexuriaLinks)             // Batch verify all links
 
 			// Rule34Video scraper endpoints
-			scraper.POST("/rule34video/scrape", startRule34VideoScrapeHandler)           // Start Rule34Video scrape (Straight filter)
-			scraper.GET("/rule34video/sort-options", getRule34VideoSortOptionsHandler)   // Get available sort options
-			scraper.GET("/rule34video/videos", getRule34VideoVideosHandler)              // Get scraped Rule34Video videos
-			scraper.GET("/rule34video/stats", getRule34VideoStatsHandler)                // Get Rule34Video scraping stats
-			scraper.GET("/rule34video/download-url", getRule34VideoDownloadURLHandler)   // Get download URL for a video
+			scraper.POST("/rule34video/scrape", startRule34VideoScrapeHandler)             // Start Rule34Video scrape
+			scraper.GET("/rule34video/sort-options", getRule34VideoSortOptionsHandler)     // Get available sort options
+			scraper.GET("/rule34video/filter-options", getRule34VideoFilterOptionsHandler) // Get all filter/sort options
+			scraper.GET("/rule34video/videos", getRule34VideoVideosHandler)                // Get scraped Rule34Video videos
+			scraper.GET("/rule34video/stats", getRule34VideoStatsHandler)                  // Get Rule34Video scraping stats
+			scraper.GET("/rule34video/download-url", getRule34VideoDownloadURLHandler)     // Get download URL for a video
+			scraper.GET("/rule34video/video-details", getRule34VideoDetailsHandler)        // Get full video details (tags, download URLs)
+			scraper.GET("/rule34video/categories", getRule34VideoCategoriesHandler)             // Get top categories from site
+			scraper.GET("/rule34video/local-categories", getRule34VideoLocalCategoriesHandler) // Distinct categories from local DB
+			scraper.GET("/rule34video/models", getRule34VideoModelsHandler)                    // Get top models/artists
+
+			// Motherless scraper endpoints
+			scraper.POST("/motherless/scrape", startMotherlessScrapeHandler)               // Start Motherless scrape by search URL
+			scraper.GET("/motherless/videos", getMotherlessVideosHandler)                  // Get scraped Motherless videos (paginated)
+			scraper.GET("/motherless/stats", getMotherlessStatsHandler)                    // Get Motherless scraping stats
+			scraper.GET("/motherless/search-terms", getMotherlessSearchTermsHandler)       // Get distinct search terms
+
+			// LeakVids scraper endpoints
+			scraper.POST("/leakvids/scrape", startLeakVidsScrapeHandler)                   // Start LeakVids scrape
+			scraper.GET("/leakvids/videos", getLeakVidsVideosHandler)                      // Get scraped LeakVids videos (paginated)
+			scraper.GET("/leakvids/stats", getLeakVidsStatsHandler)                        // Get LeakVids scraping stats
+
+			// HQPorner scraper endpoints
+			scraper.POST("/hqporner/scrape", startHQPornerScrapeHandler)                   // Start HQPorner scrape
+			scraper.GET("/hqporner/videos", getHQPornerVideosHandler)                      // Get scraped HQPorner videos (paginated)
+			scraper.GET("/hqporner/stats", getHQPornerStatsHandler)                        // Get HQPorner scraping stats
+			scraper.GET("/hqporner/performers", getHQPornerPerformersHandler)              // Get matched performers from HQPorner videos
+			scraper.GET("/hqporner/tags", getHQPornerTagsHandler)                          // Get matched tags from HQPorner videos
 		}
 
 		// Download Tracking endpoints
@@ -431,6 +473,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			dashboard.GET("/scrapers", getDashboardScrapers)              // Get scraper status cards
 			dashboard.GET("/running-tasks", getDashboardRunningTasks)     // Get currently running tasks
 			dashboard.POST("/quick-action/:action", executeDashboardQuickAction) // Execute quick action
+			dashboard.DELETE("/feed", clearDashboardFeed)                // Clear all feed items
 			dashboard.POST("/feed", addDashboardFeedItem)                 // Add feed item (internal)
 		}
 
@@ -441,6 +484,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			system.GET("/metrics", getSystemMetrics)           // Get time-series metrics
 			system.POST("/open-incognito", openInIncognito)    // Open URL in incognito browser window
 			system.POST("/open-login-helper", openLoginHelper) // Open login page for cookie capture
+			system.POST("/open-url", openUrl)                  // Open any URL in Firefox
 		}
 
 		// Notification endpoints
@@ -453,6 +497,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			notifications.POST("/:id/read", markNotificationAsRead)         // Mark notification as read
 			notifications.POST("/read-all", markAllNotificationsAsRead)     // Mark all as read
 			notifications.POST("/:id/archive", archiveNotification)         // Archive notification
+			notifications.DELETE("", deleteAllNotifications)                 // Delete all notifications
 			notifications.DELETE("/:id", deleteNotification)                // Delete notification
 			notifications.POST("/clean", deleteOldNotifications)            // Delete old notifications
 		}
@@ -498,6 +543,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			lists.POST("/:id/reorder", reorderListItemsHandler)  // Reorder items in list
 			lists.PUT("/:id/items/:itemId/notes", updateItemNotesHandler) // Update item notes
 		}
+
+		// Site health check
+		v1.GET("/sites/status", checkSiteHealth) // Check if an external site is reachable
 
 		// WebSocket endpoint
 		v1.GET("/ws", handleWebSocket)

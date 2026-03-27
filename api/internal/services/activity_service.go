@@ -23,6 +23,7 @@ type WebSocketHub interface {
 	BroadcastStatusUpdate(status *models.ActivityStatus)
 	BroadcastSystemEvent(event string)
 	BroadcastConsoleLog(log *models.ConsoleLog)
+	BroadcastLinkVerificationComplete(threadID int64, active, dead, expired, total int)
 }
 
 // Global WebSocket hub reference (will be set by API layer)
@@ -134,11 +135,13 @@ func (s *ActivityService) GetByID(id int64) (*models.Activity, error) {
 	// Details is stored as JSON string in the database
 	if len(detailsJSON) > 0 {
 		activity.Details = string(detailsJSON)
+		activity.UnmarshalDetails()
 	}
 
 	// Checkpoint is stored as JSON string in the database
 	if len(checkpointJSON) > 0 {
 		activity.Checkpoint = string(checkpointJSON)
+		activity.UnmarshalCheckpoint()
 	}
 
 	return &activity, nil
@@ -905,24 +908,24 @@ func (s *ActivityService) DeleteLog(id int64) error {
 func (s *ActivityService) GetStatusAll() (*models.ActivityStatus, error) {
 	status := &models.ActivityStatus{}
 
-	// Count by status
-	err := s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusRunning).Scan(&status.RunningTasks)
+	// Count all statuses in a single query
+	err := s.db.QueryRow(`
+		SELECT
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+		FROM activity_logs
+	`, models.TaskStatusRunning, models.TaskStatusPending, models.TaskStatusCompleted, models.TaskStatusFailed).Scan(
+		&status.RunningTasks,
+		&status.PendingTasks,
+		&status.CompletedTasks,
+		&status.FailedTasks,
+	)
 	if err != nil {
 		status.RunningTasks = 0
-	}
-
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusPending).Scan(&status.PendingTasks)
-	if err != nil {
 		status.PendingTasks = 0
-	}
-
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusCompleted).Scan(&status.CompletedTasks)
-	if err != nil {
 		status.CompletedTasks = 0
-	}
-
-	err = s.db.QueryRow("SELECT COUNT(*) FROM activity_logs WHERE status = ?", models.TaskStatusFailed).Scan(&status.FailedTasks)
-	if err != nil {
 		status.FailedTasks = 0
 	}
 
@@ -1045,6 +1048,18 @@ func (s *ActivityService) UpdateProgressLog(id int64, progress int, message stri
 	}
 	_, err := s.UpdateLog(id, update)
 	return err
+}
+
+// IsActivityPaused returns true when the given activity log has been paused by
+// the user. Safe to call with activityID = 0 (returns false).
+// Scraper services call this once per page to honour user pause requests.
+func IsActivityPaused(activityID int64) bool {
+	if activityID <= 0 {
+		return false
+	}
+	svc := NewActivityService()
+	activity, err := svc.GetByID(activityID)
+	return err == nil && activity.IsPaused
 }
 
 // Helper functions

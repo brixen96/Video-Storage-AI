@@ -214,18 +214,35 @@ func getPornHubVideosHandler(c *gin.Context) {
 	search := c.Query("search")
 	sortBy := c.DefaultQuery("sort", "discovered_at")
 	sortOrder := c.DefaultQuery("order", "desc")
+	durationFilter := c.DefaultQuery("duration_filter", "")
+	onlyDownloaded := c.DefaultQuery("downloaded_only", "false") == "true"
+	var includeTags, excludeTags []string
+	if v := c.Query("include_tags"); v != "" {
+		includeTags = strings.Split(v, ",")
+	}
+	if v := c.Query("exclude_tags"); v != "" {
+		excludeTags = strings.Split(v, ",")
+	}
+	minRating, _ := strconv.Atoi(c.DefaultQuery("min_rating", "0"))
+	minViews, _ := strconv.Atoi(c.DefaultQuery("min_views", "0"))
 
 	videoScraperSvc := ensureVideoScraperService()
 
 	// Use paginated query
 	result, err := videoScraperSvc.GetScrapedVideosPaginated(services.ScrapedVideosQuery{
-		Source:    "www.pornhub.com",
-		Keyword:   keyword,
-		Search:    search,
-		Page:      page,
-		Limit:     limit,
-		SortBy:    sortBy,
-		SortOrder: sortOrder,
+		Source:          "www.pornhub.com",
+		Keyword:         keyword,
+		Search:          search,
+		Page:            page,
+		Limit:           limit,
+		SortBy:          sortBy,
+		SortOrder:       sortOrder,
+		DurationFilter:  durationFilter,
+		OnlyDownloaded:  onlyDownloaded,
+		IncludeKeywords: includeTags,
+		ExcludeKeywords: excludeTags,
+		MinRating:       minRating,
+		MinViews:        minViews,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(

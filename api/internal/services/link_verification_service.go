@@ -3,9 +3,13 @@ package services
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +26,8 @@ type LinkVerificationService struct {
 	mu              sync.RWMutex
 	isRunning       bool
 	stats           VerificationStats
+	gofileToken     string
+	gofileTokenMu   sync.Mutex
 }
 
 // VerificationStats tracks verification statistics
@@ -106,25 +112,166 @@ func (s *LinkVerificationService) periodicVerification() {
 	}
 }
 
+// gofileContentIDRegex extracts the content ID from GoFile URLs like https://gofile.io/d/ThF0BU
+var gofileContentIDRegex = regexp.MustCompile(`gofile\.io/d/([a-zA-Z0-9]+)`)
+
+// getGoFileToken creates a guest account and returns an API token (cached)
+func (s *LinkVerificationService) getGoFileToken() (string, error) {
+	s.gofileTokenMu.Lock()
+	defer s.gofileTokenMu.Unlock()
+
+	if s.gofileToken != "" {
+		return s.gofileToken, nil
+	}
+
+	req, err := http.NewRequestWithContext(s.ctx, "POST", "https://api.gofile.io/accounts", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create gofile account request: %w", err)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create gofile guest account: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read gofile account response: %w", err)
+	}
+
+	var result struct {
+		Status string `json:"status"`
+		Data   struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return "", fmt.Errorf("failed to parse gofile account response: %w", err)
+	}
+
+	if result.Status != "ok" || result.Data.Token == "" {
+		return "", fmt.Errorf("gofile account creation failed: status=%s", result.Status)
+	}
+
+	s.gofileToken = result.Data.Token
+	log.Printf("🔗 GoFile guest token acquired")
+	return s.gofileToken, nil
+}
+
+// verifyGoFileLink uses GoFile's API to check if content exists
+func (s *LinkVerificationService) verifyGoFileLink(link *models.ScrapedDownloadLink) (string, error) {
+	matches := gofileContentIDRegex.FindStringSubmatch(link.URL)
+	if len(matches) < 2 {
+		return "dead", fmt.Errorf("could not extract content ID from GoFile URL: %s", link.URL)
+	}
+	contentID := matches[1]
+
+	token, err := s.getGoFileToken()
+	if err != nil {
+		log.Printf("⚠️ GoFile token error, falling back to HEAD check: %v", err)
+		return s.verifyLinkWithHEAD(link)
+	}
+
+	apiURL := fmt.Sprintf("https://api.gofile.io/contents/%s", contentID)
+	req, err := http.NewRequestWithContext(s.ctx, "GET", apiURL, nil)
+	if err != nil {
+		return "dead", fmt.Errorf("failed to create gofile API request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Website-Token", "4fd6sg89d7s6")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "dead", nil
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "dead", nil
+	}
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return "dead", nil
+	}
+
+	// GoFile API returns "ok" for existing content, error statuses for dead content
+	if result.Status == "ok" {
+		return "active", nil
+	}
+
+	// Any non-ok status means the content is dead/removed
+	// Common: "error-notFound", "error-notPublic", etc.
+	log.Printf("🔗 GoFile content %s status: %s", contentID, result.Status)
+
+	// If token was rejected (expired), clear it and retry once
+	if result.Status == "error-notAuthorized" {
+		s.gofileTokenMu.Lock()
+		s.gofileToken = ""
+		s.gofileTokenMu.Unlock()
+
+		token, err = s.getGoFileToken()
+		if err != nil {
+			return "dead", nil
+		}
+
+		req2, err := http.NewRequestWithContext(s.ctx, "GET", apiURL, nil)
+		if err != nil {
+			return "dead", nil
+		}
+		req2.Header.Set("Authorization", "Bearer "+token)
+		req2.Header.Set("X-Website-Token", "4fd6sg89d7s6")
+
+		resp2, err := s.httpClient.Do(req2)
+		if err != nil {
+			return "dead", nil
+		}
+		defer resp2.Body.Close()
+
+		bodyBytes2, _ := io.ReadAll(resp2.Body)
+		var result2 struct {
+			Status string `json:"status"`
+		}
+		if json.Unmarshal(bodyBytes2, &result2) == nil && result2.Status == "ok" {
+			return "active", nil
+		}
+	}
+
+	return "dead", nil
+}
+
 // VerifyLink checks if a single download link is still active
 func (s *LinkVerificationService) VerifyLink(link *models.ScrapedDownloadLink) (string, error) {
-	// Create HEAD request
+	provider := strings.ToLower(link.Provider)
+
+	// GoFile is a JavaScript SPA - server returns only HTML shell,
+	// error content is rendered client-side. Must use their API instead.
+	if provider == "gofile" {
+		return s.verifyGoFileLink(link)
+	}
+
+	return s.verifyLinkWithHEAD(link)
+}
+
+// verifyLinkWithHEAD uses a HEAD request for efficient link verification
+func (s *LinkVerificationService) verifyLinkWithHEAD(link *models.ScrapedDownloadLink) (string, error) {
 	req, err := http.NewRequestWithContext(s.ctx, "HEAD", link.URL, nil)
 	if err != nil {
 		return "dead", fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set user agent to avoid being blocked
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-	// Send request
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return "dead", nil // Network error or timeout = dead link
 	}
 	defer resp.Body.Close()
 
-	// Determine status based on HTTP status code
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return "active", nil
@@ -133,7 +280,6 @@ func (s *LinkVerificationService) VerifyLink(link *models.ScrapedDownloadLink) (
 	case resp.StatusCode == 410: // Gone
 		return "expired", nil
 	case resp.StatusCode == 403 || resp.StatusCode == 401:
-		// Forbidden/Unauthorized - might need auth, mark as unknown
 		return "active", nil // Assume active but requires auth
 	default:
 		return "dead", nil
@@ -165,7 +311,7 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 
 	// Get all links for the thread
 	rows, err := s.db.Query(`
-		SELECT id, url, status
+		SELECT id, url, provider, status
 		FROM scraped_download_links
 		WHERE thread_id = ?
 	`, threadID)
@@ -176,18 +322,20 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 	defer rows.Close()
 
 	var links []struct {
-		ID     int64
-		URL    string
-		Status string
+		ID       int64
+		URL      string
+		Provider string
+		Status   string
 	}
 
 	for rows.Next() {
 		var link struct {
-			ID     int64
-			URL    string
-			Status string
+			ID       int64
+			URL      string
+			Provider string
+			Status   string
 		}
-		if err := rows.Scan(&link.ID, &link.URL, &link.Status); err != nil {
+		if err := rows.Scan(&link.ID, &link.URL, &link.Provider, &link.Status); err != nil {
 			continue
 		}
 		links = append(links, link)
@@ -222,8 +370,9 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 
 		// Verify the link
 		linkModel := &models.ScrapedDownloadLink{
-			ID:  link.ID,
-			URL: link.URL,
+			ID:       link.ID,
+			URL:      link.URL,
+			Provider: link.Provider,
 		}
 
 		status, err := s.VerifyLink(linkModel)
@@ -260,6 +409,11 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 		activeCount, deadCount, expiredCount, len(links))
 	s.activityService.CompleteTask(int64(activity.ID), resultMsg)
 
+	// Broadcast verification complete via WebSocket
+	if wsHub != nil {
+		wsHub.BroadcastLinkVerificationComplete(threadID, activeCount, deadCount, expiredCount, len(links))
+	}
+
 	// Update stats
 	s.mu.Lock()
 	s.stats.TotalChecked += int64(len(links))
@@ -276,7 +430,7 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 func (s *LinkVerificationService) VerifyOldLinks(cutoffTime time.Time, limit int) error {
 	// Get links that haven't been checked since cutoffTime
 	rows, err := s.db.Query(`
-		SELECT id, thread_id, url, status
+		SELECT id, thread_id, url, provider, status
 		FROM scraped_download_links
 		WHERE last_checked_at IS NULL OR last_checked_at < ?
 		ORDER BY last_checked_at ASC NULLS FIRST
@@ -290,7 +444,7 @@ func (s *LinkVerificationService) VerifyOldLinks(cutoffTime time.Time, limit int
 	count := 0
 	for rows.Next() {
 		var link models.ScrapedDownloadLink
-		if err := rows.Scan(&link.ID, &link.ThreadID, &link.URL, &link.Status); err != nil {
+		if err := rows.Scan(&link.ID, &link.ThreadID, &link.URL, &link.Provider, &link.Status); err != nil {
 			continue
 		}
 
@@ -324,8 +478,14 @@ func (s *LinkVerificationService) GetStats() VerificationStats {
 	return s.stats
 }
 
+// ThreadLinkStats contains link statistics and last verification time for a thread
+type ThreadLinkStats struct {
+	Stats       map[string]int `json:"stats"`
+	LastChecked *time.Time     `json:"last_checked,omitempty"`
+}
+
 // GetThreadLinkStats returns link statistics for a specific thread
-func (s *LinkVerificationService) GetThreadLinkStats(threadID int64) (map[string]int, error) {
+func (s *LinkVerificationService) GetThreadLinkStats(threadID int64) (*ThreadLinkStats, error) {
 	rows, err := s.db.Query(`
 		SELECT status, COUNT(*) as count
 		FROM scraped_download_links
@@ -337,17 +497,43 @@ func (s *LinkVerificationService) GetThreadLinkStats(threadID int64) (map[string
 	}
 	defer rows.Close()
 
-	stats := make(map[string]int)
+	result := &ThreadLinkStats{
+		Stats: make(map[string]int),
+	}
 	for rows.Next() {
 		var status string
 		var count int
 		if err := rows.Scan(&status, &count); err != nil {
 			continue
 		}
-		stats[status] = count
+		result.Stats[status] = count
 	}
 
-	return stats, nil
+	// Get last verification time (scan as string since SQLite MAX() returns TEXT)
+	var lastCheckedStr sql.NullString
+	s.db.QueryRow(`
+		SELECT MAX(last_checked_at) FROM scraped_download_links WHERE thread_id = ?
+	`, threadID).Scan(&lastCheckedStr)
+	if lastCheckedStr.Valid && lastCheckedStr.String != "" {
+		// Try multiple time formats SQLite might use
+		formats := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02T15:04:05Z07:00",
+			"2006-01-02 15:04:05.999999999-07:00",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05",
+		}
+		for _, format := range formats {
+			if t, err := time.Parse(format, lastCheckedStr.String); err == nil {
+				result.LastChecked = &t
+				break
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // ProviderHealth represents health statistics for a download provider
@@ -512,13 +698,35 @@ type SexuriaLinkResult struct {
 }
 
 // VerifySexuriaLink verifies a single Sexuria download link
-func (s *LinkVerificationService) VerifySexuriaLink(linkID int64, url string) (*SexuriaLinkResult, error) {
+func (s *LinkVerificationService) VerifySexuriaLink(linkID int64, url string, provider ...string) (*SexuriaLinkResult, error) {
 	result := &SexuriaLinkResult{
 		LinkID: linkID,
 		URL:    url,
 	}
 
-	// Create HEAD request first for efficiency
+	// Determine provider
+	prov := ""
+	if len(provider) > 0 {
+		prov = provider[0]
+	}
+
+	// GoFile uses API-based verification
+	if strings.ToLower(prov) == "gofile" {
+		link := &models.ScrapedDownloadLink{
+			ID:       linkID,
+			URL:      url,
+			Provider: prov,
+		}
+		status, err := s.verifyGoFileLink(link)
+		if err != nil {
+			result.Status = "dead"
+			return result, nil
+		}
+		result.Status = status
+		return result, nil
+	}
+
+	// Default: HEAD request for efficiency
 	req, err := http.NewRequestWithContext(s.ctx, "HEAD", url, nil)
 	if err != nil {
 		result.Status = "dead"
@@ -536,7 +744,6 @@ func (s *LinkVerificationService) VerifySexuriaLink(linkID int64, url string) (*
 
 	result.StatusCode = resp.StatusCode
 
-	// Determine status based on HTTP status code
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		result.Status = "active"
@@ -545,10 +752,9 @@ func (s *LinkVerificationService) VerifySexuriaLink(linkID int64, url string) (*
 	case resp.StatusCode == 410:
 		result.Status = "expired"
 	case resp.StatusCode == 403 || resp.StatusCode == 401:
-		// Many file hosts return 403 for valid links - consider active
 		result.Status = "active"
 	case resp.StatusCode >= 500:
-		result.Status = "unknown" // Server error, try again later
+		result.Status = "unknown"
 	default:
 		result.Status = "dead"
 	}
@@ -615,7 +821,7 @@ func (s *LinkVerificationService) VerifySexuriaItemLinks(videoID int64) (map[str
 			time.Sleep(500 * time.Millisecond)
 		}
 
-		result, err := s.VerifySexuriaLink(link.ID, link.URL)
+		result, err := s.VerifySexuriaLink(link.ID, link.URL, link.Provider)
 		if err != nil {
 			log.Printf("Error verifying Sexuria link %d: %v", link.ID, err)
 			continue
@@ -668,7 +874,7 @@ func (s *LinkVerificationService) VerifyAllSexuriaLinks(limit int, cutoffDays in
 			time.Sleep(800 * time.Millisecond)
 		}
 
-		result, err := s.VerifySexuriaLink(link.ID, link.URL)
+		result, err := s.VerifySexuriaLink(link.ID, link.URL, link.Provider)
 		if err != nil {
 			log.Printf("Error verifying Sexuria link %d: %v", link.ID, err)
 			continue

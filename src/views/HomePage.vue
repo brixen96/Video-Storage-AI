@@ -16,91 +16,134 @@
 
 		<!-- Stats Row -->
 		<div class="stats-row">
-			<DashboardStatCard
-				:value="stats.total_videos"
-				label="Local Videos"
-				icon="video"
-				color="blue"
-			/>
-			<DashboardStatCard
-				:value="stats.total_scraped_videos"
-				label="Scraped Videos"
-				icon="download"
-				color="purple"
-			/>
-			<DashboardStatCard
-				:value="stats.total_threads"
-				label="Threads"
-				icon="comments"
-				color="pink"
-			/>
-			<DashboardStatCard
-				:value="stats.total_performers"
-				label="Performers"
-				icon="users"
-				color="green"
-			/>
-			<DashboardStatCard
-				:value="stats.running_tasks"
-				label="Running"
-				icon="spinner"
-				color="yellow"
-			/>
-			<DashboardStatCard
-				:value="stats.recent_new_items"
-				label="New (24h)"
-				icon="bell"
-				color="orange"
-			/>
+			<DashboardStatCard :value="stats.total_videos" label="Local Videos" icon="video" color="blue" to="/videos" />
+			<DashboardStatCard :value="stats.total_scraped_videos" label="Scraped Videos" icon="film" color="purple" to="/scraper" />
+			<DashboardStatCard :value="stats.total_downloaded_scraped" label="Downloaded" icon="download" color="yellow" to="/scraper" />
+			<DashboardStatCard :value="stats.total_threads" label="Threads" icon="comments" color="pink" to="/scraper" />
+			<DashboardStatCard :value="stats.total_performers" label="Performers" icon="users" color="green" to="/performers" />
+			<DashboardStatCard :value="stats.recent_new_items" label="New (24h)" icon="bell" color="orange" />
 		</div>
 
-		<!-- Main Content -->
-		<div class="dashboard-content">
-			<!-- Left Column -->
-			<div class="left-column">
-				<RunningTasksWidget :tasks="runningTasks" />
-				<DashboardFeed
-					:items="feedItems"
-					:hasMore="feedHasMore"
-					@load-more="loadMoreFeed"
-				/>
-			</div>
+		<!-- Top Bar: Running Tasks + Active Scrapers -->
+		<div class="top-bar">
+			<!-- Running Tasks (compact) -->
+			<RunningTasksWidget :tasks="runningTasks" compact />
 
-			<!-- Right Column -->
-			<div class="right-column">
-				<!-- Enabled Scrapers Section -->
-				<div class="scrapers-section" v-if="enabledScrapers.length > 0">
-					<div class="section-header">
-						<h3>
-							<font-awesome-icon :icon="['fas', 'robot']" class="me-2" />
-							Active Auto-Update Scrapers
-						</h3>
-					</div>
-					<div class="scrapers-list">
-						<ScraperStatusCard
-							v-for="scraper in enabledScrapers"
-							:key="scraper.scraper_type"
-							:config="scraper"
-							:isChecking="checkingScrapers[scraper.scraper_type]"
-							@toggle="(enabled) => toggleScraper(scraper.scraper_type, enabled)"
-							@check-now="checkScraperNow(scraper.scraper_type)"
-							@settings="openScraperSettings(scraper)"
-						/>
+			<!-- Active Scrapers (compact inline list) -->
+			<div class="active-scrapers-bar" v-if="enabledScrapers.length > 0">
+				<span class="bar-label">
+					<font-awesome-icon :icon="['fas', 'robot']" />
+					Active Scrapers
+				</span>
+				<div class="scraper-chips-row">
+					<div
+						v-for="scraper in enabledScrapers"
+						:key="scraper.scraper_type"
+						class="scraper-chip"
+					>
+						<span class="chip-dot" :class="scraper.is_checking ? 'checking' : 'active'"></span>
+						<span class="chip-name">{{ scraper.display_name || scraper.scraper_type }}</span>
+						<button class="chip-btn" @click="checkScraperNow(scraper.scraper_type)" :disabled="checkingScrapers[scraper.scraper_type]" title="Check now">
+							<font-awesome-icon :icon="['fas', checkingScrapers[scraper.scraper_type] ? 'spinner' : 'sync']" :spin="checkingScrapers[scraper.scraper_type]" />
+						</button>
+						<button class="chip-btn" @click="openScraperSettings(scraper)" title="Settings">
+							<font-awesome-icon :icon="['fas', 'cog']" />
+						</button>
 					</div>
 				</div>
+			</div>
+			<div class="active-scrapers-bar" v-else>
+				<span class="bar-label muted">
+					<font-awesome-icon :icon="['fas', 'robot']" />
+					No Active Scrapers
+				</span>
+				<router-link to="/scraper" class="btn-configure">Configure</router-link>
+			</div>
+		</div>
 
-				<!-- No Active Scrapers Message -->
-				<div class="no-scrapers-card" v-else>
-					<font-awesome-icon :icon="['fas', 'robot']" class="empty-icon" />
-					<h4>No Active Scrapers</h4>
-					<p>Enable auto-update on scrapers from the Scrapers page to see them here.</p>
-					<router-link to="/scrapers" class="btn btn-primary btn-sm">
-						<font-awesome-icon :icon="['fas', 'cog']" class="me-2" />
-						Configure Scrapers
-					</router-link>
+		<!-- Video Shelves -->
+		<div v-if="recentVideos.length > 0 || mostWatched.length > 0" class="video-shelves">
+			<!-- Recently Added -->
+			<div v-if="recentVideos.length > 0" class="video-shelf">
+				<div class="shelf-header">
+					<span class="shelf-title">
+						<font-awesome-icon :icon="['fas', 'clock']" class="me-2" />
+						Recently Added
+					</span>
+					<router-link to="/videos" class="shelf-more">View all</router-link>
+				</div>
+				<div class="shelf-track">
+					<div
+						v-for="video in recentVideos"
+						:key="video.id"
+						class="shelf-card"
+						@click="openVideo(video)"
+					>
+						<div class="shelf-thumb">
+							<img v-if="video.thumbnail_path" :src="getShelfThumb(video)" loading="lazy" />
+							<div v-else class="shelf-thumb-placeholder">
+								<font-awesome-icon :icon="['fas', 'video']" />
+							</div>
+							<div v-if="video.duration" class="shelf-duration">{{ formatDuration(video.duration) }}</div>
+						</div>
+						<div class="shelf-info">
+							<div class="shelf-video-title" :title="video.title">{{ video.title }}</div>
+							<div v-if="video.performers && video.performers.length" class="shelf-performer">
+								{{ video.performers[0].name }}
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Most Watched -->
+			<div v-if="mostWatched.length > 0" class="video-shelf">
+				<div class="shelf-header">
+					<span class="shelf-title">
+						<font-awesome-icon :icon="['fas', 'eye']" class="me-2" />
+						Most Watched
+					</span>
+					<router-link to="/videos?sort=play_count" class="shelf-more">View all</router-link>
+				</div>
+				<div class="shelf-track">
+					<div
+						v-for="video in mostWatched"
+						:key="video.id"
+						class="shelf-card"
+						@click="openVideo(video)"
+					>
+						<div class="shelf-thumb">
+							<img v-if="video.thumbnail_path" :src="getShelfThumb(video)" loading="lazy" />
+							<div v-else class="shelf-thumb-placeholder">
+								<font-awesome-icon :icon="['fas', 'video']" />
+							</div>
+							<div v-if="video.duration" class="shelf-duration">{{ formatDuration(video.duration) }}</div>
+							<div class="shelf-play-count">
+								<font-awesome-icon :icon="['fas', 'eye']" class="me-1" />
+								{{ video.play_count }}
+							</div>
+						</div>
+						<div class="shelf-info">
+							<div class="shelf-video-title" :title="video.title">{{ video.title }}</div>
+							<div v-if="video.performers && video.performers.length" class="shelf-performer">
+								{{ video.performers[0].name }}
+							</div>
+						</div>
+					</div>
 				</div>
 			</div>
 		</div>
+
+		<!-- Activity Feed — Full Width -->
+		<DashboardFeed
+			:items="feedItems"
+			:hasMore="feedHasMore"
+			:scraperTypes="feedScraperTypes"
+			:activeFilter="feedScraperFilter"
+			@load-more="loadMoreFeed"
+			@filter-change="onFeedFilterChange"
+			@clear-feed="clearFeed"
+		/>
 
 		<!-- Scraper Settings Modal -->
 		<div v-if="selectedScraper" class="modal-overlay" @click.self="selectedScraper = null">
@@ -117,23 +160,11 @@
 				<div class="modal-body">
 					<div class="setting-row">
 						<label>Check Interval (minutes)</label>
-						<input
-							type="number"
-							v-model.number="scraperSettings.interval_minutes"
-							min="5"
-							max="1440"
-							class="form-control"
-						/>
+						<input type="number" v-model.number="scraperSettings.interval_minutes" min="5" max="1440" class="form-control" />
 					</div>
 					<div class="setting-row">
 						<label>Max Pages to Check</label>
-						<input
-							type="number"
-							v-model.number="scraperSettings.max_pages_to_check"
-							min="1"
-							max="20"
-							class="form-control"
-						/>
+						<input type="number" v-model.number="scraperSettings.max_pages_to_check" min="1" max="20" class="form-control" />
 					</div>
 				</div>
 				<div class="modal-footer">
@@ -146,11 +177,12 @@
 </template>
 
 <script>
-import { dashboardAPI, autoUpdateAPI } from '@/services/api'
+import { dashboardAPI, autoUpdateAPI, videosAPI, getAssetURL } from '@/services/api'
+import { useFormatters } from '@/composables/useFormatters'
+import websocketService from '@/services/websocket'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DashboardFeed from '@/components/dashboard/DashboardFeed.vue'
 import RunningTasksWidget from '@/components/dashboard/RunningTasksWidget.vue'
-import ScraperStatusCard from '@/components/dashboard/ScraperStatusCard.vue'
 
 export default {
 	name: 'HomePage',
@@ -158,7 +190,6 @@ export default {
 		DashboardStatCard,
 		DashboardFeed,
 		RunningTasksWidget,
-		ScraperStatusCard,
 	},
 	data() {
 		return {
@@ -166,6 +197,7 @@ export default {
 			stats: {
 				total_videos: 0,
 				total_scraped_videos: 0,
+				total_downloaded_scraped: 0,
 				total_threads: 0,
 				total_performers: 0,
 				watched_threads: 0,
@@ -173,10 +205,14 @@ export default {
 				pending_tasks: 0,
 				recent_new_items: 0,
 			},
+			recentVideos: [],
+			mostWatched: [],
 			feedItems: [],
 			feedOffset: 0,
 			feedLimit: 20,
 			feedTotal: 0,
+			feedScraperFilter: '',
+			feedScraperTypes: [],
 			runningTasks: [],
 			scraperConfigs: [],
 			checkingScrapers: {},
@@ -186,7 +222,12 @@ export default {
 				max_pages_to_check: 3,
 			},
 			refreshInterval: null,
+			wsUnsubscribers: [],
 		}
+	},
+	created() {
+		const { formatDuration } = useFormatters()
+		this.formatDuration = formatDuration
 	},
 	computed: {
 		feedHasMore() {
@@ -198,16 +239,32 @@ export default {
 	},
 	async mounted() {
 		await this.loadAll()
-		// Auto-refresh every 30 seconds
 		this.refreshInterval = setInterval(() => {
 			this.loadRunningTasks()
 			this.loadStats()
 		}, 30000)
+
+		websocketService.connect()
+		this.wsUnsubscribers.push(
+			websocketService.on('feed_update', () => {
+				this.loadFeed()
+				this.loadStats()
+				this.loadScraperConfigs()
+				this.loadRunningTasks()
+			}),
+			websocketService.on('activity_update', () => {
+				this.loadRunningTasks()
+			}),
+			websocketService.on('status_update', () => {
+				this.loadRunningTasks()
+				this.loadStats()
+			})
+		)
 	},
 	beforeUnmount() {
-		if (this.refreshInterval) {
-			clearInterval(this.refreshInterval)
-		}
+		if (this.refreshInterval) clearInterval(this.refreshInterval)
+		this.wsUnsubscribers.forEach((unsub) => unsub())
+		this.wsUnsubscribers = []
 	},
 	methods: {
 		async loadAll() {
@@ -216,95 +273,80 @@ export default {
 				this.loadFeed(),
 				this.loadRunningTasks(),
 				this.loadScraperConfigs(),
+				this.loadVideoShelves(),
 			])
 		},
 		async refreshAll() {
 			this.isRefreshing = true
-			try {
-				await this.loadAll()
-			} finally {
-				this.isRefreshing = false
-			}
+			try { await this.loadAll() }
+			finally { this.isRefreshing = false }
 		},
 		async loadStats() {
 			try {
 				const response = await dashboardAPI.getStats()
-				if (response?.data) {
-					this.stats = response.data
-				}
-			} catch (error) {
-				console.error('Failed to load dashboard stats:', error)
-			}
+				if (response?.data) this.stats = response.data
+			} catch (error) { console.error('Failed to load stats:', error) }
 		},
 		async loadFeed() {
 			try {
-				const response = await dashboardAPI.getFeed(this.feedLimit, this.feedOffset)
+				const response = await dashboardAPI.getFeed(this.feedLimit, this.feedOffset, this.feedScraperFilter)
 				if (response) {
 					this.feedItems = response.data || []
 					this.feedTotal = response.pagination?.total || 0
+					if (response.scraper_types) this.feedScraperTypes = response.scraper_types
 				}
-			} catch (error) {
-				console.error('Failed to load feed:', error)
-			}
+			} catch (error) { console.error('Failed to load feed:', error) }
 		},
 		async loadMoreFeed() {
 			this.feedOffset += this.feedLimit
 			try {
-				const response = await dashboardAPI.getFeed(this.feedLimit, this.feedOffset)
-				if (response?.data) {
-					this.feedItems = [...this.feedItems, ...response.data]
-				}
-			} catch (error) {
-				console.error('Failed to load more feed items:', error)
-			}
+				const response = await dashboardAPI.getFeed(this.feedLimit, this.feedOffset, this.feedScraperFilter)
+				if (response?.data) this.feedItems = [...this.feedItems, ...response.data]
+			} catch (error) { console.error('Failed to load more feed:', error) }
+		},
+		async onFeedFilterChange(scraperType) {
+			this.feedScraperFilter = scraperType
+			this.feedOffset = 0
+			await this.loadFeed()
+		},
+		async clearFeed() {
+			try {
+				await dashboardAPI.clearFeed()
+				this.feedItems = []
+				this.feedTotal = 0
+				this.feedOffset = 0
+			} catch (error) { console.error('Failed to clear feed:', error) }
 		},
 		async loadRunningTasks() {
 			try {
 				const response = await dashboardAPI.getRunningTasks()
-				if (response?.data) {
-					this.runningTasks = response.data
-				}
-			} catch (error) {
-				console.error('Failed to load running tasks:', error)
-			}
+				if (response?.data) this.runningTasks = response.data
+			} catch (error) { console.error('Failed to load tasks:', error) }
 		},
 		async loadScraperConfigs() {
 			try {
 				const response = await dashboardAPI.getScrapers()
-				if (response?.data) {
-					this.scraperConfigs = response.data
-				}
-			} catch (error) {
-				console.error('Failed to load scraper configs:', error)
-			}
+				if (response?.data) this.scraperConfigs = response.data
+			} catch (error) { console.error('Failed to load scrapers:', error) }
 		},
 		async toggleScraper(scraperType, enabled) {
 			try {
 				await autoUpdateAPI.toggle(scraperType, enabled)
-				// Update local state
 				const config = this.scraperConfigs.find((c) => c.scraper_type === scraperType)
-				if (config) {
-					config.enabled = enabled
-				}
-			} catch (error) {
-				console.error('Failed to toggle scraper:', error)
-			}
+				if (config) config.enabled = enabled
+			} catch (error) { console.error('Failed to toggle scraper:', error) }
 		},
 		async checkScraperNow(scraperType) {
 			this.checkingScrapers = { ...this.checkingScrapers, [scraperType]: true }
 			try {
 				await autoUpdateAPI.checkNow(scraperType)
-				// Reload after a short delay to get updated stats
 				setTimeout(() => {
 					this.loadScraperConfigs()
 					this.loadFeed()
 					this.loadStats()
 				}, 2000)
-			} catch (error) {
-				console.error('Failed to check scraper:', error)
-			} finally {
-				this.checkingScrapers = { ...this.checkingScrapers, [scraperType]: false }
-			}
+			} catch (error) { console.error('Failed to check scraper:', error) }
+			finally { this.checkingScrapers = { ...this.checkingScrapers, [scraperType]: false } }
 		},
 		openScraperSettings(scraper) {
 			this.selectedScraper = scraper
@@ -317,18 +359,40 @@ export default {
 			if (!this.selectedScraper) return
 			try {
 				await autoUpdateAPI.updateConfig(this.selectedScraper.scraper_type, this.scraperSettings)
-				// Update local state
-				const config = this.scraperConfigs.find(
-					(c) => c.scraper_type === this.selectedScraper.scraper_type
-				)
+				const config = this.scraperConfigs.find((c) => c.scraper_type === this.selectedScraper.scraper_type)
 				if (config) {
 					config.interval_minutes = this.scraperSettings.interval_minutes
 					config.max_pages_to_check = this.scraperSettings.max_pages_to_check
 				}
 				this.selectedScraper = null
-			} catch (error) {
-				console.error('Failed to save scraper settings:', error)
-			}
+			} catch (error) { console.error('Failed to save settings:', error) }
+		},
+		async loadVideoShelves() {
+			try {
+				const [recentRes, watchedRes] = await Promise.allSettled([
+					videosAPI.getAll({ sort_by: 'created_at', sort_order: 'desc', limit: 10, page: 1 }),
+					videosAPI.getAll({ sort_by: 'play_count', sort_order: 'desc', limit: 10, page: 1 }),
+				])
+				if (recentRes.status === 'fulfilled') {
+					const raw = recentRes.value
+					this.recentVideos = (Array.isArray(raw) ? raw : raw?.data ?? []).slice(0, 10)
+				}
+				if (watchedRes.status === 'fulfilled') {
+					const raw = watchedRes.value
+					const videos = (Array.isArray(raw) ? raw : raw?.data ?? [])
+					// Only show most-watched shelf if there are actually watched videos
+					this.mostWatched = videos.filter(v => v.play_count > 0).slice(0, 10)
+				}
+			} catch (error) { console.error('Failed to load video shelves:', error) }
+		},
+		getShelfThumb(video) {
+			if (!video.thumbnail_path) return ''
+			if (video.thumbnail_path.startsWith('http')) return video.thumbnail_path
+			return getAssetURL(video.thumbnail_path)
+		},
+		openVideo(video) {
+			const route = this.$router.resolve(`/watch/${video.id}`)
+			window.open(route.href, '_blank')
 		},
 	},
 }

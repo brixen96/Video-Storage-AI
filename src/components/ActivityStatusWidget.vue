@@ -5,7 +5,7 @@
 			<span class="status-label">{{ statusLabel }}</span>
 			<span v-if="status.running_tasks > 0" class="badge bg-warning text-dark ms-2">{{ status.running_tasks }}</span>
 			<span v-if="wsConnected" class="ws-indicator" title="Real-time updates active">
-				<i class="bi bi-broadcast"></i>
+				<font-awesome-icon :icon="['fas', 'signal']" />
 			</span>
 		</div>
 
@@ -33,7 +33,7 @@
 
 				<!-- Idle State -->
 				<div v-else class="text-center">
-					<i class="bi bi-check-circle fs-3"></i>
+					<font-awesome-icon :icon="['fas', 'check-circle']" size="3x" />
 					<p class="text-primary">{{ idleMessage }}</p>
 				</div>
 
@@ -79,6 +79,7 @@
 <script>
 import { activityAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
+import { debounce } from '@/utils/debounce'
 
 export default {
 	name: 'ActivityStatusWidget',
@@ -91,7 +92,12 @@ export default {
 			unsubscribeWs: null,
 			unsubscribeStatus: null,
 			unsubscribeConnection: null,
+			debouncedLoadStatus: null,
 		}
+	},
+	created() {
+		// Create debounced version once so it shares the timer across calls
+		this.debouncedLoadStatus = debounce(() => this.loadStatus(), 2000)
 	},
 	computed: {
 		statusColor() {
@@ -153,8 +159,8 @@ export default {
 			if (this.currentActivity && this.currentActivity.id === data.id) {
 				this.currentActivity = data
 			}
-			// Reload status to get updated counts
-			this.loadStatus()
+			// Reload status to get updated counts (debounced — scraper can fire many updates per second)
+			this.debouncedLoadStatus()
 		})
 
 		// Check initial connection state
@@ -165,9 +171,6 @@ export default {
 		if (this.unsubscribeWs) this.unsubscribeWs()
 		if (this.unsubscribeStatus) this.unsubscribeStatus()
 		if (this.unsubscribeConnection) this.unsubscribeConnection()
-
-		// Disconnect WebSocket
-		websocketService.disconnect()
 	},
 	methods: {
 		async loadStatus() {

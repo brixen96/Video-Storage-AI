@@ -1,5 +1,25 @@
 <template>
-	<div class="running-tasks-widget">
+	<!-- Compact inline bar mode (used in dashboard top-bar) -->
+	<div v-if="compact" class="rtw-compact">
+		<span class="rtw-compact-label">
+			<font-awesome-icon v-if="tasks.length > 0" :icon="['fas', 'spinner']" spin />
+			<font-awesome-icon v-else :icon="['fas', 'check-circle']" class="rtw-idle-icon" />
+			Tasks
+		</span>
+		<div v-if="tasks.length > 0" class="rtw-compact-chips">
+			<div v-for="task in tasks" :key="task.id" class="rtw-compact-chip">
+				<span class="rtw-chip-name">{{ formatTaskType(task.task_type) }}</span>
+				<div class="rtw-chip-bar">
+					<div class="rtw-chip-fill" :style="{ width: (task.progress || 0) + '%' }"></div>
+				</div>
+				<span class="rtw-chip-pct">{{ task.progress || 0 }}%</span>
+			</div>
+		</div>
+		<span v-else class="rtw-compact-idle">All systems idle</span>
+	</div>
+
+	<!-- Full panel mode -->
+	<div v-else class="running-tasks-widget">
 		<div class="widget-header">
 			<h3>
 				<font-awesome-icon v-if="tasks.length > 0" :icon="['fas', 'spinner']" spin class="me-2" />
@@ -35,6 +55,10 @@ export default {
 		tasks: {
 			type: Array,
 			default: () => [],
+		},
+		compact: {
+			type: Boolean,
+			default: false,
 		},
 	},
 	methods: {
@@ -159,5 +183,85 @@ export default {
 
 .text-success {
 	color: #4ade80 !important;
+}
+
+/* Compact inline bar */
+.rtw-compact {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	background: rgba(30, 30, 40, 0.6);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 10px;
+	padding: 0.625rem 1rem;
+	white-space: nowrap;
+	flex-shrink: 0;
+}
+
+.rtw-compact-label {
+	font-size: 0.75rem;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.5);
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+}
+
+.rtw-idle-icon {
+	color: #4ade80;
+}
+
+.rtw-compact-idle {
+	font-size: 0.75rem;
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.rtw-compact-chips {
+	display: flex;
+	gap: 0.5rem;
+	overflow: hidden;
+}
+
+.rtw-compact-chip {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	background: rgba(59, 130, 246, 0.12);
+	border: 1px solid rgba(59, 130, 246, 0.2);
+	border-radius: 20px;
+	padding: 0.2rem 0.5rem 0.2rem 0.625rem;
+	font-size: 0.72rem;
+	max-width: 200px;
+}
+
+.rtw-chip-name {
+	color: #93c5fd;
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex-shrink: 0;
+}
+
+.rtw-chip-bar {
+	width: 50px;
+	height: 4px;
+	background: rgba(255, 255, 255, 0.1);
+	border-radius: 2px;
+	overflow: hidden;
+	flex-shrink: 0;
+}
+
+.rtw-chip-fill {
+	height: 100%;
+	background: linear-gradient(90deg, #3b82f6, #60a5fa);
+	border-radius: 2px;
+	transition: width 0.3s ease;
+}
+
+.rtw-chip-pct {
+	font-size: 0.68rem;
+	color: rgba(255, 255, 255, 0.4);
+	flex-shrink: 0;
 }
 </style>

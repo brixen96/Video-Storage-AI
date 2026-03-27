@@ -87,13 +87,9 @@ func (s *PornHubScraperService) ScrapeByKeywordWithProgress(req PornHubSearchReq
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ PornHub scrape paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ PornHub scrape paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 
 		pageURL := buildPornHubSearchURL(req.Keyword, page)
@@ -495,7 +491,7 @@ func (s *PornHubScraperService) CheckForNewVideos(keywords []string, maxPages in
 		}
 
 		// Update checkpoint with newest video
-		if firstVideoURL != "" && newVideosForKeyword > 0 {
+		if firstVideoURL != "" {
 			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
 				ScraperType:     "pornhub",
 				CheckpointType:  "last_video_url",

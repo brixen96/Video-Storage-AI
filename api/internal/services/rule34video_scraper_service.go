@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -23,12 +24,44 @@ type Rule34VideoScraperService struct {
 
 // Rule34VideoScrapeRequest represents a scrape request for Rule34Video
 type Rule34VideoScrapeRequest struct {
-	MaxPages          int    `json:"maxPages"`          // 0 = unlimited
-	StartPage         int    `json:"startPage"`         // Page to start from (for resume)
-	SortBy            string `json:"sortBy"`            // post_date, video_viewed, rating, etc.
-	ActivityID        int64  `json:"-"`                 // Activity ID for pause checking
-	InitialVideoCount int    `json:"-"`                 // Initial video count from checkpoint
-	InitialSavedCount int    `json:"-"`                 // Initial saved count from checkpoint
+	MaxPages          int      `json:"maxPages"`          // 0 = unlimited
+	StartPage         int      `json:"startPage"`         // Page to start from (for resume)
+	SortBy            string   `json:"sortBy"`            // post_date, video_viewed, rating, duration, pseudo_rand
+	DateFilter        string   `json:"dateFilter"`        // post_date_past_24_hours, post_date_past_week, post_date_past_month, post_date_past_year
+	CategorySlug      string   `json:"categorySlug"`      // e.g. "3d", "big-hero-6"
+	ModelSlug         string   `json:"modelSlug"`         // e.g. "anianiboy"
+	IncludeTags       []string `json:"includeTags"`       // tags to include
+	ExcludeTags       []string `json:"excludeTags"`       // tags to exclude
+	FetchDetails      bool     `json:"fetchDetails"`      // fetch video detail page for tags/download URLs
+	ActivityID        int64    `json:"-"`                 // Activity ID for pause checking
+	InitialVideoCount int      `json:"-"`                 // Initial video count from checkpoint
+	InitialSavedCount int      `json:"-"`                 // Initial saved count from checkpoint
+}
+
+// Rule34VideoDetails contains detailed info from a video detail page
+type Rule34VideoDetails struct {
+	DownloadURLs map[string]string `json:"download_urls"` // "360p","480p","720p" -> URL
+	Tags         []string          `json:"tags"`
+	Categories   []string          `json:"categories"`
+	CategoryURLs map[string]string `json:"category_urls"` // name -> URL
+	Artist       string            `json:"artist"`
+	ArtistURL    string            `json:"artist_url"`
+	Uploader     string            `json:"uploader"`
+}
+
+// Rule34VideoCategory represents a category on Rule34Video
+type Rule34VideoCategory struct {
+	Name  string `json:"name"`
+	Slug  string `json:"slug"`
+	URL   string `json:"url"`
+	Count string `json:"count"`
+}
+
+// Rule34VideoModel represents a model/artist on Rule34Video
+type Rule34VideoModel struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	URL  string `json:"url"`
 }
 
 // Rule34VideoScrapeResult contains the results of a Rule34Video scrape
@@ -54,9 +87,22 @@ func (s *Rule34VideoScraperService) GetSortOptions() []map[string]string {
 		{"value": "post_date", "label": "Most Recent"},
 		{"value": "video_viewed", "label": "Most Viewed"},
 		{"value": "rating", "label": "Top Rated"},
+		{"value": "duration", "label": "Longest"},
+		{"value": "pseudo_rand", "label": "Random"},
 		{"value": "video_viewed_today", "label": "Most Viewed Today"},
 		{"value": "video_viewed_week", "label": "Most Viewed This Week"},
 		{"value": "video_viewed_month", "label": "Most Viewed This Month"},
+	}
+}
+
+// GetDateFilterOptions returns available date filter options
+func (s *Rule34VideoScraperService) GetDateFilterOptions() []map[string]string {
+	return []map[string]string{
+		{"value": "", "label": "All Time"},
+		{"value": "post_date_past_24_hours", "label": "Past 24 Hours"},
+		{"value": "post_date_past_week", "label": "Past Week"},
+		{"value": "post_date_past_month", "label": "Past Month"},
+		{"value": "post_date_past_year", "label": "Past Year"},
 	}
 }
 
@@ -98,18 +144,14 @@ func (s *Rule34VideoScraperService) ScrapeWithProgress(req Rule34VideoScrapeRequ
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ Rule34Video scrape paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ Rule34Video scrape paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 
-		fmt.Printf("\n=== Scraping Rule34Video Page %d (sort: %s, filter: Straight) ===\n", page, sortBy)
+		fmt.Printf("\n=== Scraping Rule34Video Page %d (sort: %s) ===\n", page, sortBy)
 
-		videos, err := s.scrapeRule34VideoPage(page, sortBy)
+		videos, err := s.scrapeRule34VideoPage(page, sortBy, req.DateFilter, req.CategorySlug, req.ModelSlug, req.IncludeTags, req.ExcludeTags)
 		if err != nil {
 			errMsg := fmt.Sprintf("Error scraping page %d: %v", page, err)
 			result.Errors = append(result.Errors, errMsg)
@@ -151,7 +193,57 @@ func (s *Rule34VideoScraperService) ScrapeWithProgress(req Rule34VideoScrapeRequ
 			break
 		}
 
-		// Save videos
+		// Fetch details concurrently (up to 4 at a time), then save sequentially
+		const detailWorkers = 4
+		sem := make(chan struct{}, detailWorkers)
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for _, video := range videos {
+			video := video
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				details, detailErr := s.FetchVideoDetails(video.URL)
+				if detailErr != nil {
+					log.Printf("  ⚠️  Could not fetch details for %s: %v", video.URL, detailErr)
+					return
+				}
+
+				mu.Lock()
+				defer mu.Unlock()
+				if len(details.Tags) > 0 {
+					video.Tags = details.Tags
+				}
+				if details.Artist != "" {
+					video.Author = details.Artist
+				}
+				if details.Uploader != "" {
+					video.Uploader = details.Uploader
+				}
+				var metaMap map[string]interface{}
+				json.Unmarshal([]byte(video.Metadata), &metaMap)
+				if metaMap == nil {
+					metaMap = make(map[string]interface{})
+				}
+				if len(details.Categories) > 0 {
+					metaMap["categories"] = details.Categories
+					video.Category = strings.Join(details.Categories, ", ")
+				}
+				if len(details.DownloadURLs) > 0 {
+					metaMap["download_urls"] = details.DownloadURLs
+				}
+				if metaJSON, merr := json.Marshal(metaMap); merr == nil {
+					video.Metadata = string(metaJSON)
+				}
+			}()
+		}
+		wg.Wait()
+
+		// Save enriched videos sequentially (SQLite doesn't handle concurrent writes well)
 		for _, video := range videos {
 			err := s.videoScraperService.saveVideo(video)
 			if err != nil {
@@ -192,18 +284,38 @@ func (s *Rule34VideoScraperService) ScrapeWithProgress(req Rule34VideoScrapeRequ
 }
 
 // scrapeRule34VideoPage scrapes a single page from Rule34Video using AJAX POST
-func (s *Rule34VideoScraperService) scrapeRule34VideoPage(page int, sortBy string) ([]*ScrapedVideo, error) {
+func (s *Rule34VideoScraperService) scrapeRule34VideoPage(page int, sortBy, dateFilter, categorySlug, modelSlug string, includeTags, excludeTags []string) ([]*ScrapedVideo, error) {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 	}
 
-	// Rule34Video uses AJAX POST requests to the base URL
-	// Parameters are sent as form data with the KVS format
+	// Build base URL based on context (all videos, category, or model)
 	baseURL := "https://rule34video.com/"
+	if categorySlug != "" {
+		baseURL = fmt.Sprintf("https://rule34video.com/categories/%s/", categorySlug)
+	} else if modelSlug != "" {
+		baseURL = fmt.Sprintf("https://rule34video.com/models/%s/", modelSlug)
+	}
 
 	// Build form data for the AJAX request
-	// Format: mode=async&function=get_block&block_id=...&sort_by=...&from=...
 	formData := fmt.Sprintf("mode=async&function=get_block&block_id=custom_list_videos_most_recent_videos&sort_by=%s", sortBy)
+
+	// Date filter
+	if dateFilter != "" {
+		formData += "&post_date=" + dateFilter
+	}
+
+	// Tag inclusion/exclusion
+	if len(includeTags) > 0 || len(excludeTags) > 0 {
+		var tagParts []string
+		for _, t := range includeTags {
+			tagParts = append(tagParts, strings.ReplaceAll(t, " ", "_"))
+		}
+		for _, t := range excludeTags {
+			tagParts = append(tagParts, "-"+strings.ReplaceAll(t, " ", "_"))
+		}
+		formData += "&tags=" + strings.Join(tagParts, "+")
+	}
 
 	// Add pagination - "from" parameter is the page number
 	if page > 1 {
@@ -605,7 +717,7 @@ func (s *Rule34VideoScraperService) CheckForNewVideos(maxPages int, activityID i
 
 	// Scrape up to maxPages looking for new videos
 	for page := 1; page <= maxPages; page++ {
-		videos, err := s.scrapeRule34VideoPage(page, "post_date")
+		videos, err := s.scrapeRule34VideoPage(page, "post_date", "", "", "", nil, nil)
 		if err != nil {
 			log.Printf("Error scraping page %d: %v", page, err)
 			break
@@ -652,7 +764,7 @@ func (s *Rule34VideoScraperService) CheckForNewVideos(maxPages int, activityID i
 	}
 
 	// Update checkpoint with newest video
-	if firstVideoID != "" && totalNewVideos > 0 {
+	if firstVideoID != "" {
 		autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
 			ScraperType:     "rule34video",
 			CheckpointType:  "last_external_id",
@@ -666,4 +778,280 @@ func (s *Rule34VideoScraperService) CheckForNewVideos(maxPages int, activityID i
 	log.Printf("Found %d new videos from Rule34Video", totalNewVideos)
 
 	return result, nil
+}
+
+// FetchVideoDetails fetches full details from a Rule34Video video page
+func (s *Rule34VideoScraperService) FetchVideoDetails(videoURL string) (*Rule34VideoDetails, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	req, err := http.NewRequest("GET", videoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("page returned status %d", resp.StatusCode)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %w", err)
+	}
+
+	details := &Rule34VideoDetails{
+		DownloadURLs: make(map[string]string),
+		CategoryURLs: make(map[string]string),
+	}
+
+	// Extract flashvars from inline script for download URLs and metadata
+	doc.Find("script").Each(func(_ int, sel *goquery.Selection) {
+		text := sel.Text()
+		if !strings.Contains(text, "flashvars") {
+			return
+		}
+		// Extract each quality URL
+		for _, pair := range []struct{ key, quality string }{
+			{"video_url", "360p"},
+			{"video_alt_url", "480p"},
+			{"video_alt_url2", "720p"},
+		} {
+			re := regexp.MustCompile(pair.key + `:\s*'([^']+)'`)
+			if m := re.FindStringSubmatch(text); len(m) > 1 {
+				details.DownloadURLs[pair.quality] = m[1]
+			}
+		}
+	})
+
+	// Extract tags: a.tag_item but not .tag_item_suggest
+	doc.Find("a.tag_item").Each(func(_ int, sel *goquery.Selection) {
+		if sel.HasClass("tag_item_suggest") {
+			return
+		}
+		if href, _ := sel.Attr("href"); strings.Contains(href, "get_file") {
+			// This is a download link, not a tag
+			text := strings.TrimSpace(sel.Text())
+			if strings.Contains(text, "720") {
+				details.DownloadURLs["720p"] = href
+			} else if strings.Contains(text, "480") {
+				details.DownloadURLs["480p"] = href
+			} else if strings.Contains(text, "360") {
+				details.DownloadURLs["360p"] = href
+			}
+			return
+		}
+		tag := strings.TrimSpace(sel.Text())
+		if tag != "" && tag != "+ | Suggest" {
+			details.Tags = append(details.Tags, tag)
+		}
+	})
+
+	// Extract categories, artist, uploader from the info cols
+	doc.Find(".col").Each(func(_ int, col *goquery.Selection) {
+		label := strings.TrimSpace(col.Find(".label").First().Text())
+		switch label {
+		case "Categories":
+			col.Find("a.item.btn_link").Each(func(_ int, a *goquery.Selection) {
+				name := strings.TrimSpace(a.Find("span").Text())
+				if name == "" {
+					name = strings.TrimSpace(a.Text())
+				}
+				href, _ := a.Attr("href")
+				if name != "" {
+					details.Categories = append(details.Categories, name)
+					details.CategoryURLs[name] = href
+				}
+			})
+		case "Artist":
+			a := col.Find("a.item.btn_link").First()
+			details.Artist = strings.TrimSpace(a.Find(".name").Text())
+			if details.Artist == "" {
+				details.Artist = strings.TrimSpace(a.Text())
+			}
+			details.ArtistURL, _ = a.Attr("href")
+		case "Uploaded by":
+			a := col.Find("a.item.btn_link").First()
+			// Get text without child element text
+			details.Uploader = strings.TrimSpace(a.Clone().Children().Remove().End().Text())
+			if details.Uploader == "" {
+				details.Uploader = strings.TrimSpace(a.Text())
+			}
+		}
+	})
+
+	return details, nil
+}
+
+// GetTopCategories fetches all categories from Rule34Video using pagination
+func (s *Rule34VideoScraperService) GetTopCategories() ([]Rule34VideoCategory, error) {
+	var allCategories []Rule34VideoCategory
+	seen := make(map[string]bool)
+
+	for page := 1; page <= 30; page++ {
+		cats, err := s.fetchCategoriesPage(page)
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break
+		}
+		if len(cats) == 0 {
+			break
+		}
+		added := 0
+		for _, c := range cats {
+			if !seen[c.Slug] {
+				seen[c.Slug] = true
+				allCategories = append(allCategories, c)
+				added++
+			}
+		}
+		// If no new categories were found, we've reached the end
+		if added == 0 {
+			break
+		}
+		if page > 1 {
+			time.Sleep(400 * time.Millisecond)
+		}
+	}
+
+	return allCategories, nil
+}
+
+// fetchCategoriesPage fetches one page of categories from Rule34Video
+func (s *Rule34VideoScraperService) fetchCategoriesPage(page int) ([]Rule34VideoCategory, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	var reqURL string
+	if page == 1 {
+		reqURL = "https://rule34video.com/categories/"
+	} else {
+		reqURL = fmt.Sprintf(
+			"https://rule34video.com/categories/?mode=async&function=get_block&block_id=list_categories_categories_list&sort_by=total_videos&from=%d&_=%d",
+			page, time.Now().UnixMilli(),
+		)
+	}
+
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	req.Header.Set("Accept", "text/html,*/*;q=0.9")
+	if page > 1 {
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
+		req.Header.Set("Referer", "https://rule34video.com/categories/")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d for categories page %d", resp.StatusCode, page)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var categories []Rule34VideoCategory
+
+	// For AJAX response and full page: find all category links
+	doc.Find("a[href*='/categories/']").Each(func(_ int, sel *goquery.Selection) {
+		href, _ := sel.Attr("href")
+		slug := extractRule34Slug(href, "categories")
+		if slug == "" {
+			return
+		}
+
+		// Extract name: try .name first (removing count sub-element), then img alt
+		nameEl := sel.Find(".name").First()
+		var name string
+		if nameEl.Length() > 0 {
+			name = strings.TrimSpace(nameEl.Clone().Children().Remove().End().Text())
+			if name == "" {
+				name = strings.TrimSpace(nameEl.Text())
+			}
+		}
+		if name == "" {
+			name, _ = sel.Find("img").First().Attr("alt")
+		}
+		if name == "" {
+			return
+		}
+
+		count := strings.TrimSpace(sel.Find(".count span").Text())
+		categories = append(categories, Rule34VideoCategory{
+			Name:  name,
+			Slug:  slug,
+			URL:   href,
+			Count: count,
+		})
+	})
+
+	return categories, nil
+}
+
+// GetTopModels fetches top models/artists from Rule34Video
+func (s *Rule34VideoScraperService) GetTopModels() ([]Rule34VideoModel, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("GET", "https://rule34video.com/models/", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var models []Rule34VideoModel
+	doc.Find(".aside_wrap a.item, .item.model, .models-list .item").Each(func(_ int, sel *goquery.Selection) {
+		href, _ := sel.Attr("href")
+		name := strings.TrimSpace(sel.Find(".name").First().Clone().Children().Remove().End().Text())
+		if name == "" {
+			name = strings.TrimSpace(sel.Find(".name").Text())
+		}
+		if name == "" {
+			name, _ = sel.Find("img").First().Attr("alt")
+		}
+		slug := extractRule34Slug(href, "models")
+		if name != "" && slug != "" {
+			models = append(models, Rule34VideoModel{
+				Name: name,
+				Slug: slug,
+				URL:  href,
+			})
+		}
+	})
+
+	return models, nil
+}
+
+// extractRule34Slug extracts a slug from a Rule34Video URL
+// e.g. "/categories/3d/" -> "3d", "/models/anianiboy/" -> "anianiboy"
+func extractRule34Slug(urlStr, segment string) string {
+	re := regexp.MustCompile(`/` + segment + `/([^/]+)/`)
+	if m := re.FindStringSubmatch(urlStr); len(m) > 1 {
+		return m[1]
+	}
+	return ""
 }

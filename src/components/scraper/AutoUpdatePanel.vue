@@ -22,12 +22,16 @@
 					<span class="stat-label">Last Check</span>
 				</div>
 				<div class="stat-item">
+					<span class="stat-value" :class="nextCheckUrgent ? 'text-warning' : ''">{{ formatNextCheck }}</span>
+					<span class="stat-label">Next Check</span>
+				</div>
+				<div class="stat-item">
 					<span class="stat-value">{{ config.interval_minutes }}m</span>
 					<span class="stat-label">Interval</span>
 				</div>
-				<div class="stat-item" v-if="config.last_found_count > 0">
-					<span class="stat-value">{{ config.last_found_count }}</span>
-					<span class="stat-label">Found</span>
+				<div class="stat-item" v-if="config.total_found_count > 0">
+					<span class="stat-value">{{ config.total_found_count.toLocaleString() }}</span>
+					<span class="stat-label">Total Found</span>
 				</div>
 			</div>
 
@@ -147,6 +151,8 @@ export default {
 			endpoints: [],
 			intervalMinutes: 60,
 			maxPages: 3,
+			now: Date.now(),
+			tickerInterval: null,
 		}
 	},
 	computed: {
@@ -156,18 +162,19 @@ export default {
 		endpointLabel() {
 			if (this.endpointType === 'keywords') return 'Keywords'
 			if (this.endpointType === 'categories') return 'Categories'
+			if (this.endpointType === 'urls') return 'Forum URLs'
 			return 'Endpoints'
 		},
 		endpointPlaceholder() {
 			if (this.endpointType === 'keywords') return 'Add keyword or search term...'
 			if (this.endpointType === 'categories') return 'Add category URL...'
+			if (this.endpointType === 'urls') return 'Add forum/listing URL to monitor...'
 			return 'Add endpoint...'
 		},
 		formatLastChecked() {
 			if (!this.config?.last_checked_at) return 'Never'
 			const date = new Date(this.config.last_checked_at)
-			const now = new Date()
-			const diffMs = now - date
+			const diffMs = this.now - date.getTime()
 			const diffMins = Math.floor(diffMs / 60000)
 			const diffHours = Math.floor(diffMs / 3600000)
 			if (diffMins < 1) return 'Just now'
@@ -175,9 +182,31 @@ export default {
 			if (diffHours < 24) return `${diffHours}h ago`
 			return date.toLocaleDateString()
 		},
+		formatNextCheck() {
+			if (!this.config?.last_checked_at || !this.config?.interval_minutes) return '—'
+			const last = new Date(this.config.last_checked_at).getTime()
+			const nextMs = last + this.config.interval_minutes * 60000
+			const diffMs = nextMs - this.now
+			if (diffMs <= 0) return 'Soon'
+			const diffMins = Math.ceil(diffMs / 60000)
+			if (diffMins < 60) return `${diffMins}m`
+			const h = Math.floor(diffMins / 60)
+			const m = diffMins % 60
+			return m > 0 ? `${h}h ${m}m` : `${h}h`
+		},
+		nextCheckUrgent() {
+			if (!this.config?.last_checked_at || !this.config?.interval_minutes) return false
+			const last = new Date(this.config.last_checked_at).getTime()
+			const nextMs = last + this.config.interval_minutes * 60000
+			return nextMs - this.now <= 5 * 60000 // within 5 minutes
+		},
 	},
 	async mounted() {
 		await this.loadConfig()
+		this.tickerInterval = setInterval(() => { this.now = Date.now() }, 30000)
+	},
+	beforeUnmount() {
+		if (this.tickerInterval) clearInterval(this.tickerInterval)
 	},
 	methods: {
 		async loadConfig() {
@@ -193,6 +222,8 @@ export default {
 							this.endpoints = this.config.config.keywords || []
 						} else if (this.endpointType === 'categories') {
 							this.endpoints = this.config.config.categories || []
+						} else if (this.endpointType === 'urls') {
+							this.endpoints = this.config.config.urls || []
 						}
 					}
 				}
@@ -215,6 +246,7 @@ export default {
 				const configJSON = JSON.stringify({
 					keywords: this.endpointType === 'keywords' ? this.endpoints : undefined,
 					categories: this.endpointType === 'categories' ? this.endpoints : undefined,
+					urls: this.endpointType === 'urls' ? this.endpoints : undefined,
 				})
 
 				await autoUpdateAPI.updateConfig(this.scraperType, {

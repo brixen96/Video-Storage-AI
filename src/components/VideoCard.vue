@@ -9,7 +9,7 @@
 		<div class="video-thumbnail" @mouseenter="startPreview" @mouseleave="stopPreview">
 			<!-- Static Thumbnail -->
 			<img
-				v-if="!isPreviewPlaying && video.thumbnail_path"
+				v-if="!isPreviewPlaying && video.thumbnail_path && !thumbnailError"
 				:src="getThumbnailURL(video)"
 				:alt="video.title"
 				loading="lazy"
@@ -28,6 +28,17 @@
 				class="preview-video active"
 				:alt="`${video.title} - Preview`"
 				loading="lazy"
+			/>
+			<!-- Video Preview (scraped videos with external video_preview_url) -->
+			<video
+				v-if="videoPreviewUrl && isPreviewPlaying && !previewVideoError"
+				:src="videoPreviewUrl"
+				class="preview-video active"
+				autoplay
+				muted
+				loop
+				playsinline
+				@error="previewVideoError = true"
 			/>
 
 			<!-- Status Badges (top right) -->
@@ -54,6 +65,16 @@
 
 			<!-- Duration badge -->
 			<div v-if="video.duration" class="badge-duration">{{ formatDuration(video.duration) }}</div>
+
+			<!-- Quick favorite button (shown on hover) -->
+			<button
+				class="quick-favorite"
+				:class="{ active: video.is_favorite }"
+				:title="video.is_favorite ? 'Remove from favorites' : 'Add to favorites'"
+				@click.stop="$emit('toggle-favorite', video)"
+			>
+				<font-awesome-icon :icon="[video.is_favorite ? 'fas' : 'far', 'heart']" />
+			</button>
 		</div>
 
 		<!-- Video Info -->
@@ -79,6 +100,24 @@
 			</div>
 
 			<!-- Performers -->
+			<div v-if="video.performers && video.performers.length > 0" class="video-performers">
+				<div
+					v-for="performer in video.performers.slice(0, 4)"
+					:key="performer.id"
+					class="performer-avatar"
+					:title="performer.name"
+					@click.stop="$emit('open-performer', performer)"
+				>
+					<img
+						v-if="performer.thumbnail_path"
+						:src="getPerformerThumbnailURL(performer)"
+						:alt="performer.name"
+						loading="lazy"
+					/>
+					<div v-else class="performer-initials">{{ getInitials(performer.name) }}</div>
+				</div>
+				<span v-if="video.performers.length > 4" class="performer-more">+{{ video.performers.length - 4 }}</span>
+			</div>
 
 			<!-- Studio -->
 			<div v-if="video.studios && video.studios.length > 0" class="video-studio" @click.stop="$emit('open-studio', video.studios[0])">
@@ -120,7 +159,7 @@ export default {
 			default: false,
 		},
 	},
-	emits: ['click', 'toggle-select', 'context-menu', 'play', 'add-tag', 'edit-metadata', 'open-performer', 'open-studio'],
+	emits: ['click', 'toggle-select', 'context-menu', 'play', 'add-tag', 'edit-metadata', 'open-performer', 'open-studio', 'toggle-favorite'],
 	data() {
 		return {
 			isPreviewPlaying: false,
@@ -129,19 +168,15 @@ export default {
 			previewFrameIndex: 0,
 			previewInterval: null,
 			previewFrames: [], // Array of frame URLs
+			videoPreviewUrl: null, // External video URL (for scraped video_preview_url)
+			previewVideoError: false,
 			thumbnailError: false,
 		}
 	},
 	computed: {
 		hasPreview() {
-			// Check for regular video preview path OR scraped video thumbnail frames
-			if (this.video.preview_path && this.video.preview_path !== '') {
-				return true
-			}
-			// For scraped videos, check thumbnail_frames array
-			if (this.video.is_scraped && this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) {
-				return true
-			}
+			if (this.video.preview_path && this.video.preview_path !== '') return true
+			if (this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) return true
 			return false
 		},
 		currentPreviewFrame() {
@@ -160,6 +195,13 @@ export default {
 	},
 	methods: {
 		getAssetURL,
+		getPerformerThumbnailURL(performer) {
+			if (!performer.thumbnail_path) return null
+			if (performer.thumbnail_path.startsWith('http://') || performer.thumbnail_path.startsWith('https://')) {
+				return performer.thumbnail_path
+			}
+			return getAssetURL(performer.thumbnail_path)
+		},
 		getThumbnailURL(video) {
 			// For scraped videos, thumbnail_path is already a full URL
 			if (video.is_scraped && video.thumbnail_path) {
@@ -174,8 +216,8 @@ export default {
 			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
 		},
 		loadPreviewFrames() {
-			// For scraped videos, check if we have thumbnail_frames array
-			if (this.video.is_scraped && this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) {
+			// Scraped videos: thumbnail_frames array takes priority
+			if (this.video.thumbnail_frames && this.video.thumbnail_frames.length > 0) {
 				this.previewFrames = this.video.thumbnail_frames
 				return
 			}
@@ -185,8 +227,14 @@ export default {
 				return
 			}
 
-			// Generate URLs for all 10 preview frames
-			// preview_path is like "1/someFolder/videoName" (directory containing frames)
+			// Scraped videos: preview_path may be an external CDN video URL (e.g. video_preview_url)
+			if (this.video.preview_path.startsWith('http://') || this.video.preview_path.startsWith('https://')) {
+				this.videoPreviewUrl = this.video.preview_path
+				this.previewFrames = []
+				return
+			}
+
+			// Local videos: generate frame URLs from relative preview_path directory
 			const frames = []
 			for (let i = 1; i <= 10; i++) {
 				const framePath = `previews/${this.video.preview_path}/frame_${i.toString().padStart(3, '0')}.jpg`
@@ -197,11 +245,19 @@ export default {
 		startPreview() {
 			// Delay preview start by 300ms to avoid loading on quick hovers
 			this.hoverTimeout = setTimeout(() => {
+				// Lazily build frame URLs on first hover (deferred from mounted)
+				if (this.previewFrames.length === 0 && !this.videoPreviewUrl && this.hasPreview) {
+					this.loadPreviewFrames()
+				}
+				// Video preview (scraped videos with external video_preview_url)
+				if (this.videoPreviewUrl && !this.previewVideoError) {
+					this.isPreviewPlaying = true
+					return
+				}
+				// Frame cycling preview
 				if (this.hasPreview && this.previewFrames.length > 0) {
 					this.isPreviewPlaying = true
 					this.previewFrameIndex = 0
-
-					// Cycle through frames every 500ms for better viewing
 					this.previewInterval = setInterval(() => {
 						if (this.previewFrames.length > 0) {
 							this.previewFrameIndex = (this.previewFrameIndex + 1) % this.previewFrames.length
@@ -211,19 +267,14 @@ export default {
 			}, 300)
 		},
 		stopPreview() {
-			// Clear the timeout if user moves away before preview starts
 			if (this.hoverTimeout) {
 				clearTimeout(this.hoverTimeout)
 				this.hoverTimeout = null
 			}
-
-			// Stop preview cycling
 			if (this.previewInterval) {
 				clearInterval(this.previewInterval)
 				this.previewInterval = null
 			}
-
-			// Reset preview state
 			this.isPreviewPlaying = false
 			this.previewFrameIndex = 0
 		},
@@ -250,6 +301,7 @@ export default {
 			return parseFloat(fps.toFixed(2))
 		},
 		getInitials(name) {
+			if (!name) return '?'
 			return name
 				.split(' ')
 				.map((n) => n[0])
@@ -269,20 +321,15 @@ export default {
 		},
 		async openInFirefox(url) {
 			try {
-				// Call backend API to open URL in Firefox
-				const response = await fetch('http://localhost:8080/api/v1/system/open-incognito', {
+				const response = await fetch('http://localhost:8080/api/v1/system/open-url', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ url })
 				})
 				if (!response.ok) {
-					// Fallback to regular new tab if API fails
-					console.warn('Firefox API failed, opening in regular tab')
 					window.open(url, '_blank')
 				}
 			} catch (error) {
-				// Fallback to regular new tab if API is unavailable
-				console.warn('Firefox API unavailable, opening in regular tab:', error)
 				window.open(url, '_blank')
 			}
 		},
@@ -298,10 +345,15 @@ export default {
 		},
 	},
 	mounted() {
-		// Load preview frames on mount
-		this.loadPreviewFrames()
+		// Preview frames are loaded lazily on first hover (see startPreview)
 	},
 	watch: {
+		'video.id'() {
+			this.thumbnailError = false
+			this.previewFrames = []
+			this.videoPreviewUrl = null
+			this.previewVideoError = false
+		},
 		'video.preview_path'() {
 			// Reload frames if preview_path changes
 			this.loadPreviewFrames()

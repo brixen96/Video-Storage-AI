@@ -17,7 +17,7 @@ type Hub struct {
 // NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan []byte),
+		broadcast:  make(chan []byte, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 		clients:    make(map[*Client]bool),
@@ -113,6 +113,57 @@ func (h *Hub) BroadcastNotification(notification *models.Notification) {
 	message, err := json.Marshal(wrapper)
 	if err == nil {
 		h.Broadcast(message)
+	}
+}
+
+// BroadcastCompanionEvent broadcasts an AI companion event to all clients.
+func (h *Hub) BroadcastCompanionEvent(eventType, source, message, severity string, data map[string]interface{}) {
+	wrapper := map[string]interface{}{
+		"type": "companion_event",
+		"data": map[string]interface{}{
+			"type":     eventType,
+			"source":   source,
+			"message":  message,
+			"severity": severity,
+			"data":     data,
+		},
+	}
+	msg, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(msg)
+	}
+}
+
+// BroadcastLinkVerificationComplete broadcasts a link verification completion event.
+func (h *Hub) BroadcastLinkVerificationComplete(threadID int64, active, dead, expired, total int) {
+	wrapper := map[string]interface{}{
+		"type": "link_verification_complete",
+		"data": map[string]interface{}{
+			"thread_id": threadID,
+			"active":    active,
+			"dead":      dead,
+			"expired":   expired,
+			"total":     total,
+		},
+	}
+	msg, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(msg)
+	}
+}
+
+// BroadcastFeedUpdate notifies all clients that the dashboard feed has new items.
+func (h *Hub) BroadcastFeedUpdate(scraperType string, count int) {
+	wrapper := map[string]interface{}{
+		"type": "feed_update",
+		"data": map[string]interface{}{
+			"scraper_type": scraperType,
+			"new_count":    count,
+		},
+	}
+	msg, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(msg)
 	}
 }
 

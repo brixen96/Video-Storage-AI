@@ -72,6 +72,8 @@ import {
 	faThumbtack,
 	faSave,
 	faUserPlus,
+	faUserTag,
+	faUserCheck,
 	faCloudUploadAlt,
 	faSignal,
 	faPaw,
@@ -88,6 +90,7 @@ import {
 	faUserGroup,
 	faUserGraduate,
 	faMagic,
+	faFlask,
 	faLayerGroup,
 	faFileVideo,
 	faExclamation,
@@ -125,6 +128,7 @@ import {
 	faTerminal,
 	faClone,
 	faLightbulb,
+	faSun,
 	faMicrophone,
 	faWrench,
 	faTools,
@@ -165,13 +169,16 @@ import {
 	faAngleDoubleRight,
 	faAngleRight,
 	faEyeSlash,
+	faHeading,
+	faSkullCrossbones,
+	faHourglassEnd,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
 import { faFileImage, faHeart as farHeart, faStar as farStar } from '@fortawesome/free-regular-svg-icons'
 
 // Import brand icons
-import { faTwitter, faInstagram } from '@fortawesome/free-brands-svg-icons'
+import { faTwitter, faInstagram, faFirefoxBrowser } from '@fortawesome/free-brands-svg-icons'
 
 // Add icons to library
 library.add(
@@ -246,10 +253,13 @@ library.add(
 	faThumbtack,
 	faSave,
 	faUserPlus,
+	faUserTag,
+	faUserCheck,
 	faCloudUploadAlt,
 	faSignal,
 	faTwitter,
 	faInstagram,
+	faFirefoxBrowser,
 	faPaw,
 	faDog,
 	faBan,
@@ -264,6 +274,7 @@ library.add(
 	faUserGroup,
 	faUserGraduate,
 	faMagic,
+	faFlask,
 	faLayerGroup,
 	faFileVideo,
 	faExclamation,
@@ -303,6 +314,7 @@ library.add(
 	faTerminal,
 	faClone,
 	faLightbulb,
+	faSun,
 	faMicrophone,
 	faWrench,
 	faTools,
@@ -341,7 +353,10 @@ library.add(
 	faAngleLeft,
 	faAngleDoubleRight,
 	faAngleRight,
-	faEyeSlash
+	faEyeSlash,
+	faHeading,
+	faSkullCrossbones,
+	faHourglassEnd
 )
 
 export default FontAwesomeIcon

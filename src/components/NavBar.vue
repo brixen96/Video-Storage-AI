@@ -93,28 +93,28 @@
 							Scraper
 						</router-link>
 					</li>
-					<li class="nav-item">
-						<router-link to="/scheduler" class="nav-link" active-class="active">
-							<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
-							Scheduler
-						</router-link>
-					</li>
-					<li class="nav-item">
-						<router-link to="/link-health" class="nav-link" active-class="active">
-							<font-awesome-icon :icon="['fas', 'heartbeat']" class="me-1" />
-							Link Health
-						</router-link>
-					</li>
-					<li class="nav-item">
+						<li class="nav-item">
 						<router-link to="/jdownloader" class="nav-link" active-class="active">
 							<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
 							JDownloader
+						</router-link>
+					</li>
+					<li class="nav-item">
+						<router-link to="/ai" class="nav-link" active-class="active">
+							<font-awesome-icon :icon="['fas', 'robot']" class="me-1" />
+							AI
 						</router-link>
 					</li>
 				</ul>
 
 				<!-- Right side items -->
 				<div class="d-flex align-items-center gap-3">
+					<!-- Global Search Trigger -->
+					<button class="btn btn-sm btn-outline-secondary nav-search-btn d-none d-lg-flex align-items-center gap-2" @click="openGlobalSearch">
+						<font-awesome-icon :icon="['fas', 'search']" />
+						<kbd class="nav-search-kbd">Ctrl+K</kbd>
+					</button>
+
 					<!-- Activity Status Widget -->
 					<div class="widget-container d-none d-lg-block">
 						<ActivityStatusWidget />
@@ -151,7 +151,6 @@ export default {
 	},
 	data() {
 		return {
-			searchQuery: '',
 			wsConnected: false,
 			unsubscribeConnection: null,
 		}
@@ -175,11 +174,9 @@ export default {
 			this.unsubscribeConnection()
 		}
 	},
-	methods: {
-		handleSearch() {
-			if (this.searchQuery.trim()) {
-				this.$router.push({ path: '/videos', query: { search: this.searchQuery } })
-			}
+	methods: {
+		openGlobalSearch() {
+			document.dispatchEvent(new CustomEvent('open-global-search'))
 		},
 	},
 }

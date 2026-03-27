@@ -13,6 +13,7 @@
 						<button v-if="unreadCount > 0" class="btn-link" @click="markAllAsRead">
 							Mark all read
 						</button>
+						<button v-if="notifications.length > 0" class="btn-link btn-clear" @click="clearAll">Clear all</button>
 						<button class="close-btn" @click="showPanel = false">
 							<font-awesome-icon :icon="['fas', 'times']" />
 						</button>
@@ -105,7 +106,6 @@ const filteredNotifications = computed(() => {
 	return filtered
 })
 
-let refreshInterval = null
 let unsubscribeNotification = null
 
 const loadNotifications = async () => {
@@ -180,6 +180,21 @@ const handleNotificationClick = async (notification) => {
 	}
 }
 
+const clearAll = async () => {
+	try {
+		const response = await fetch('http://localhost:8080/api/v1/notifications', { method: 'DELETE' })
+		const data = await response.json()
+		if (data.success) {
+			notifications.value = []
+			unreadCount.value = 0
+			toast.success('All notifications cleared')
+		}
+	} catch (error) {
+		console.error('Failed to clear notifications:', error)
+		toast.error('Failed to clear notifications')
+	}
+}
+
 const archiveNotification = async (id) => {
 	try {
 		const response = await fetch(`http://localhost:8080/api/v1/notifications/${id}/archive`, {
@@ -187,11 +202,12 @@ const archiveNotification = async (id) => {
 		})
 		const data = await response.json()
 		if (data.success) {
-			notifications.value = notifications.value.filter((n) => n.id !== id)
+			// Find before filtering — otherwise the item is gone before we can check is_read
 			const notification = notifications.value.find((n) => n.id === id)
 			if (notification && !notification.is_read) {
 				unreadCount.value = Math.max(0, unreadCount.value - 1)
 			}
+			notifications.value = notifications.value.filter((n) => n.id !== id)
 		}
 	} catch (error) {
 		console.error('Failed to archive notification:', error)
@@ -210,7 +226,7 @@ const getNotificationIcon = (category) => {
 }
 
 const formatTime = (dateStr) => {
-	const date = new Date(dateStr)
+	const date = new Date(dateStr.replace(" ", "T"))
 	const now = new Date()
 	const diffMs = now - date
 	const diffMins = Math.floor(diffMs / 60000)
@@ -226,10 +242,8 @@ const formatTime = (dateStr) => {
 
 onMounted(() => {
 	loadStats()
-	// Refresh stats every 30 seconds
-	refreshInterval = setInterval(loadStats, 30000)
 
-	// Subscribe to WebSocket notification events
+	// Subscribe to WebSocket notification events (real-time; no polling needed)
 	unsubscribeNotification = websocketService.on('notification', (data) => {
 		const notification = data.data
 		// Add notification to the list
@@ -242,9 +256,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-	if (refreshInterval) {
-		clearInterval(refreshInterval)
-	}
 	if (unsubscribeNotification) {
 		unsubscribeNotification()
 	}
@@ -337,6 +348,13 @@ onBeforeUnmount(() => {
 
 .btn-link:hover {
 	text-decoration: underline;
+}
+
+.btn-clear {
+	color: rgba(248, 113, 113, 0.7);
+}
+.btn-clear:hover {
+	color: #f87171;
 }
 
 .close-btn {

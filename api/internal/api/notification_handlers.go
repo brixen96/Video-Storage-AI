@@ -220,6 +220,21 @@ func archiveNotification(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Notification archived successfully"))
 }
 
+// deleteAllNotifications deletes all notifications
+func deleteAllNotifications(c *gin.Context) {
+	svc := ensureNotificationService()
+	if svc == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("Service unavailable", "Notification service not initialized"))
+		return
+	}
+	deleted, err := svc.DeleteAll()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to clear notifications", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{"deleted": deleted}, "All notifications cleared"))
+}
+
 // deleteNotification deletes a notification
 func deleteNotification(c *gin.Context) {
 	svc := ensureNotificationService()

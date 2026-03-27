@@ -197,13 +197,9 @@ func (s *SexuriaScraperService) ScrapeAdvancedSearchWithProgress(req SexuriaAdva
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ Sexuria advanced search paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ Sexuria advanced search paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 
 		pageURL := buildSexuriaAdvancedSearchPageURL(searchURL, page)
@@ -375,13 +371,9 @@ func (s *SexuriaScraperService) ScrapeCategoryWithProgress(req SexuriaScrapeRequ
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ Sexuria scrape paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ Sexuria scrape paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 
 		pageURL := buildSexuriaPageURL(req.CategoryURL, page)
@@ -666,6 +658,7 @@ func (s *SexuriaScraperService) scrapeSexuriaPage(pageURL string) ([]*ScrapedVid
 			Duration:     0, // Not applicable for download links
 			ViewCount:    0,
 			Uploader:     author,
+			Category:     subcategory, // Store subcategory for filtering
 			Status:       "discovered",
 			DiscoveredAt: time.Now(),
 			Tags:         fileHosts, // Store file hosts as tags for easy filtering
@@ -943,7 +936,7 @@ func (s *SexuriaScraperService) CheckForNewItems(categories []string, maxPages i
 			time.Sleep(1 * time.Second)
 		}
 
-		if firstItemURL != "" && newItemsForCategory > 0 {
+		if firstItemURL != "" {
 			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
 				ScraperType:     "sexuria",
 				CheckpointType:  "last_item_url",

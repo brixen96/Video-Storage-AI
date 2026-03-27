@@ -256,6 +256,194 @@
 	border-color: rgba(0, 217, 255, 0.3);
 }
 
+/* Proactive event messages */
+.chat-message.proactive .message-avatar {
+	background: linear-gradient(135deg, #f9a825 0%, #ff8f00 100%);
+	color: #fff;
+}
+
+.chat-message.proactive .message-text {
+	background: linear-gradient(135deg, rgba(249, 168, 37, 0.15) 0%, rgba(255, 143, 0, 0.15) 100%);
+	border-color: rgba(249, 168, 37, 0.3);
+	font-size: 0.85rem;
+}
+
+.chat-message.proactive.error .message-text {
+	background: linear-gradient(135deg, rgba(244, 67, 54, 0.15) 0%, rgba(211, 47, 47, 0.15) 100%);
+	border-color: rgba(244, 67, 54, 0.3);
+}
+
+.chat-message.proactive.warning .message-text {
+	background: linear-gradient(135deg, rgba(255, 152, 0, 0.15) 0%, rgba(245, 124, 0, 0.15) 100%);
+	border-color: rgba(255, 152, 0, 0.3);
+}
+
+/* Suggestion messages (AI-generated placements) — cyan accent vs orange bell */
+.chat-message.proactive.suggestion .message-avatar {
+	background: linear-gradient(135deg, #00b8d4 0%, #006064 100%);
+}
+
+.chat-message.proactive.suggestion .message-text {
+	background: linear-gradient(135deg, rgba(0, 184, 212, 0.12) 0%, rgba(0, 96, 100, 0.12) 100%);
+	border-color: rgba(0, 184, 212, 0.35);
+}
+
+/* Daily briefing messages — warm golden sunrise gradient */
+.chat-message.daily-briefing .message-avatar {
+	background: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+	box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+}
+
+.chat-message.daily-briefing .message-text {
+	background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(180, 83, 9, 0.10) 100%);
+	border-color: rgba(245, 158, 11, 0.35);
+}
+
+/* Inline video cards */
+.video-cards-row {
+	display: flex;
+	gap: 8px;
+	padding: 6px 12px 10px;
+	overflow-x: auto;
+	scrollbar-width: thin;
+	scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.video-cards-row::-webkit-scrollbar { height: 4px; }
+.video-cards-row::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+.video-mini-card {
+	flex: 0 0 130px;
+	background: rgba(255,255,255,0.05);
+	border: 1px solid rgba(255,255,255,0.1);
+	border-radius: 8px;
+	overflow: hidden;
+	cursor: pointer;
+	transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.video-mini-card:hover {
+	transform: translateY(-2px);
+	border-color: rgba(0, 217, 255, 0.4);
+}
+
+.mini-thumb-wrap {
+	position: relative;
+	width: 100%;
+	height: 74px;
+	background: rgba(0,0,0,0.3);
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.mini-thumb {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.mini-thumb-fallback {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(255,255,255,0.25);
+	font-size: 22px;
+	z-index: 0;
+}
+.mini-thumb:not([style*="display: none"]) ~ .mini-thumb-fallback { display: none; }
+
+.mini-info {
+	padding: 6px 7px 7px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+.mini-title {
+	font-size: 11px;
+	font-weight: 500;
+	color: rgba(255,255,255,0.9);
+	line-height: 1.3;
+	word-break: break-word;
+}
+.mini-performers {
+	font-size: 10px;
+	color: rgba(0, 217, 255, 0.8);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.mini-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 1px;
+}
+.mini-stars { font-size: 11px; letter-spacing: 1px; display: flex; gap: 1px; }
+.mini-stars .star-btn { cursor: pointer; transition: transform 0.1s ease; }
+.mini-stars .star-btn:hover { transform: scale(1.3); }
+.mini-stars .star-filled { color: #f59e0b; }
+.mini-stars .star-empty { color: rgba(255,255,255,0.2); }
+.mini-stars .star-empty:hover { color: #f59e0b; }
+.mini-duration { font-size: 10px; color: rgba(255,255,255,0.4); }
+
+.mini-fav-btn {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	background: rgba(0,0,0,0.55);
+	border: none;
+	border-radius: 50%;
+	width: 22px;
+	height: 22px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: rgba(255,255,255,0.5);
+	font-size: 10px;
+	transition: color 0.15s ease, background 0.15s ease;
+	z-index: 2;
+}
+.mini-fav-btn:hover { color: #f43f5e; background: rgba(0,0,0,0.8); }
+.mini-fav-btn.active { color: #f43f5e; }
+
+.mini-actions {
+	display: flex;
+	gap: 4px;
+	margin-top: 3px;
+}
+.mini-action-btn {
+	background: rgba(255,255,255,0.06);
+	border: 1px solid rgba(255,255,255,0.1);
+	border-radius: 4px;
+	padding: 2px 6px;
+	font-size: 9px;
+	color: rgba(255,255,255,0.5);
+	cursor: pointer;
+	transition: background 0.15s, color 0.15s;
+}
+.mini-action-btn:hover {
+	background: rgba(0, 217, 255, 0.15);
+	color: #00d9ff;
+	border-color: rgba(0, 217, 255, 0.3);
+}
+
+/* Library insight messages — teal pulse */
+.chat-message.library-insights .message-avatar {
+	background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+	box-shadow: 0 2px 8px rgba(6, 182, 212, 0.4);
+}
+
+.chat-message.library-insights .message-text {
+	background: linear-gradient(135deg, rgba(6, 182, 212, 0.10) 0%, rgba(8, 145, 178, 0.08) 100%);
+	border-color: rgba(6, 182, 212, 0.35);
+}
+
+/* Proactive toggle active state */
+.btn-header-action.active {
+	color: #f9a825;
+}
+
 .message-time {
 	font-size: 0.7rem;
 	color: rgba(255, 255, 255, 0.4);
@@ -676,6 +864,27 @@
 	transform: scale(1.1);
 }
 
+/* Response source indicator */
+.message-source {
+	font-size: 0.65rem;
+	padding: 0.1rem 0.4rem;
+	border-radius: 8px;
+	opacity: 0.6;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+}
+
+.message-source.llm {
+	color: #a78bfa;
+	background: rgba(167, 139, 250, 0.1);
+}
+
+.message-source.rule-based {
+	color: #94a3b8;
+	background: rgba(148, 163, 184, 0.1);
+}
+
 /* Suggested Prompts */
 .suggested-prompts {
 	padding: 1.5rem 1rem;
@@ -773,4 +982,20 @@
 		height: calc(100vh - 100px);
 		max-height: 600px;
 	}
+}
+
+/* Streaming cursor shown while text is being received */
+.streaming-text::after {
+	content: '▋';
+	display: inline-block;
+	margin-left: 2px;
+	color: rgba(0, 217, 255, 0.85);
+	animation: cursor-blink 0.7s step-end infinite;
+	vertical-align: text-bottom;
+	font-size: 0.85em;
+}
+
+@keyframes cursor-blink {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0; }
 }

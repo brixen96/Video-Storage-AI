@@ -89,13 +89,9 @@ func (s *LuxureTVScraperService) ScrapeCategoryWithProgress(req LuxureTVScrapeRe
 	// Scrape pages
 	for page := startPage; page <= maxPages; page++ {
 		// Check if task has been paused
-		if req.ActivityID > 0 {
-			activitySvc := NewActivityService()
-			currentActivity, err := activitySvc.GetByID(req.ActivityID)
-			if err == nil && currentActivity.IsPaused {
-				fmt.Printf("⏸️ LuxureTV scrape paused by user at page %d\n", page)
-				return result, fmt.Errorf("task paused by user at page %d", page)
-			}
+		if IsActivityPaused(req.ActivityID) {
+			fmt.Printf("⏸️ LuxureTV scrape paused by user at page %d\n", page)
+			return result, fmt.Errorf("task paused by user at page %d", page)
 		}
 
 		pageURL := buildLuxureTVPageURL(baseURL, page)
@@ -586,7 +582,7 @@ func (s *LuxureTVScraperService) CheckForNewVideos(categories []string, maxPages
 			time.Sleep(1 * time.Second)
 		}
 
-		if firstVideoURL != "" && newVideosForCategory > 0 {
+		if firstVideoURL != "" {
 			autoUpdateSvc.SaveCheckpoint(&models.ScraperCheckpoint{
 				ScraperType:     "luxuretv",
 				CheckpointType:  "last_video_url",
@@ -603,5 +599,65 @@ func (s *LuxureTVScraperService) CheckForNewVideos(categories []string, maxPages
 	result.Details["categories_checked"] = len(categories)
 	result.Details["total_new_videos"] = totalNewVideos
 
+	return result, nil
+}
+
+// GetMatchedPerformers returns all unique DB-matched performers appearing in LuxureTV videos.
+func (s *LuxureTVScraperService) GetMatchedPerformers() ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT
+			CAST(json_extract(p.value, '$.id') AS INTEGER) as pid,
+			json_extract(p.value, '$.name') as pname
+		FROM scraped_videos,
+		     json_each(json_extract(metadata, '$.performers')) p
+		WHERE site_type = 'luxuretv'
+		  AND json_extract(p.value, '$.id') > 0
+		ORDER BY pname
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []map[string]interface{}{}
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{"id": id, "name": name})
+	}
+	return result, nil
+}
+
+// GetMatchedTags returns all unique DB-matched tags appearing in LuxureTV videos.
+func (s *LuxureTVScraperService) GetMatchedTags() ([]map[string]interface{}, error) {
+	rows, err := s.db.Query(`
+		SELECT DISTINCT
+			CAST(json_extract(t.value, '$.id') AS INTEGER) as tid,
+			json_extract(t.value, '$.name') as tname,
+			COALESCE(json_extract(t.value, '$.color'), '#6c757d') as color,
+			COALESCE(json_extract(t.value, '$.icon'), '') as icon
+		FROM scraped_videos,
+		     json_each(json_extract(metadata, '$.matched_tags')) t
+		WHERE site_type = 'luxuretv'
+		  AND json_extract(t.value, '$.id') > 0
+		ORDER BY tname
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []map[string]interface{}{}
+	for rows.Next() {
+		var id int64
+		var name, color, icon string
+		if err := rows.Scan(&id, &name, &color, &icon); err != nil {
+			continue
+		}
+		result = append(result, map[string]interface{}{"id": id, "name": name, "color": color, "icon": icon})
+	}
 	return result, nil
 }

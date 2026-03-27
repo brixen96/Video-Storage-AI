@@ -490,6 +490,49 @@ func openInIncognito(c *gin.Context) {
 	}, "Opening URL in Firefox"))
 }
 
+// openUrl opens any URL in Firefox
+func openUrl(c *gin.Context) {
+	var request struct {
+		URL string `json:"url" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+
+	url := request.URL
+	var err error
+	switch runtime.GOOS {
+	case "windows":
+		firefoxPaths := []string{
+			`C:\Program Files\Mozilla Firefox\firefox.exe`,
+			`C:\Program Files (x86)\Mozilla Firefox\firefox.exe`,
+		}
+		launched := false
+		for _, p := range firefoxPaths {
+			if _, statErr := os.Stat(p); statErr == nil {
+				if runErr := exec.Command(p, url).Start(); runErr == nil {
+					launched = true
+					break
+				}
+			}
+		}
+		if !launched {
+			err = exec.Command("cmd", "/c", "start", "", "firefox", url).Start()
+		}
+	case "darwin":
+		err = exec.Command("open", "-a", "Firefox", url).Start()
+	default:
+		err = exec.Command("firefox", url).Start()
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to open URL in Firefox", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(nil, "URL opened in Firefox"))
+}
+
 // openLoginHelper opens the Simpcity login page in Firefox for authentication
 func openLoginHelper(c *gin.Context) {
 	var request struct {

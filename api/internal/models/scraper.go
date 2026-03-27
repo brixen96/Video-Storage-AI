@@ -24,6 +24,7 @@ type ScrapedThread struct {
 	LastScrapedAt   time.Time              `json:"last_scraped_at" db:"last_scraped_at"`
 	LastUpdatedAt   time.Time              `json:"last_updated_at" db:"last_updated_at"` // Thread last updated on source
 	CreatedAt       time.Time              `json:"created_at" db:"created_at"`
+	IsWatched       bool                   `json:"is_watched" db:"is_watched"`
 }
 
 // ScrapedThreadMetadata represents additional thread information
@@ -53,6 +54,7 @@ type ScrapedPost struct {
 	LikeCount      int                   `json:"like_count" db:"like_count"`
 	Metadata       string                `json:"-" db:"metadata"`                // JSON string
 	MetadataObj    *ScrapedPostMetadata  `json:"metadata,omitempty" db:"-"`
+	IsRead         bool                  `json:"is_read" db:"is_read"`
 	PostedAt       time.Time             `json:"posted_at" db:"posted_at"`       // Original post date
 	ScrapedAt      time.Time             `json:"scraped_at" db:"scraped_at"`
 	CreatedAt      time.Time             `json:"created_at" db:"created_at"`
@@ -147,6 +149,7 @@ type ScraperStats struct {
 	LastScrapedAt       time.Time `json:"last_scraped_at"`
 	SourceBreakdown     map[string]int `json:"source_breakdown"`
 	ProviderBreakdown   map[string]int `json:"provider_breakdown"`
+	CategoryBreakdown   map[string]int `json:"category_breakdown"`
 }
 
 // ThreadCreate represents data needed to create a thread

@@ -196,7 +196,7 @@
 								</div>
 								<div class="mb-3">
 									<label class="form-label">Logo Path</label>
-									<input v-model="studioForm.logo_path" type="text" class="form-control" />
+									<input v-model="studioForm.logo_path" type="text" class="form-control" placeholder="Local path or external URL (https://...)" />
 								</div>
 								<div class="mb-3">
 									<label class="form-label">Description</label>
@@ -304,8 +304,11 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import { studiosAPI, groupsAPI, getAssetURL } from '@/services/api'
 import { DeleteConfirmationModal } from '@/components/shared'
+
+const route = useRoute()
 
 // State
 const studios = ref([])
@@ -614,6 +617,7 @@ const hideContextMenu = () => {
 
 // Lifecycle
 onMounted(() => {
+	if (route.query.search) searchQuery.value = route.query.search
 	loadStudios()
 	loadGroups()
 	document.addEventListener('click', hideContextMenu)

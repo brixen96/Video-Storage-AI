@@ -103,12 +103,7 @@
 						<font-awesome-icon :icon="['fas', verifying ? 'spinner' : 'sync']" :spin="verifying" />
 						{{ verifying ? 'Verifying...' : 'Verify Links' }}
 					</button>
-					<button
-						class="btn btn-jdownloader"
-						@click="sendToJDownloader"
-						:disabled="totalLinks === 0 || sendingToJD"
-						title="Send to JDownloader"
-					>
+					<button class="btn btn-jdownloader" @click="openJDModal" :disabled="totalLinks === 0 || sendingToJD" title="Send to JDownloader">
 						<font-awesome-icon :icon="['fas', sendingToJD ? 'spinner' : 'cloud-download-alt']" :spin="sendingToJD" />
 						{{ sendingToJD ? 'Sending...' : 'Send to JD' }}
 					</button>
@@ -141,7 +136,7 @@
 
 			<!-- Posts Grid -->
 			<div v-else class="posts-container">
-				<div v-for="post in filteredPosts" :key="post.id" class="post-card">
+				<div v-for="post in filteredPosts" :key="post.id" class="post-card" :class="getPostCardHealthClass(post.id)">
 					<!-- Post Header -->
 					<div class="post-header">
 						<div class="post-author">
@@ -161,6 +156,10 @@
 							<span v-if="getPostLinks(post.id).length > 0" class="meta-badge">
 								<font-awesome-icon :icon="['fas', 'download']" />
 								{{ getPostLinks(post.id).length }}
+							</span>
+							<span v-if="getPostLinks(post.id).length > 0 && hasVerifiedLinks(post.id)" class="meta-badge" :class="getPostHealthClass(post.id)">
+								<font-awesome-icon :icon="getPostHealthIcon(post.id)" />
+								{{ getPostHealthSummary(post.id) }}
 							</span>
 						</div>
 					</div>
@@ -189,18 +188,8 @@
 								<span>Download Links ({{ getPostLinks(post.id).length }})</span>
 							</div>
 							<div class="download-links">
-								<div
-									v-for="link in getPostLinks(post.id)"
-									:key="link.id"
-									class="download-link-wrapper"
-									:class="`status-${link.download_status || 'pending'}`"
-								>
-									<a
-										:href="link.url"
-										target="_blank"
-										class="download-link"
-										:class="`provider-${link.provider.toLowerCase()}`"
-									>
+								<div v-for="link in getPostLinks(post.id)" :key="link.id" class="download-link-wrapper" :class="[`status-${link.download_status || 'pending'}`, `health-${link.status || 'unknown'}`]">
+									<a :href="link.url" target="_blank" class="download-link" :class="`provider-${link.provider.toLowerCase()}`">
 										<div class="link-icon">
 											<font-awesome-icon :icon="getProviderIcon(link.provider)" />
 										</div>
@@ -208,10 +197,9 @@
 											<div class="link-provider">{{ link.provider }}</div>
 											<div class="link-url">{{ truncateURL(link.url) }}</div>
 										</div>
-										<div class="link-status-badge" :class="`status-${link.download_status || 'pending'}`">
-											<font-awesome-icon :icon="getDownloadStatusIcon(link.download_status)" />
+										<div v-if="link.status && link.status !== 'unknown'" class="link-health-badge" :class="`health-${link.status}`" :title="`Link ${link.status}`">
+											<font-awesome-icon :icon="getLinkHealthIcon(link.status)" />
 										</div>
-										<font-awesome-icon :icon="['fas', 'external-link-alt']" class="link-arrow" />
 									</a>
 									<div class="link-actions">
 										<button
@@ -222,12 +210,7 @@
 										>
 											<font-awesome-icon :icon="['fas', 'check']" />
 										</button>
-										<button
-											v-if="link.download_status !== 'failed'"
-											@click.stop="markAsFailed(link.id)"
-											class="action-btn danger-btn"
-											title="Mark as failed"
-										>
+										<button v-if="link.download_status !== 'failed'" @click.stop="markAsFailed(link.id)" class="action-btn danger-btn" title="Mark as failed">
 											<font-awesome-icon :icon="['fas', 'times']" />
 										</button>
 										<button
@@ -246,14 +229,92 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Send to JDownloader Modal -->
+		<div v-if="showJDModal" class="jd-modal-backdrop" @click.self="showJDModal = false">
+			<div class="jd-modal-content">
+				<div class="jd-modal-header">
+					<h5 class="jd-modal-title">
+						<font-awesome-icon :icon="['fas', 'cloud-download-alt']" class="me-2" />
+						Send to JDownloader
+					</h5>
+					<button class="jd-btn-close" @click="showJDModal = false">&times;</button>
+				</div>
+				<div class="jd-modal-body">
+					<div v-if="jdDedupInfo" class="jd-dedup-info">
+						<font-awesome-icon :icon="['fas', 'info-circle']" />
+						<span>{{ jdDedupInfo }}</span>
+					</div>
+
+					<!-- Provider Priority Config -->
+					<div class="priority-config-section">
+						<button class="priority-toggle-btn" @click="showPriorityConfig = !showPriorityConfig">
+							<font-awesome-icon :icon="['fas', 'sort-amount-down']" class="me-1" />
+							Provider Priority
+							<font-awesome-icon :icon="['fas', showPriorityConfig ? 'chevron-up' : 'chevron-down']" class="ms-auto" />
+						</button>
+						<div v-if="showPriorityConfig" class="priority-list">
+							<div v-for="(provider, idx) in priorityList" :key="provider" class="priority-item">
+								<span class="priority-rank">{{ idx + 1 }}</span>
+								<span class="priority-name">{{ provider }}</span>
+								<div class="priority-actions">
+									<button @click="movePriorityUp(provider)" :disabled="idx === 0" class="priority-btn" title="Move up">
+										<font-awesome-icon :icon="['fas', 'chevron-up']" />
+									</button>
+									<button @click="movePriorityDown(provider)" :disabled="idx === priorityList.length - 1" class="priority-btn" title="Move down">
+										<font-awesome-icon :icon="['fas', 'chevron-down']" />
+									</button>
+								</div>
+							</div>
+							<button class="priority-reset-btn" @click="resetPriority">
+								<font-awesome-icon :icon="['fas', 'undo']" class="me-1" />Reset to defaults
+							</button>
+						</div>
+					</div>
+
+					<div class="jd-form-group">
+						<label class="jd-form-label">Links ({{ jdLinksCount }} link{{ jdLinksCount !== 1 ? 's' : '' }})</label>
+						<textarea v-model="jdLinksText" class="jd-form-control jd-textarea" rows="10" placeholder="No active links found..."></textarea>
+					</div>
+
+					<div class="jd-form-group">
+						<label class="jd-form-label">Package Name</label>
+						<input v-model="jdPackageName" type="text" class="jd-form-control" placeholder="Package name for JDownloader" />
+					</div>
+
+					<div class="jd-form-group">
+						<label class="jd-form-label">Download Path</label>
+						<div class="jd-input-group">
+							<span class="jd-input-prefix">/output/</span>
+							<input v-model="jdDownloadPath" type="text" class="jd-form-control jd-input-with-prefix" placeholder="subfolder (leave empty for root)" />
+						</div>
+					</div>
+
+					<div class="jd-form-check">
+						<input v-model="jdAutoStart" type="checkbox" class="jd-check-input" id="jdAutoStart" />
+						<label class="jd-check-label" for="jdAutoStart">Auto-start downloads</label>
+					</div>
+				</div>
+				<div class="jd-modal-footer">
+					<button class="btn btn-secondary" @click="showJDModal = false">Cancel</button>
+					<button class="btn btn-jdownloader" @click="confirmSendToJD" :disabled="!jdLinksText.trim() || sendingToJD">
+						<font-awesome-icon v-if="sendingToJD" :icon="['fas', 'spinner']" spin class="me-1" />
+						<font-awesome-icon v-else :icon="['fas', 'cloud-download-alt']" class="me-1" />
+						Send {{ jdLinksCount }} Link{{ jdLinksCount !== 1 ? 's' : '' }}
+					</button>
+				</div>
+			</div>
+		</div>
 	</div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch, getCurrentInstance } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, getCurrentInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import DOMPurify from 'dompurify'
 import { SearchBox } from '@/components/shared'
+import { openInFirefox } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 const route = useRoute()
 const { proxy } = getCurrentInstance()
@@ -274,6 +335,12 @@ const downloadStats = ref(null)
 
 // JDownloader state
 const sendingToJD = ref(false)
+const showJDModal = ref(false)
+const jdLinksText = ref('')
+const jdPackageName = ref('')
+const jdDownloadPath = ref('')
+const jdAutoStart = ref(false)
+const jdDedupInfo = ref('')
 
 // Performer creation state
 const creatingPerformer = ref(false)
@@ -374,16 +441,14 @@ const verifyLinks = async () => {
 		})
 		const data = await response.json()
 		if (data.success) {
-			toast.success('Link verification started! Check Activity page for progress.')
-			// Reload stats after a delay
-			setTimeout(loadLinkStats, 3000)
+			toast.success('Link verification started! Results will update automatically when done.')
 		} else {
 			toast.error(data.message || 'Failed to start verification')
+			verifying.value = false
 		}
 	} catch (error) {
 		console.error('Error verifying links:', error)
 		toast.error('Failed to verify links: ' + error.message)
-	} finally {
 		verifying.value = false
 	}
 }
@@ -393,7 +458,7 @@ const exportLinks = async () => {
 		// Build query params
 		const params = new URLSearchParams({
 			format: exportFormat.value,
-			status: 'active' // Only export active links by default
+			status: 'active', // Only export active links by default
 		})
 
 		if (filterProvider.value) {
@@ -431,14 +496,14 @@ const markAsDownloaded = async (linkId) => {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				download_path: '',
-				notes: ''
-			})
+				notes: '',
+			}),
 		})
 		const data = await response.json()
 		if (data.success) {
 			toast.success('Link marked as downloaded!')
 			// Update the link in the list
-			const link = downloadLinks.value.find(l => l.id === linkId)
+			const link = downloadLinks.value.find((l) => l.id === linkId)
 			if (link) link.download_status = 'downloaded'
 			// Reload stats
 			await loadDownloadStats()
@@ -456,13 +521,13 @@ const markAsFailed = async (linkId) => {
 		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/mark-failed`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ notes: 'User marked as failed' })
+			body: JSON.stringify({ notes: 'User marked as failed' }),
 		})
 		const data = await response.json()
 		if (data.success) {
 			toast.success('Link marked as failed')
 			// Update the link in the list
-			const link = downloadLinks.value.find(l => l.id === linkId)
+			const link = downloadLinks.value.find((l) => l.id === linkId)
 			if (link) link.download_status = 'failed'
 			// Reload stats
 			await loadDownloadStats()
@@ -478,13 +543,13 @@ const markAsFailed = async (linkId) => {
 const resetDownloadStatus = async (linkId) => {
 	try {
 		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/reset`, {
-			method: 'POST'
+			method: 'POST',
 		})
 		const data = await response.json()
 		if (data.success) {
 			toast.success('Download status reset')
 			// Update the link in the list
-			const link = downloadLinks.value.find(l => l.id === linkId)
+			const link = downloadLinks.value.find((l) => l.id === linkId)
 			if (link) link.download_status = 'pending'
 			// Reload stats
 			await loadDownloadStats()
@@ -497,62 +562,6 @@ const resetDownloadStatus = async (linkId) => {
 	}
 }
 
-const getDownloadStatusIcon = (status) => {
-	switch (status) {
-		case 'downloaded':
-			return ['fas', 'check-circle']
-		case 'failed':
-			return ['fas', 'times-circle']
-		case 'in_progress':
-			return ['fas', 'spinner']
-		default:
-			return ['fas', 'clock']
-	}
-}
-
-// JDownloader integration
-const sendToJDownloader = async () => {
-	sendingToJD.value = true
-	try {
-		// First check if JDownloader is available
-		const statusResponse = await fetch('http://localhost:8080/api/v1/jdownloader/status')
-		const statusData = await statusResponse.json()
-
-		if (!statusData.success || !statusData.data.available) {
-			toast.error('JDownloader is not running! Please start JDownloader and enable Direct Connection API.')
-			return
-		}
-
-		// Send thread to JDownloader (only active, pending links)
-		const response = await fetch(`http://localhost:8080/api/v1/jdownloader/threads/${route.params.id}/send`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				only_active: true,   // Only send verified active links
-				only_pending: true,  // Only send not-yet-downloaded links
-				auto_start: false    // Don't auto-start downloads
-			})
-		})
-
-		const data = await response.json()
-
-		if (data.success) {
-			const count = data.data.links_sent
-			if (count === 0) {
-				toast.info('No new links to send - all links already downloaded or inactive')
-			} else {
-				toast.success(`🎉 Sent ${count} links to JDownloader! Package: "${data.data.thread_title}"`)
-			}
-		} else {
-			toast.error(data.message || 'Failed to send links to JDownloader')
-		}
-	} catch (error) {
-		console.error('Error sending to JDownloader:', error)
-		toast.error('Failed to connect to JDownloader: ' + error.message)
-	} finally {
-		sendingToJD.value = false
-	}
-}
 
 const loadThread = async () => {
 	loading.value = true
@@ -664,8 +673,8 @@ const createPerformer = async () => {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				thread_id: parseInt(route.params.id),
-				name: performerName.trim()
-			})
+				name: performerName.trim(),
+			}),
 		})
 		const data = await response.json()
 
@@ -691,7 +700,7 @@ const getPostImages = (post) => {
 }
 
 const openImage = (url) => {
-	window.open(url, '_blank')
+	openInFirefox(url)
 }
 
 const getProviderIcon = (provider) => {
@@ -701,6 +710,7 @@ const getProviderIcon = (provider) => {
 		bunkr: ['fas', 'cloud-download-alt'],
 		bunkrr: ['fas', 'cloud-download-alt'],
 		cyberdrop: ['fas', 'cloud-download-alt'],
+		cyberfile: ['fas', 'cloud-download-alt'],
 		mediafire: ['fas', 'cloud-download-alt'],
 		mega: ['fas', 'cloud-download-alt'],
 	}
@@ -712,6 +722,272 @@ const truncateURL = (url) => {
 		return url.substring(0, 47) + '...'
 	}
 	return url
+}
+
+// Link health helpers
+const getLinkHealthIcon = (status) => {
+	switch (status) {
+		case 'active':
+			return ['fas', 'check-circle']
+		case 'dead':
+			return ['fas', 'skull-crossbones']
+		case 'expired':
+			return ['fas', 'hourglass-end']
+		default:
+			return ['fas', 'question-circle']
+	}
+}
+
+const hasVerifiedLinks = (postId) => {
+	const links = getPostLinks(postId)
+	return links.some((l) => l.status === 'active' || l.status === 'dead' || l.status === 'expired')
+}
+
+const getPostHealthSummary = (postId) => {
+	const links = getPostLinks(postId)
+	if (links.length === 0) return ''
+	const active = links.filter((l) => l.status === 'active').length
+	return `${active}/${links.length}`
+}
+
+const getPostHealthClass = (postId) => {
+	const links = getPostLinks(postId)
+	if (links.length === 0) return ''
+	const active = links.filter((l) => l.status === 'active').length
+	const dead = links.filter((l) => l.status === 'dead').length
+	if (active === links.length) return 'health-all-active'
+	if (dead === links.length) return 'health-all-dead'
+	return 'health-mixed'
+}
+
+const getPostHealthIcon = (postId) => {
+	const links = getPostLinks(postId)
+	if (links.length === 0) return ['fas', 'link']
+	const active = links.filter((l) => l.status === 'active').length
+	if (active === links.length) return ['fas', 'check-circle']
+	if (active === 0) return ['fas', 'times-circle']
+	return ['fas', 'exclamation-triangle']
+}
+
+const getPostCardHealthClass = (postId) => {
+	const links = getPostLinks(postId)
+	if (links.length === 0) return ''
+	if (!hasVerifiedLinks(postId)) return ''
+	const active = links.filter((l) => l.status === 'active').length
+	if (active === links.length) return 'post-health-active'
+	if (active === 0) return 'post-health-dead'
+	return 'post-health-mixed'
+}
+
+// JDownloader modal - deduplication and sending
+// Default priority order (lower number = higher priority, picked first)
+const DEFAULT_PROVIDER_PRIORITY = {
+	pixeldrain: 1,
+	gofile: 2,
+	cyberfile: 3,
+	bunkr: 4,
+	bunkrr: 4,
+	cyberdrop: 5,
+	mediafire: 6,
+	mega: 7,
+}
+
+// Load user-configured priority from localStorage, fall back to defaults
+const loadProviderPriority = () => {
+	try {
+		const saved = localStorage.getItem('providerPriority')
+		if (saved) {
+			const parsed = JSON.parse(saved)
+			for (const [provider, priority] of Object.entries(DEFAULT_PROVIDER_PRIORITY)) {
+				if (!(provider in parsed)) parsed[provider] = priority
+			}
+			const sorted = Object.entries(parsed).sort(([, a], [, b]) => a - b)
+			const values = sorted.map(([, v]) => v)
+			if (new Set(values).size !== values.length) {
+				const fixed = {}
+				sorted.forEach(([name], idx) => { fixed[name] = idx + 1 })
+				localStorage.setItem('providerPriority', JSON.stringify(fixed))
+				return fixed
+			}
+			return parsed
+		}
+	} catch (e) { /* ignore */ }
+	return { ...DEFAULT_PROVIDER_PRIORITY }
+}
+
+const providerPriority = ref(loadProviderPriority())
+const showPriorityConfig = ref(false)
+
+const savePriority = () => {
+	localStorage.setItem('providerPriority', JSON.stringify(providerPriority.value))
+}
+
+// Ordered list for the priority config UI (ascending: lower number = higher priority)
+// Filter out bunkrr alias - it stays synced with bunkr
+const priorityList = computed(() => {
+	return Object.entries(providerPriority.value)
+		.filter(([name]) => name !== 'bunkrr')
+		.sort(([, a], [, b]) => a - b)
+		.map(([name]) => name)
+})
+
+const movePriorityUp = (provider) => {
+	const list = priorityList.value
+	const idx = list.indexOf(provider)
+	if (idx <= 0) return
+	const above = list[idx - 1]
+	const temp = providerPriority.value[provider]
+	providerPriority.value[provider] = providerPriority.value[above]
+	providerPriority.value[above] = temp
+	// Keep bunkrr synced with bunkr
+	if (provider === 'bunkr' || above === 'bunkr') {
+		providerPriority.value['bunkrr'] = providerPriority.value['bunkr']
+	}
+	savePriority()
+}
+
+const movePriorityDown = (provider) => {
+	const list = priorityList.value
+	const idx = list.indexOf(provider)
+	if (idx < 0 || idx >= list.length - 1) return
+	const below = list[idx + 1]
+	const temp = providerPriority.value[provider]
+	providerPriority.value[provider] = providerPriority.value[below]
+	providerPriority.value[below] = temp
+	if (provider === 'bunkr' || below === 'bunkr') {
+		providerPriority.value['bunkrr'] = providerPriority.value['bunkr']
+	}
+	savePriority()
+}
+
+const resetPriority = () => {
+	providerPriority.value = { ...DEFAULT_PROVIDER_PRIORITY }
+	savePriority()
+}
+
+const getProviderPriority = (provider) => {
+	return providerPriority.value[provider.toLowerCase()] || 0
+}
+
+const jdLinksCount = computed(() => {
+	if (!jdLinksText.value.trim()) return 0
+	return jdLinksText.value
+		.trim()
+		.split('\n')
+		.filter((l) => l.trim()).length
+})
+
+const getDeduplicatedActiveLinks = () => {
+	const activeLinks = downloadLinks.value.filter((l) => l.status === 'active')
+	const totalActive = activeLinks.length
+
+	// Group by post_id
+	const byPost = {}
+	for (const link of activeLinks) {
+		if (!byPost[link.post_id]) {
+			byPost[link.post_id] = []
+		}
+		byPost[link.post_id].push(link)
+	}
+
+	// For each post, pick the highest-priority provider link
+	const deduplicated = []
+	for (const postId of Object.keys(byPost)) {
+		const postLinks = byPost[postId]
+		if (postLinks.length === 1) {
+			deduplicated.push(postLinks[0])
+			continue
+		}
+		postLinks.sort((a, b) => getProviderPriority(a.provider) - getProviderPriority(b.provider))
+		deduplicated.push(postLinks[0])
+	}
+
+	return {
+		links: deduplicated.map((l) => l.url),
+		removedCount: totalActive - deduplicated.length,
+		totalActive,
+	}
+}
+
+const openJDModal = async () => {
+	// Check JDownloader availability
+	try {
+		const statusResponse = await fetch('http://localhost:8080/api/v1/jdownloader/status')
+		const statusData = await statusResponse.json()
+
+		if (!statusData.success && !statusData.available && !statusData.connected) {
+			toast.error('JDownloader is not running! Please start JDownloader and enable Direct Connection API.')
+			return
+		}
+	} catch (error) {
+		toast.error('Cannot connect to JDownloader: ' + error.message)
+		return
+	}
+
+	// Run deduplication
+	const result = getDeduplicatedActiveLinks()
+
+	// Pre-fill modal fields
+	jdLinksText.value = result.links.join('\n')
+	jdPackageName.value = thread.value?.title || ''
+	jdDownloadPath.value = ''
+	jdAutoStart.value = false
+
+	// Info about deduplication
+	if (result.removedCount > 0) {
+		jdDedupInfo.value = `${result.removedCount} duplicate link${result.removedCount !== 1 ? 's' : ''} removed (${result.totalActive} active → ${result.links.length}). Priority: ${priorityList.value.join(' > ')}`
+	} else if (result.totalActive > 0) {
+		jdDedupInfo.value = `${result.links.length} verified active link${result.links.length !== 1 ? 's' : ''} ready to send.`
+	} else {
+		jdDedupInfo.value = 'No active (verified) links found. Try verifying links first.'
+	}
+
+	showJDModal.value = true
+}
+
+const confirmSendToJD = async () => {
+	if (!jdLinksText.value.trim()) return
+
+	sendingToJD.value = true
+	try {
+		const urls = jdLinksText.value
+			.trim()
+			.split('\n')
+			.filter((l) => l.trim())
+		const downloadPath = jdDownloadPath.value.trim() ? `/output/${jdDownloadPath.value.trim().replace(/^\/+/, '')}` : ''
+
+		const links = urls.map((url) => ({
+			url: url.trim(),
+			packageName: jdPackageName.value || undefined,
+			downloadPath: downloadPath || undefined,
+			autoStart: jdAutoStart.value,
+		}))
+
+		const response = await fetch('http://localhost:8080/api/v1/jdownloader/send', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ links }),
+		})
+
+		const data = await response.json()
+
+		if (data.successCount > 0) {
+			toast.success(`Sent ${data.successCount} link${data.successCount !== 1 ? 's' : ''} to JDownloader!`)
+		}
+		if (data.failCount > 0) {
+			toast.error(`${data.failCount} link${data.failCount !== 1 ? 's' : ''} failed to send`)
+		}
+		if (!data.successCount && !data.failCount) {
+			toast.info('No links were sent')
+		}
+
+		showJDModal.value = false
+	} catch (error) {
+		console.error('Error sending to JDownloader:', error)
+		toast.error('Failed to send links: ' + error.message)
+	} finally {
+		sendingToJD.value = false
+	}
 }
 
 const sanitizeHTML = (html) => {
@@ -748,10 +1024,42 @@ const formatDate = (dateString) => {
 	})
 }
 
+let unsubVerification = null
+let unsubActivity = null
+
 onMounted(() => {
 	loadThread()
 	loadLinkStats()
 	loadDownloadStats()
+
+	const threadId = parseInt(route.params.id)
+
+	// Auto-update when verification completes
+	unsubVerification = websocketService.on('link_verification_complete', (data) => {
+		if (data.thread_id !== threadId) return
+		verifying.value = false
+		toast.success(`Verification complete: ${data.active} active, ${data.dead} dead, ${data.expired} expired (${data.total} total)`)
+		loadLinkStats()
+		loadThread() // reload link statuses on each card
+	})
+
+	// Keep verifying spinner alive while task is in progress
+	unsubActivity = websocketService.on('activity_update', (activity) => {
+		if (activity.task_type !== 'link_verification') return
+		if (activity.details?.thread_id !== threadId) return
+		if (activity.status === 'completed' || activity.status === 'failed') {
+			verifying.value = false
+			if (activity.status === 'completed') {
+				loadLinkStats()
+				loadThread()
+			}
+		}
+	})
+})
+
+onBeforeUnmount(() => {
+	if (unsubVerification) unsubVerification()
+	if (unsubActivity) unsubActivity()
 })
 
 // Watch for route parameter changes (when navigating from one thread to another)
@@ -1425,11 +1733,27 @@ watch(
 
 /* Download Tracking Styles */
 .download-link-wrapper {
-	position: relative;
 	display: flex;
 	gap: 0.5rem;
 	align-items: center;
-	transition: all 0.2s;
+	transition: border-color 0.2s, opacity 0.2s;
+	border: 2px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	padding: 0.4rem;
+	margin-bottom: 0.35rem;
+}
+
+/* Health-based border colors */
+.download-link-wrapper.health-active {
+	border-color: rgba(81, 207, 102, 0.5);
+}
+
+.download-link-wrapper.health-dead {
+	border-color: rgba(255, 107, 107, 0.5);
+}
+
+.download-link-wrapper.health-expired {
+	border-color: rgba(255, 169, 77, 0.5);
 }
 
 .download-link-wrapper.status-downloaded {
@@ -1438,48 +1762,87 @@ watch(
 
 .download-link-wrapper .download-link {
 	flex: 1;
-}
-
-.link-status-badge {
-	width: 28px;
-	height: 28px;
-	border-radius: 50%;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	font-size: 0.85rem;
-	margin-left: auto;
-}
-
-.link-status-badge.status-downloaded {
-	background: rgba(81, 207, 102, 0.15);
-	color: #51cf66;
-}
-
-.link-status-badge.status-failed {
-	background: rgba(255, 107, 107, 0.15);
-	color: #ff6b6b;
-}
-
-.link-status-badge.status-in_progress {
-	background: rgba(74, 171, 247, 0.15);
-	color: #4dabf7;
-}
-
-.link-status-badge.status-pending {
-	background: rgba(255, 255, 255, 0.05);
-	color: rgba(255, 255, 255, 0.3);
+	min-width: 0;
 }
 
 .link-actions {
 	display: flex;
 	gap: 0.25rem;
-	opacity: 0;
-	transition: opacity 0.2s;
+	flex-shrink: 0;
 }
 
-.download-link-wrapper:hover .link-actions {
-	opacity: 1;
+/* Link Health Indicators */
+.link-health-badge {
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.7rem;
+	flex-shrink: 0;
+}
+
+.link-health-badge.health-active {
+	background: rgba(81, 207, 102, 0.15);
+	color: #51cf66;
+}
+
+.link-health-badge.health-dead {
+	background: rgba(255, 107, 107, 0.15);
+	color: #ff6b6b;
+}
+
+.link-health-badge.health-expired {
+	background: rgba(255, 169, 77, 0.15);
+	color: #ffa94d;
+}
+
+/* Dead link styling */
+.download-link-wrapper.health-dead .download-link {
+	opacity: 0.45;
+}
+
+.download-link-wrapper.health-dead .link-url {
+	text-decoration: line-through;
+	color: rgba(255, 107, 107, 0.5);
+}
+
+/* Expired link styling */
+.download-link-wrapper.health-expired .link-url {
+	color: rgba(255, 169, 77, 0.6);
+}
+
+/* Post health summary badges */
+.meta-badge.health-all-active {
+	background: rgba(81, 207, 102, 0.15);
+	color: #51cf66;
+	border: 1px solid rgba(81, 207, 102, 0.3);
+}
+
+.meta-badge.health-all-dead {
+	background: rgba(255, 107, 107, 0.15);
+	color: #ff6b6b;
+	border: 1px solid rgba(255, 107, 107, 0.3);
+}
+
+.meta-badge.health-mixed {
+	background: rgba(255, 169, 77, 0.15);
+	color: #ffa94d;
+	border: 1px solid rgba(255, 169, 77, 0.3);
+}
+
+/* Post card left border based on health */
+.post-card.post-health-active {
+	border-left: 3px solid #51cf66;
+}
+
+.post-card.post-health-dead {
+	border-left: 3px solid #ff6b6b;
+}
+
+.post-card.post-health-mixed {
+	border-left: 3px solid #ffa94d;
 }
 
 .action-btn {
@@ -1558,5 +1921,284 @@ watch(
 	.media-grid {
 		grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 	}
+}
+
+/* Send to JDownloader Modal */
+.jd-modal-backdrop {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.7);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1050;
+}
+
+.jd-modal-content {
+	background: #1a1a2e;
+	border-radius: 16px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	width: 90%;
+	max-width: 650px;
+	max-height: 90vh;
+	overflow: auto;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.jd-modal-header {
+	padding: 1.25rem 1.5rem;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.jd-modal-title {
+	margin: 0;
+	color: #fff;
+	font-size: 1.2rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+}
+
+.jd-btn-close {
+	background: transparent;
+	border: none;
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 1.5rem;
+	cursor: pointer;
+	padding: 0;
+	line-height: 1;
+}
+
+.jd-btn-close:hover {
+	color: #fff;
+}
+
+.jd-modal-body {
+	padding: 1.5rem;
+}
+
+.jd-modal-footer {
+	padding: 1rem 1.5rem;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.75rem;
+}
+
+.jd-form-group {
+	margin-bottom: 1.25rem;
+}
+
+.jd-form-label {
+	display: block;
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 0.9rem;
+	font-weight: 500;
+	margin-bottom: 0.5rem;
+}
+
+.jd-form-control {
+	width: 100%;
+	padding: 0.75rem 1rem;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 10px;
+	color: #fff;
+	font-size: 0.9rem;
+	transition: border-color 0.2s;
+}
+
+.jd-form-control:focus {
+	outline: none;
+	border-color: rgba(74, 171, 247, 0.5);
+	background: rgba(255, 255, 255, 0.08);
+}
+
+.jd-form-control::placeholder {
+	color: rgba(255, 255, 255, 0.3);
+}
+
+.jd-textarea {
+	resize: vertical;
+	min-height: 120px;
+	font-family: 'Fira Code', 'Consolas', monospace;
+	font-size: 0.8rem;
+	line-height: 1.5;
+}
+
+.jd-input-group {
+	display: flex;
+}
+
+.jd-input-prefix {
+	padding: 0.75rem 0.75rem;
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-right: none;
+	border-radius: 10px 0 0 10px;
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 0.9rem;
+	display: flex;
+	align-items: center;
+}
+
+.jd-input-with-prefix {
+	border-radius: 0 10px 10px 0;
+}
+
+.jd-form-check {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.jd-check-input {
+	width: 18px;
+	height: 18px;
+	accent-color: #4dabf7;
+	cursor: pointer;
+}
+
+.jd-check-label {
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 0.9rem;
+	cursor: pointer;
+}
+
+.jd-dedup-info {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.75rem;
+	padding: 0.75rem 1rem;
+	border-radius: 10px;
+	background: rgba(74, 171, 247, 0.1);
+	border: 1px solid rgba(74, 171, 247, 0.2);
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 0.85rem;
+	margin-bottom: 1.25rem;
+	line-height: 1.4;
+}
+
+.jd-dedup-info svg {
+	color: #4dabf7;
+	font-size: 1rem;
+	margin-top: 0.1rem;
+	flex-shrink: 0;
+}
+
+/* Priority Config */
+.priority-config-section {
+	margin-bottom: 1rem;
+}
+
+.priority-toggle-btn {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 0.6rem 1rem;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	color: rgba(255, 255, 255, 0.8);
+	font-size: 0.85rem;
+	cursor: pointer;
+	transition: background 0.2s;
+}
+.priority-toggle-btn:hover {
+	background: rgba(255, 255, 255, 0.1);
+}
+
+.priority-list {
+	margin-top: 0.5rem;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.priority-item {
+	display: flex;
+	align-items: center;
+	padding: 0.5rem 0.75rem;
+	background: rgba(255, 255, 255, 0.03);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.priority-item:last-of-type {
+	border-bottom: none;
+}
+
+.priority-rank {
+	width: 1.5rem;
+	height: 1.5rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(139, 92, 246, 0.2);
+	color: #a78bfa;
+	border-radius: 50%;
+	font-size: 0.75rem;
+	font-weight: 600;
+	margin-right: 0.75rem;
+	flex-shrink: 0;
+}
+
+.priority-name {
+	flex: 1;
+	color: rgba(255, 255, 255, 0.85);
+	font-size: 0.85rem;
+	text-transform: capitalize;
+}
+
+.priority-actions {
+	display: flex;
+	gap: 0.25rem;
+}
+
+.priority-btn {
+	width: 1.6rem;
+	height: 1.6rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 4px;
+	color: rgba(255, 255, 255, 0.6);
+	cursor: pointer;
+	font-size: 0.7rem;
+	transition: all 0.2s;
+}
+.priority-btn:hover:not(:disabled) {
+	background: rgba(139, 92, 246, 0.2);
+	color: #a78bfa;
+	border-color: rgba(139, 92, 246, 0.3);
+}
+.priority-btn:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
+.priority-reset-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	padding: 0.45rem;
+	background: rgba(255, 255, 255, 0.03);
+	border: none;
+	border-top: 1px solid rgba(255, 255, 255, 0.06);
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 0.8rem;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+.priority-reset-btn:hover {
+	background: rgba(255, 255, 255, 0.06);
+	color: rgba(255, 255, 255, 0.8);
 }
 </style>
