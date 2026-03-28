@@ -402,20 +402,38 @@ func resetPreviews(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement preview reset logic
 	performer, err := svc.GetByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, models.ErrorResponseMsg(
-			"Performer not found",
-			err.Error(),
-		))
+		c.JSON(http.StatusNotFound, models.ErrorResponseMsg("Performer not found", err.Error()))
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		performer,
-		"Preview reset not yet implemented. Coming soon!",
-	))
+	if !performer.PreviewPath.Valid || performer.PreviewPath.String == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("No preview video", "This performer has no preview video to generate a thumbnail from."))
+		return
+	}
+
+	// Delete existing thumbnail file so GenerateThumbnailForPerformer regenerates it
+	if performer.ThumbnailPath.Valid && performer.ThumbnailPath.String != "" {
+		thumbSvc := services.NewPerformerThumbnailService(services.NewMediaService(), services.NewActivityService())
+		thumbSvc.DeleteThumbnail(performer.ThumbnailPath.String)
+	}
+
+	// Clear thumbnail_path in DB so the generator doesn't skip it
+	if err := svc.ClearThumbnailPath(id); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to clear thumbnail", err.Error()))
+		return
+	}
+
+	// Regenerate in background
+	go func() {
+		thumbSvc := services.NewPerformerThumbnailService(services.NewMediaService(), services.NewActivityService())
+		if _, err := thumbSvc.GenerateThumbnailForPerformer(id); err != nil {
+			log.Printf("Failed to regenerate thumbnail for performer %d: %v", id, err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil, "Thumbnail regeneration started"))
 }
 
 // scanPerformers scans the performer asset folders and creates/updates performers

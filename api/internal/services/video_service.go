@@ -735,6 +735,12 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 
 	// Process videos sequentially, but queue thumbnails for parallel generation
 	for _, filePath := range videoFiles {
+		// Respect pause/cancel — check before each file so the task stops promptly
+		if IsActivityPaused(int64(activity.ID)) {
+			log.Printf("Library scan cancelled/paused at %d/%d files", processed, total)
+			break
+		}
+
 		processed++
 		progress := int((float64(processed) / float64(total)) * 100)
 		currentFile := filepath.Base(filePath)
@@ -1518,8 +1524,12 @@ func (s *VideoService) GenerateAllThumbnails() error {
 		}(i)
 	}
 
-	// Queue all videos
+	// Queue all videos, stopping early if the task is cancelled
 	for _, video := range videos {
+		if activity != nil && IsActivityPaused(int64(activity.ID)) {
+			log.Printf("Thumbnail generation cancelled/paused, stopping queue")
+			break
+		}
 		thumbnailJobs <- video
 	}
 

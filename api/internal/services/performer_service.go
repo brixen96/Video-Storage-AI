@@ -651,3 +651,9 @@ func (s *PerformerService) DecrementVideoCount(performerID int64) error {
 	}
 	return nil
 }
+
+// ClearThumbnailPath nulls out the thumbnail_path for a performer so it can be regenerated.
+func (s *PerformerService) ClearThumbnailPath(id int64) error {
+	_, err := s.db.Exec(`UPDATE performers SET thumbnail_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
+	return err
+}

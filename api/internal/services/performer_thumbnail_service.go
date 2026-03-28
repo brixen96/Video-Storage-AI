@@ -301,3 +301,19 @@ func (ps *PerformerService) UpdateWithThumbnailCheck(id int64, update *models.Pe
 
 	return performer, nil
 }
+
+// DeleteThumbnail removes a performer thumbnail file from disk.
+// thumbnailPath is the stored value (e.g. "/assets/previews/123/thumbnail.jpg").
+func (s *PerformerThumbnailService) DeleteThumbnail(thumbnailPath string) {
+	if thumbnailPath == "" {
+		return
+	}
+	p := thumbnailPath
+	if len(p) > 8 && p[:8] == "/assets/" {
+		p = p[8:]
+	}
+	fullPath := filepath.Join(s.assetsBaseDir, filepath.FromSlash(p))
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Warning: could not delete thumbnail %s: %v", fullPath, err)
+	}
+}

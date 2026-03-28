@@ -115,6 +115,11 @@ func (s *ThumbnailService) GenerateThumbnailsForFolder(libraryID int64, folderPa
 		skipped := 0
 
 		for _, videoFile := range videosNeedingThumbnails {
+			if activity != nil && IsActivityPaused(int64(activity.ID)) {
+				log.Printf("Thumbnail generation cancelled/paused at %d/%d", processed+failed+skipped, len(videosNeedingThumbnails))
+				break
+			}
+
 			videoPath := filepath.Join(fullPath, videoFile)
 
 			// Extract metadata
