@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
@@ -22,17 +23,11 @@ type PerformerScanService struct {
 
 // NewPerformerScanService creates a new performer scan service
 func NewPerformerScanService() *PerformerScanService {
-	// Get absolute path to assets directory (api/assets since server runs from api folder)
-	assetsBase, err := filepath.Abs("./assets")
-	if err != nil {
-		// Fallback to relative path
-		assetsBase = "./assets"
-	}
-
+	performersDir := filepath.Join(config.DataDir(), "performers")
 	return &PerformerScanService{
 		performerService: NewPerformerService(),
-		assetsPath:       "assets/performers",
-		assetsBaseDir:    assetsBase,
+		assetsPath:       performersDir,
+		assetsBaseDir:    config.DataDir(),
 	}
 }
 

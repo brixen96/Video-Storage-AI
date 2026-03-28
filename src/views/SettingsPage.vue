@@ -40,6 +40,12 @@
 					</button>
 				</li>
 				<li class="nav-item" role="presentation">
+					<button :class="['nav-link', { active: activeTab === 'server' }]" @click="activeTab = 'server'" type="button">
+						<font-awesome-icon :icon="['fas', 'server']" class="me-2" />
+						Server
+					</button>
+				</li>
+				<li class="nav-item" role="presentation">
 					<button :class="['nav-link', { active: activeTab === 'about' }]" @click="activeTab = 'about'" type="button">
 						<font-awesome-icon :icon="['fas', 'info-circle']" class="me-2" />
 						About
@@ -443,6 +449,148 @@
 				</div>
 
 				<!-- About -->
+				<!-- Server Settings -->
+				<div v-if="activeTab === 'server'" class="settings-section">
+
+					<!-- Service Control Panel -->
+					<div class="setting-group mb-4">
+						<div class="d-flex align-items-center gap-3 mb-3">
+							<h4 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'server']" class="me-2" />
+								Service Control
+							</h4>
+							<button class="btn btn-sm btn-outline-secondary" :disabled="loadingServices" @click="loadServiceStatus">
+								<font-awesome-icon :icon="['fas', 'sync-alt']" :spin="loadingServices" class="me-1" />
+								Refresh
+							</button>
+						</div>
+						<div class="service-cards d-flex gap-3 mb-3 flex-wrap">
+							<div v-for="(svc, key) in services" :key="key" class="service-card card p-3" style="min-width:220px;flex:1">
+								<div class="d-flex align-items-center justify-content-between mb-1">
+									<strong>{{ key === 'api' ? 'API Server' : 'Web Server' }}</strong>
+									<span class="badge" :class="serviceStatusClass(svc)">{{ serviceStatusLabel(svc) }}</span>
+								</div>
+								<small class="text-muted d-block mb-2">{{ svc ? svc.name : '...' }}</small>
+								<div class="d-flex gap-2 align-items-center">
+									<button
+										class="btn btn-sm btn-success"
+										title="Start"
+										:disabled="serviceActionPending !== null || !svc || svc.status === 'running' || !svc.installed"
+										@click="doServiceAction(key, 'start')"
+									>
+										<font-awesome-icon :icon="['fas', 'play']" />
+									</button>
+									<button
+										class="btn btn-sm btn-warning"
+										title="Restart"
+										:disabled="serviceActionPending !== null || !svc || svc.status !== 'running'"
+										@click="doServiceAction(key, 'restart')"
+									>
+										<font-awesome-icon :icon="['fas', 'redo']" />
+									</button>
+									<button
+										class="btn btn-sm btn-danger"
+										title="Stop"
+										:disabled="serviceActionPending !== null || !svc || svc.status !== 'running'"
+										@click="doServiceAction(key, 'stop')"
+									>
+										<font-awesome-icon :icon="['fas', 'stop']" />
+									</button>
+								</div>
+							</div>
+						</div>
+						<div class="d-flex gap-2 mb-2">
+							<button
+								class="btn btn-sm btn-outline-warning"
+								:disabled="serviceActionPending !== null"
+								@click="doServiceAction('both', 'restart')"
+							>
+								<font-awesome-icon :icon="['fas', 'redo']" class="me-1" />
+								Restart All
+							</button>
+							<button
+								class="btn btn-sm btn-outline-danger"
+								:disabled="serviceActionPending !== null"
+								@click="doServiceAction('both', 'stop')"
+							>
+								<font-awesome-icon :icon="['fas', 'stop']" class="me-1" />
+								Stop All
+							</button>
+						</div>
+						<p class="text-muted small mb-0">
+							<font-awesome-icon :icon="['fas', 'info-circle']" class="me-1" />
+							Services must be installed as Windows services for these controls to work. Run <code>install-services.bat</code> as Administrator.
+						</p>
+					</div>
+
+					<!-- Live Log Viewer -->
+					<div class="setting-group mb-4">
+						<div class="d-flex align-items-center justify-content-between mb-2">
+							<h4 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'terminal']" class="me-2" />
+								Recent Logs
+							</h4>
+							<button class="btn btn-sm btn-outline-secondary" :disabled="loadingLogs" @click="loadConsoleLogs">
+								<font-awesome-icon :icon="['fas', 'sync-alt']" :spin="loadingLogs" />
+							</button>
+						</div>
+						<div class="log-viewer" ref="logViewer">
+							<div v-if="consoleLogs.length === 0 && !loadingLogs" class="text-muted small p-2">No logs found.</div>
+							<div v-for="log in consoleLogs" :key="log.id" class="log-entry" :class="'log-level-' + log.level">
+								<span class="log-time">{{ formatLogTime(log.created_at) }}</span>
+								<span class="log-badge" :class="'log-badge-' + log.level">{{ log.level }}</span>
+								<span class="log-source">{{ log.source }}</span>
+								<span class="log-msg">{{ log.message }}</span>
+							</div>
+						</div>
+					</div>
+
+					<hr />
+
+					<div class="setting-item">
+						<div class="setting-info">
+							<h4>API Port</h4>
+							<p>The port the backend API server listens on. Default: 8080.</p>
+						</div>
+						<div class="setting-control">
+							<input
+								v-model="appConfig.server_port"
+								type="number"
+								class="form-control"
+								min="1024"
+								max="65535"
+								style="width: 120px"
+							/>
+						</div>
+					</div>
+					<div class="setting-item">
+						<div class="setting-info">
+							<h4>Web Port</h4>
+							<p>The port the frontend web server listens on. Default: 3000.</p>
+						</div>
+						<div class="setting-control">
+							<input
+								v-model="appConfig.web_port"
+								type="number"
+								class="form-control"
+								min="1024"
+								max="65535"
+								style="width: 120px"
+							/>
+						</div>
+					</div>
+					<p class="text-warning small mt-2">
+						<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-1" />
+						A restart of both services is required for port changes to take effect.
+					</p>
+					<div class="settings-footer">
+						<button class="btn btn-primary" :disabled="savingAppConfig" @click="saveAppConfig">
+							<font-awesome-icon v-if="savingAppConfig" :icon="['fas', 'spinner']" spin class="me-2" />
+							Save &amp; Restart Required
+						</button>
+					</div>
+				</div>
+
 				<div v-if="activeTab === 'about'" class="settings-section">
 					<div class="about-content">
 						<div class="app-info">
@@ -450,7 +598,7 @@
 								<font-awesome-icon :icon="['fas', 'video']" class="me-3 text-primary" />
 								Video Storage AI
 							</h3>
-							<p class="version">Version 1.0.0</p>
+							<p class="version">Version {{ appVersion || '...' }}</p>
 							<p class="description">
 								A powerful video library management system with AI-powered organization, metadata management, and intelligent search capabilities.
 							</p>
@@ -496,6 +644,41 @@
 							</div>
 						</div>
 
+						<!-- Update checker -->
+						<div class="update-section mt-4">
+							<h4>Updates</h4>
+							<div v-if="!updateInfo" class="d-flex align-items-center gap-3">
+								<button class="btn btn-outline-primary" @click="checkForUpdate" :disabled="checkingUpdate">
+									<font-awesome-icon :icon="['fas', 'sync-alt']" :spin="checkingUpdate" class="me-2" />
+									{{ checkingUpdate ? 'Checking...' : 'Check for Updates' }}
+								</button>
+							</div>
+							<div v-else class="update-result">
+								<div v-if="updateInfo.update_available" class="alert alert-success d-flex align-items-center gap-3 mb-2">
+									<font-awesome-icon :icon="['fas', 'arrow-up']" />
+									<span>
+										Update available: <strong>v{{ updateInfo.latest_version }}</strong>
+										<span v-if="updateInfo.published_at" class="text-muted ms-2 small">
+											({{ new Date(updateInfo.published_at).toLocaleDateString() }})
+										</span>
+									</span>
+									<button class="btn btn-success btn-sm ms-auto" @click="installUpdate" :disabled="installingUpdate">
+										<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
+										{{ installingUpdate ? 'Downloading...' : 'Install Update' }}
+									</button>
+								</div>
+								<div v-else class="alert alert-info d-flex align-items-center gap-2 mb-2">
+									<font-awesome-icon :icon="['fas', 'check-circle']" />
+									You're on the latest version (v{{ updateInfo.current_version }}).
+								</div>
+								<div v-if="updateInfo.release_notes" class="release-notes small text-muted border rounded p-2 mb-2" style="max-height:120px;overflow-y:auto;white-space:pre-wrap;">{{ updateInfo.release_notes }}</div>
+								<button class="btn btn-outline-secondary btn-sm" @click="updateInfo = null">
+									<font-awesome-icon :icon="['fas', 'times']" class="me-1" />
+									Dismiss
+								</button>
+							</div>
+						</div>
+
 						<div class="links-section mt-4">
 							<h4>Links</h4>
 							<div class="link-buttons">
@@ -534,7 +717,8 @@
 
 <script>
 import settingsService from '@/services/settingsService'
-import { jdownloaderAPI, aiAPI } from '@/services/api'
+import { jdownloaderAPI, aiAPI, appConfigAPI, systemAPI, consoleLogAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 
 export default {
 	name: 'SettingsPage',
@@ -576,6 +760,22 @@ export default {
 			},
 			aiTestingConnection: false,
 			aiSavingConfig: false,
+			// Server / app config
+			appConfig: { server_port: '8080' },
+			savingAppConfig: false,
+			appVersion: null,
+			// Update checker
+			checkingUpdate: false,
+			installingUpdate: false,
+			updateInfo: null,
+			// Service control
+			services: { api: null, web: null },
+			loadingServices: false,
+			serviceActionPending: null,
+			// Log viewer
+			consoleLogs: [],
+			loadingLogs: false,
+			wsUnsubLog: null,
 		}
 	},
 	watch: {
@@ -590,12 +790,36 @@ export default {
 				this.loadJDConfig()
 				this.loadAIConfig()
 			}
+			if (newTab === 'server') {
+				this.loadAppConfig()
+				this.loadServiceStatus()
+				this.loadConsoleLogs()
+			}
+			if (newTab === 'about') {
+				this.loadVersion()
+			}
 		},
 	},
 	mounted() {
 		// Load JD config if starting on integrations tab
 		if (this.activeTab === 'integrations') {
 			this.loadJDConfig()
+		}
+		this.loadVersion()
+		// Subscribe to live log events
+		this.wsUnsubLog = websocketService.on('console_log', (data) => {
+			if (data) {
+				this.consoleLogs.unshift(data)
+				if (this.consoleLogs.length > 100) {
+					this.consoleLogs.splice(100)
+				}
+			}
+		})
+	},
+	beforeUnmount() {
+		if (this.wsUnsubLog) {
+			this.wsUnsubLog()
+			this.wsUnsubLog = null
 		}
 	},
 	methods: {
@@ -712,6 +936,62 @@ export default {
 				this.aiSavingConfig = false
 			}
 		},
+		async loadVersion() {
+			try {
+				const res = await systemAPI.getHealth()
+				this.appVersion = res?.data?.version || null
+			} catch {
+				// non-critical, leave as null
+			}
+		},
+		async checkForUpdate() {
+			this.checkingUpdate = true
+			this.updateInfo = null
+			try {
+				const res = await systemAPI.checkUpdate()
+				this.updateInfo = res.data?.data || null
+			} catch (error) {
+				this.$toast.error('Update check failed', error?.response?.data?.message || error.message)
+			} finally {
+				this.checkingUpdate = false
+			}
+		},
+		async installUpdate() {
+			if (!this.updateInfo?.download_url) {
+				this.$toast.error('No download URL available')
+				return
+			}
+			this.installingUpdate = true
+			try {
+				await systemAPI.installUpdate(this.updateInfo.download_url)
+				this.$toast.success('Update installed', 'The service will restart momentarily.')
+			} catch (error) {
+				this.$toast.error('Update failed', error?.response?.data?.message || error.message)
+			} finally {
+				this.installingUpdate = false
+			}
+		},
+		// Server / app config methods
+		async loadAppConfig() {
+			try {
+				const response = await appConfigAPI.get()
+				this.appConfig = response.data?.data || { server_port: '8080' }
+			} catch (error) {
+				console.error('Failed to load app config:', error)
+			}
+		},
+		async saveAppConfig() {
+			this.savingAppConfig = true
+			try {
+				await appConfigAPI.update(this.appConfig)
+				this.$toast.success('Server config saved', 'Restart the app for the new port to take effect')
+			} catch (error) {
+				console.error('Failed to save app config:', error)
+				this.$toast.error('Failed to save server config')
+			} finally {
+				this.savingAppConfig = false
+			}
+		},
 		async testAIConnection() {
 			this.aiTestingConnection = true
 			try {
@@ -738,6 +1018,76 @@ export default {
 				}
 			} finally {
 				this.aiTestingConnection = false
+			}
+		},
+		// Service control methods
+		async loadServiceStatus() {
+			this.loadingServices = true
+			try {
+				const res = await systemAPI.getServices()
+				const data = res.data?.data || {}
+				this.services = {
+					api: data.api || null,
+					web: data.web || null,
+				}
+			} catch (error) {
+				console.error('Failed to load service status:', error)
+			} finally {
+				this.loadingServices = false
+			}
+		},
+		async doServiceAction(service, action) {
+			this.serviceActionPending = service
+			try {
+				await systemAPI.controlService(service, action)
+				this.$toast.success(`${action} ${service} initiated`)
+				// Refresh status after the service has had time to change state
+				setTimeout(() => this.loadServiceStatus(), 3000)
+			} catch (error) {
+				this.$toast.error(`Failed to ${action} ${service}`, error?.response?.data?.message || error.message)
+			} finally {
+				this.serviceActionPending = null
+			}
+		},
+		async loadConsoleLogs() {
+			this.loadingLogs = true
+			try {
+				const res = await consoleLogAPI.getAll({ limit: 50, page: 1 })
+				const data = res.data?.data || res.data || []
+				this.consoleLogs = Array.isArray(data) ? data : (data.logs || data.items || [])
+			} catch (error) {
+				console.error('Failed to load console logs:', error)
+			} finally {
+				this.loadingLogs = false
+			}
+		},
+		serviceStatusClass(svc) {
+			if (!svc || !svc.installed) return 'bg-secondary'
+			switch (svc.status) {
+				case 'running': return 'bg-success'
+				case 'starting': return 'bg-info'
+				case 'stopping': return 'bg-warning text-dark'
+				case 'stopped': return 'bg-danger'
+				default: return 'bg-secondary'
+			}
+		},
+		serviceStatusLabel(svc) {
+			if (!svc) return '...'
+			if (!svc.installed) return 'Not Installed'
+			switch (svc.status) {
+				case 'running': return 'Running'
+				case 'starting': return 'Starting...'
+				case 'stopping': return 'Stopping...'
+				case 'stopped': return 'Stopped'
+				default: return svc.status || 'Unknown'
+			}
+		},
+		formatLogTime(ts) {
+			if (!ts) return ''
+			try {
+				return new Date(ts).toLocaleTimeString()
+			} catch {
+				return ts
 			}
 		},
 	},

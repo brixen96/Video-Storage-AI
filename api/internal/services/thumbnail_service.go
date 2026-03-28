@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/brixen96/video-storage-ai/internal/config"
 )
 
 // ThumbnailService handles background thumbnail generation
@@ -60,7 +62,7 @@ func (s *ThumbnailService) GenerateThumbnailsForFolder(libraryID int64, folderPa
 	// Get thumbnail directory
 	thumbnailDir := os.Getenv("THUMBNAIL_DIR")
 	if thumbnailDir == "" {
-		thumbnailDir = filepath.Join("assets", "thumbnails")
+		thumbnailDir = filepath.Join(config.DataDir(), "thumbnails")
 	}
 
 	// Filter out videos that already have thumbnails

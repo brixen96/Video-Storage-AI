@@ -30,6 +30,10 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
+	// Repair orphan indexes before the main open — these can appear after DB copies
+	// or improper schema changes and cause a fatal "malformed database schema" error.
+	repairOrphanIndexes(cfg.Database.Path)
+
 	// Open database connection with optimized settings
 	// Enable WAL mode for better concurrent read performance
 	dbPath := cfg.Database.Path + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=FULL&_cache_size=10000&_foreign_keys=ON"
@@ -82,6 +86,34 @@ func Close() error {
 		return DB.Close()
 	}
 	return nil
+}
+
+// repairOrphanIndexes removes index entries from sqlite_master whose table no
+// longer exists. This can happen after DB copies or schema migrations and causes
+// a fatal "malformed database schema - orphan index" error on startup.
+func repairOrphanIndexes(filePath string) {
+	db, err := sql.Open("sqlite3", filePath+"?_foreign_keys=OFF")
+	if err != nil {
+		return
+	}
+	defer db.Close()
+
+	if _, err = db.Exec("PRAGMA writable_schema = ON"); err != nil {
+		return
+	}
+	res, err := db.Exec(`
+		DELETE FROM sqlite_master
+		WHERE type IN ('index', 'trigger')
+		  AND tbl_name NOT IN (SELECT name FROM sqlite_master WHERE type = 'table')
+	`)
+	db.Exec("PRAGMA writable_schema = OFF")
+	if err != nil {
+		log.Printf("[DB] Schema repair query failed: %v", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("[DB] Repaired %d orphan schema entries", n)
+	}
 }
 
 // createTables creates all necessary database tables
@@ -597,6 +629,17 @@ func runMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_job_history_job ON job_execution_history(job_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_execution_history(status)`,
 		`CREATE INDEX IF NOT EXISTS idx_job_history_created ON job_execution_history(created_at DESC)`,
+	}
+
+	// Run the base migrations slice first — creates all foundational tables
+	// (including scraped_threads) that later numbered migrations depend on.
+	for i, migration := range migrations {
+		if _, err := DB.Exec(migration); err != nil {
+			errMsg := err.Error()
+			if !isColumnExistsError(err) && !strings.Contains(errMsg, "no such column") {
+				return fmt.Errorf("migration %d failed: %w", i+1, err)
+			}
+		}
 	}
 
 	// Migration 32: Generic Video Scraper Tables
@@ -1283,17 +1326,6 @@ func runMigrations() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created ON ai_chat_messages(created_at DESC)`)
-
-	for i, migration := range migrations {
-		if _, err := DB.Exec(migration); err != nil {
-			errMsg := err.Error()
-			// Ignore error if column already exists or if it's a "no such column" error
-			// (which can happen with ALTER TABLE or CREATE INDEX on non-existent columns)
-			if !isColumnExistsError(err) && !strings.Contains(errMsg, "no such column") {
-				return fmt.Errorf("migration %d failed: %w", i+1, err)
-			}
-		}
-	}
 
 	return nil
 }

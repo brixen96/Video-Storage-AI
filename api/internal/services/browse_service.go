@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
@@ -144,7 +145,7 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 				// Always check for existing thumbnails, even if not extracting metadata
 				thumbnailDir := os.Getenv("THUMBNAIL_DIR")
 				if thumbnailDir == "" {
-					thumbnailDir = filepath.Join("assets", "thumbnails")
+					thumbnailDir = filepath.Join(config.DataDir(), "thumbnails")
 				}
 
 				// Create minimal config to check for existing thumbnail
@@ -173,7 +174,7 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 						// Use centralized thumbnail generation with hierarchical structure
 						thumbnailDir := os.Getenv("THUMBNAIL_DIR")
 						if thumbnailDir == "" {
-							thumbnailDir = filepath.Join("assets", "thumbnails")
+							thumbnailDir = filepath.Join(config.DataDir(), "thumbnails")
 						}
 
 						// Create thumbnail configuration

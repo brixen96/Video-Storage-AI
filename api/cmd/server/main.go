@@ -6,8 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
+	"path/filepath"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/api"
@@ -15,17 +14,65 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/logger"
 	"github.com/brixen96/video-storage-ai/internal/services"
+	"github.com/kardianos/service"
 )
 
-// main is the entry point of the application. It initializes the configuration,
-// database, and services, then starts the HTTP server. It also handles
-// graceful shutdown on interrupt signals.
-func main() {
-	// Load configuration
+// apiProgram implements service.Interface for the API server.
+type apiProgram struct {
+	server *http.Server
+	stopCh chan struct{}
+}
+
+func (p *apiProgram) Start(s service.Service) error {
+	p.stopCh = make(chan struct{})
+	go p.run()
+	return nil
+}
+
+func (p *apiProgram) Stop(s service.Service) error {
+	// Signal the run goroutine to begin shutdown
+	if p.stopCh != nil {
+		close(p.stopCh)
+	}
+
+	// Stop AI Companion
+	if companion := api.GetAICompanionService(); companion != nil {
+		if err := companion.Stop(); err != nil {
+			log.Printf("Error stopping AI Companion: %v", err)
+		}
+	}
+
+	// Graceful HTTP shutdown
+	if p.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := p.server.Shutdown(ctx); err != nil {
+			log.Printf("Server forced to shutdown: %v", err)
+		}
+	}
+
+	log.Println("Server exited")
+	return nil
+}
+
+func (p *apiProgram) run() {
+	// Load configuration (also resolves and creates the AppData base dir)
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Ensure all required subdirectories exist under AppData
+	for _, dir := range []string{
+		config.DataDir(),
+		cfg.Paths.ThumbnailDir,
+		cfg.Paths.PerformerDir,
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			log.Printf("Warning: could not create directory %s: %v", dir, err)
+		}
+	}
+	log.Printf("Data directory: %s", config.DataDir())
 
 	// Initialize database
 	if err := database.Initialize(cfg); err != nil {
@@ -52,11 +99,11 @@ func main() {
 		for _, activity := range pausedActivities {
 			if activity.IsPaused {
 				pausedCount++
-				log.Printf("📍 Found paused task: [%s] %s (ID: %d)", activity.TaskType, activity.Message, activity.ID)
+				log.Printf("Found paused task: [%s] %s (ID: %d)", activity.TaskType, activity.Message, activity.ID)
 			}
 		}
 		if pausedCount > 0 {
-			log.Printf("ℹ️ Found %d paused task(s). You can resume them from the Activity page.", pausedCount)
+			log.Printf("Found %d paused task(s). You can resume them from the Activity page.", pausedCount)
 		}
 	}
 
@@ -69,10 +116,8 @@ func main() {
 	} else {
 		log.Printf("Performer scan complete: %d folders found, %d new created, %d existing",
 			scanResult.TotalFolders, scanResult.NewCreated, scanResult.Existing)
-		if len(scanResult.Errors) > 0 {
-			for _, errMsg := range scanResult.Errors {
-				log.Printf("  Scan error: %s", errMsg)
-			}
+		for _, errMsg := range scanResult.Errors {
+			log.Printf("  Scan error: %s", errMsg)
 		}
 	}
 
@@ -131,45 +176,73 @@ func main() {
 	api.InitScheduler()
 
 	// Create HTTP server
-	srv := &http.Server{
+	p.server = &http.Server{
 		Addr:         fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port),
 		Handler:      api.CacheControlMiddleware(router),
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeout) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeout) * time.Second,
 	}
 
-	// Start server in a goroutine
-	go func() {
-		log.Printf("Starting server on http://%s:%s", cfg.Server.Host, cfg.Server.Port)
-		log.Printf("Mode: %s", cfg.Server.Mode)
-		log.Printf("Health check: http://%s:%s/health", cfg.Server.Host, cfg.Server.Port)
+	log.Printf("Starting server on http://%s:%s", cfg.Server.Host, cfg.Server.Port)
+	log.Printf("Mode: %s", cfg.Server.Mode)
 
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
-		}
-	}()
+	if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Failed to start server: %v", err)
+	}
+}
 
-	// Wait for interrupt signal to gracefully shutdown the server
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+func main() {
+	exePath, _ := os.Executable()
+	exeDir := filepath.Dir(exePath)
 
-	log.Println("Shutting down server...")
+	svcConfig := &service.Config{
+		Name:             "VideoStorageAI-API",
+		DisplayName:      "Video Storage AI - API Server",
+		Description:      "Video Storage AI backend API server (port 8080 by default).",
+		WorkingDirectory: exeDir,
+		Option: service.KeyValue{
+			"StartType":              "automatic",
+			"OnFailure":              "restart",
+			"OnFailureDelayDuration": "5s",
+			"OnFailureResetPeriod":   10,
+		},
+	}
 
-	// Stop AI Companion
-	if companion := api.GetAICompanionService(); companion != nil {
-		if err := companion.Stop(); err != nil {
-			log.Printf("Error stopping AI Companion: %v", err)
+	prg := &apiProgram{}
+	s, err := service.New(prg, svcConfig)
+	if err != nil {
+		log.Fatalf("Failed to create service: %v", err)
+	}
+
+	// Handle service control commands: install, uninstall, start, stop, restart
+	if len(os.Args) > 1 {
+		cmd := os.Args[1]
+		switch cmd {
+		case "install", "uninstall", "start", "stop", "restart":
+			if err := service.Control(s, cmd); err != nil {
+				log.Fatalf("Service %s failed: %v", cmd, err)
+			}
+			log.Printf("Service %s succeeded.", cmd)
+			return
+		case "status":
+			status, err := s.Status()
+			if err != nil {
+				log.Fatalf("Could not get service status: %v", err)
+			}
+			switch status {
+			case service.StatusRunning:
+				log.Println("Service status: Running")
+			case service.StatusStopped:
+				log.Println("Service status: Stopped")
+			default:
+				log.Println("Service status: Unknown")
+			}
+			return
 		}
 	}
 
-	// Graceful shutdown with 5 second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	// Run as service (or interactively if not invoked by SCM)
+	if err := s.Run(); err != nil {
+		log.Fatalf("Service run failed: %v", err)
 	}
-
-	log.Println("Server exited")
 }

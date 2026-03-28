@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 )
 
@@ -124,7 +125,7 @@ func (s *DatabaseService) Backup() (*BackupResult, error) {
 	log.Println("Starting database backup...")
 
 	// Create backups directory if it doesn't exist
-	backupDir := "./backups"
+	backupDir := filepath.Join(config.DataDir(), "backups")
 	err := os.MkdirAll(backupDir, 0755)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create backup directory: %w", err)
@@ -250,7 +251,7 @@ func (s *DatabaseService) RestoreFromBackup(backupPath string) error {
 
 // ListBackups returns a list of available backup files
 func (s *DatabaseService) ListBackups() ([]BackupResult, error) {
-	backupDir := "./backups"
+	backupDir := filepath.Join(config.DataDir(), "backups")
 
 	// Check if backups directory exists
 	_, err := os.Stat(backupDir)

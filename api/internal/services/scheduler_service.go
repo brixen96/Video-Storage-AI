@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
+	appconfig "github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
@@ -497,7 +499,7 @@ func (s *SchedulerService) executeCleanupOldAuditLogs(ctx context.Context, job *
 
 // executeDatabaseBackup creates a database backup
 func (s *SchedulerService) executeDatabaseBackup(ctx context.Context, job *models.ScheduledJob) *models.JobResult {
-	backupSvc := NewBackupService("./backups")
+	backupSvc := NewBackupService(filepath.Join(appconfig.DataDir(), "backups"))
 
 	backup, err := backupSvc.CreateBackup("automatic")
 	if err != nil {
@@ -530,7 +532,7 @@ func (s *SchedulerService) executeCleanupOldBackups(ctx context.Context, job *mo
 		retentionDays = config.TimeoutMinutes
 	}
 
-	backupSvc := NewBackupService("./backups")
+	backupSvc := NewBackupService(filepath.Join(appconfig.DataDir(), "backups"))
 	deletedCount, err := backupSvc.CleanupOldBackups(retentionDays, keepMinimum)
 	if err != nil {
 		return &models.JobResult{

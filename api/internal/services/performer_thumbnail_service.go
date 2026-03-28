@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
@@ -21,17 +22,11 @@ type PerformerThumbnailService struct {
 
 // NewPerformerThumbnailService creates a new performer thumbnail service
 func NewPerformerThumbnailService(mediaService *MediaService, activityService *ActivityService) *PerformerThumbnailService {
-	// Get absolute path to assets directory
-	assetsBase, err := filepath.Abs("./assets")
-	if err != nil {
-		assetsBase = "./assets"
-	}
-
 	return &PerformerThumbnailService{
 		performerService: NewPerformerService(),
 		mediaService:     mediaService,
 		activityService:  activityService,
-		assetsBaseDir:    assetsBase,
+		assetsBaseDir:    config.DataDir(),
 	}
 }
 

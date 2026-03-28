@@ -1,7 +1,9 @@
 package api
 
 import (
+	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"github.com/brixen96/video-storage-ai/internal/config"
@@ -485,6 +487,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			system.POST("/open-incognito", openInIncognito)    // Open URL in incognito browser window
 			system.POST("/open-login-helper", openLoginHelper) // Open login page for cookie capture
 			system.POST("/open-url", openUrl)                  // Open any URL in Firefox
+			system.GET("/config", getAppConfig)                // Get persisted app config (port etc.)
+			system.PUT("/config", updateAppConfig)             // Update persisted app config
+			system.GET("/update/check", checkForUpdate)        // Check GitHub for a newer release
+			system.POST("/update/install", installUpdate)      // Download and apply an update
+			system.GET("/services", getServicesStatus)          // Query Windows service status
+			system.POST("/services/control", controlService)   // Start / stop / restart a service
 		}
 
 		// Notification endpoints
@@ -552,8 +560,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	}
 
 	// Serve frontend static files from dist folder (production build)
-	// This allows the API to serve the entire application from a single server
-	distPath := filepath.Join(".", "dist")
+	// This allows the API to serve the entire application from a single server.
+	// Use executable-relative path so Windows services (which may have a different
+	// working directory) can still find the dist folder.
+	exePath, _ := os.Executable()
+	distPath := filepath.Join(filepath.Dir(exePath), "dist")
+	if _, err := os.Stat(filepath.Join(distPath, "index.html")); err != nil {
+		// Executable-relative dist not found — fall back to working directory
+		distPath = filepath.Join(".", "dist")
+	}
+	log.Printf("Frontend: serving from %s", distPath)
 
 	// Apply cache middleware globally for frontend files
 	router.Use(middleware.FrontendCacheMiddleware())

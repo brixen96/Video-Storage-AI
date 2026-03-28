@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/gin-gonic/gin"
@@ -28,6 +31,7 @@ func getSystemHealth(c *gin.Context) {
 	health := gin.H{
 		"status":    "healthy",
 		"timestamp": time.Now(),
+		"version":   config.Version,
 	}
 
 	// Database health
@@ -594,4 +598,146 @@ func openLoginHelper(c *gin.Context) {
 			"5. Paste them back in the app",
 		},
 	}, "Login page opened in Firefox"))
+}
+
+// getAppConfig returns the current persisted user configuration (e.g. server port)
+func getAppConfig(c *gin.Context) {
+	cfg := config.GetUserConfig()
+	c.JSON(http.StatusOK, models.SuccessResponse(cfg, "App config retrieved"))
+}
+
+// updateAppConfig saves updated user configuration to config.json
+func updateAppConfig(c *gin.Context) {
+	var req config.AppUserConfig
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request body", err.Error()))
+		return
+	}
+	if err := config.SaveUserConfig(req); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to save config", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, models.SuccessResponse(req, "Config saved — restart required for changes to take effect"))
+}
+
+// getServicesStatus queries Windows service status for the API and Web services.
+func getServicesStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"api": queryWindowsService("VideoStorageAI-API"),
+		"web": queryWindowsService("VideoStorageAI-Web"),
+	}, "Service status retrieved"))
+}
+
+// queryWindowsService runs `sc query <name>` and returns a status map.
+func queryWindowsService(name string) gin.H {
+	// Use full path so it resolves correctly under any service account.
+	sc := `C:\Windows\System32\sc.exe`
+	out, err := exec.Command(sc, "query", name).Output()
+	if err != nil {
+		return gin.H{"name": name, "installed": false, "status": "not_installed"}
+	}
+	output := string(out)
+	status := "stopped"
+	if strings.Contains(output, "RUNNING") {
+		status = "running"
+	} else if strings.Contains(output, "START_PENDING") {
+		status = "starting"
+	} else if strings.Contains(output, "STOP_PENDING") {
+		status = "stopping"
+	}
+	return gin.H{"name": name, "installed": true, "status": status}
+}
+
+// controlService starts, stops, or restarts a named service via sc.exe.
+// Any action that may stop the API service itself is spawned as a detached batch
+// script so the process can survive the API going down and bring it back up.
+func controlService(c *gin.Context) {
+	var req struct {
+		Service string `json:"service" binding:"required"` // "api" | "web" | "both"
+		Action  string `json:"action" binding:"required"`  // "start" | "stop" | "restart"
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+
+	serviceMap := map[string][]string{
+		"api":  {"VideoStorageAI-API"},
+		"web":  {"VideoStorageAI-Web"},
+		"both": {"VideoStorageAI-API", "VideoStorageAI-Web"},
+	}
+	names, ok := serviceMap[req.Service]
+	if !ok {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Unknown service", req.Service))
+		return
+	}
+	validActions := map[string]bool{"start": true, "stop": true, "restart": true}
+	if !validActions[req.Action] {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Unknown action", req.Action))
+		return
+	}
+
+	// Stopping or restarting the API service will kill this process mid-goroutine.
+	// Spawn a detached batch script so the operation survives the API going down.
+	apiInvolved := req.Service == "api" || req.Service == "both"
+	if apiInvolved && (req.Action == "stop" || req.Action == "restart") {
+		script := buildServiceControlScript(names, req.Action)
+		exePath, _ := os.Executable()
+		scriptPath := filepath.Join(filepath.Dir(exePath), "svc_control.bat")
+		if err := os.WriteFile(scriptPath, []byte(script), 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to write control script", err.Error()))
+			return
+		}
+		cmd := exec.Command("cmd", "/c", "start", "/b", "", scriptPath)
+		cmd.Dir = filepath.Dir(exePath)
+		if err := cmd.Start(); err != nil {
+			c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to launch control script", err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, models.SuccessResponse(nil, fmt.Sprintf("%s %s initiated", req.Action, req.Service)))
+		return
+	}
+
+	// Safe path: action doesn't involve stopping the API (e.g. start api, or web only).
+	sc := `C:\Windows\System32\sc.exe`
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		for _, name := range names {
+			switch req.Action {
+			case "restart":
+				exec.Command(sc, "stop", name).Run()
+				time.Sleep(3 * time.Second)
+				exec.Command(sc, "start", name).Run()
+			default:
+				exec.Command(sc, req.Action, name).Run()
+			}
+		}
+	}()
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil,
+		fmt.Sprintf("%s %s initiated", req.Action, req.Service)))
+}
+
+// buildServiceControlScript generates a batch script that stops then starts the given services.
+func buildServiceControlScript(names []string, action string) string {
+	var sb strings.Builder
+	sb.WriteString("@echo off\r\n")
+	sb.WriteString("timeout /t 1 /nobreak > nul\r\n")
+
+	sc := `C:\Windows\System32\sc.exe`
+	if action == "stop" || action == "restart" {
+		for _, name := range names {
+			sb.WriteString(sc + " stop " + name + "\r\n")
+		}
+	}
+
+	if action == "restart" {
+		sb.WriteString("timeout /t 4 /nobreak > nul\r\n")
+		for _, name := range names {
+			sb.WriteString(sc + " start " + name + "\r\n")
+		}
+	}
+
+	sb.WriteString("del \"%~f0\"\r\n") // self-delete
+	return sb.String()
 }

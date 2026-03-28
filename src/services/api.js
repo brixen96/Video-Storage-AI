@@ -1,12 +1,16 @@
 import axios from 'axios'
 
+// Resolve the API base URL. In production the web server injects window.VSAI_API_URL
+// into index.html before the bundle loads. In development it falls back to localhost:8080.
+const API_ORIGIN = window.VSAI_API_URL || 'http://localhost:8080'
+
 // Create axios instance with base configuration
 const api = axios.create({
-	baseURL: 'http://localhost:8080/api/v1', // Add /api/v1 prefix
+	baseURL: `${API_ORIGIN}/api/v1`,
 	headers: {
 		'Content-Type': 'application/json',
 	},
-	timeout: 600000, // Increase to 60 seconds
+	timeout: 60000, // 60 seconds
 	paramsSerializer: {
 		indexes: null, // Use repeat format for arrays: tag_ids=1&tag_ids=2
 	},
@@ -527,25 +531,38 @@ export const getAssetURL = (path) => {
 		// Convert Windows path to web path
 		const relativePath = path.split('api\\assets\\')[1] || path.split('api/assets/')[1]
 		if (relativePath) {
-			return `http://localhost:8080/assets/${relativePath.replace(/\\/g, '/')}`
+			return `${API_ORIGIN}/assets/${relativePath.replace(/\\/g, '/')}`
 		}
 	}
 	// Check if path already starts with /assets/ to avoid double prefix
 	if (path.startsWith('/assets/')) {
-		return `http://localhost:8080${path}`
+		return `${API_ORIGIN}${path}`
 	}
-	return `http://localhost:8080/assets/${path}`
+	return `${API_ORIGIN}/assets/${path}`
 }
 
 // Proxy a CDN image through the backend so the correct Referer header is sent
 // (needed for hotlink-protected CDNs like HQPorner, Motherless, LeakVids, etc.)
 export const getProxiedImageURL = (url) => {
 	if (!url) return ''
-	return `http://localhost:8080/api/v1/scraper/proxy-image?url=${encodeURIComponent(url)}`
+	return `${API_ORIGIN}/api/v1/scraper/proxy-image?url=${encodeURIComponent(url)}`
 }
 
 export const siteHealthAPI = {
 	check: (url) => api.get('/sites/status', { params: { url } }),
+}
+
+export const appConfigAPI = {
+	get: () => api.get('/system/config'),
+	update: (cfg) => api.put('/system/config', cfg),
+}
+
+export const systemAPI = {
+	getHealth: () => api.get('/system/health'),
+	checkUpdate: () => api.get('/system/update/check'),
+	installUpdate: (downloadURL) => api.post('/system/update/install', { download_url: downloadURL }),
+	getServices: () => api.get('/system/services'),
+	controlService: (service, action) => api.post('/system/services/control', { service, action }),
 }
 
 export default api

@@ -77,6 +77,8 @@ Thumbs.db
 dist/
 build/
 bin/
+release/
+website_examples_for_scraping/
 
 # Temporary files
 tmp/

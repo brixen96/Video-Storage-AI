@@ -19,7 +19,8 @@ class WebSocketService {
 		}
 
 		this.isConnecting = true
-		const wsUrl = `ws://localhost:8080/api/v1/ws`
+		const apiOrigin = window.VSAI_API_URL || 'http://localhost:8080'
+		const wsUrl = apiOrigin.replace(/^http/, 'ws') + '/api/v1/ws'
 
 		try {
 			this.ws = new WebSocket(wsUrl)

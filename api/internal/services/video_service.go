@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
@@ -703,7 +704,7 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	// Get thumbnail base directory
 	thumbnailDir := os.Getenv("THUMBNAIL_DIR")
 	if thumbnailDir == "" {
-		thumbnailDir = filepath.Join("assets", "thumbnails")
+		thumbnailDir = filepath.Join(appconfig.DataDir(), "thumbnails")
 	}
 
 	// Setup parallel thumbnail generation using new hierarchical structure
@@ -1153,7 +1154,7 @@ func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 	// Get preview base directory
 	previewDir := os.Getenv("PREVIEW_DIR")
 	if previewDir == "" {
-		previewDir = filepath.Join("assets", "previews")
+		previewDir = filepath.Join(appconfig.DataDir(), "previews")
 	}
 
 	// Create wait group for all library processing

@@ -3,7 +3,9 @@ package api
 import (
 	"log"
 	"net/http"
+	"path/filepath"
 
+	"github.com/brixen96/video-storage-ai/internal/config"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
@@ -14,7 +16,7 @@ var backupService *services.BackupService
 // ensureBackupService initializes the backup service if needed
 func ensureBackupService() *services.BackupService {
 	if backupService == nil {
-		backupService = services.NewBackupService("./backups")
+		backupService = services.NewBackupService(filepath.Join(config.DataDir(), "backups"))
 		log.Println("💾 Backup Service initialized")
 	}
 	return backupService
