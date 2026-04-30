@@ -89,8 +89,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.GET("/search", searchVideos)                    // Search videos
 			videos.POST("/scan", scanVideos)                       // Scan library for videos
 			videos.POST("/scan-all-parallel", scanAllVideosParallel) // Scan all libraries in parallel
-			videos.POST("/generate-previews", generateAllPreviews) // Generate preview storyboards for all videos
+			videos.POST("/generate-previews", generateAllPreviews)    // Generate preview storyboards for all videos
 			videos.POST("/generate-thumbnails", generateVideoThumbnails) // Generate thumbnails for all videos
+			videos.POST("/path-analysis", runPathAnalysis)               // Run path-based auto-linking
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path

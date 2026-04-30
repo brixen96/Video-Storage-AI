@@ -87,6 +87,8 @@ export const videosAPI = {
 	scanAllParallel: (config = {}, signal) => api.post('/videos/scan-all-parallel', config, { signal }),
 	generatePreviews: (config = {}, signal) => api.post('/videos/generate-previews', config, { signal }),
 	generateThumbnails: (signal) => api.post('/videos/generate-thumbnails', {}, { signal }),
+	runPathAnalysis: (libraryId = 0, onlyUnlinked = false, dryRun = false, signal) =>
+		api.post('/videos/path-analysis', { library_id: libraryId, only_unlinked: onlyUnlinked, dry_run: dryRun }, { signal }),
 	fetchMetadata: (id, signal) => api.post(`/videos/${id}/fetch`, {}, { signal }),
 	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
 	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),

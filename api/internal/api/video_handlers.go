@@ -455,6 +455,30 @@ func generateVideoThumbnails(c *gin.Context) {
 	respondSuccess(c, nil, "Video thumbnail generation started")
 }
 
+// runPathAnalysis handles POST /api/v1/videos/path-analysis
+// Runs path-based auto-linking for performers, tags, and studios.
+func runPathAnalysis(c *gin.Context) {
+	var req struct {
+		LibraryID    int64 `json:"library_id"`
+		OnlyUnlinked bool  `json:"only_unlinked"`
+		DryRun       bool  `json:"dry_run"`
+	}
+	c.ShouldBindJSON(&req)
+
+	go func() {
+		svc := services.NewPathAnalysisService()
+		report, err := svc.RunAutoLink(req.LibraryID, req.OnlyUnlinked, req.DryRun)
+		if err != nil {
+			log.Printf("Path analysis failed: %v", err)
+			return
+		}
+		log.Printf("Path analysis complete: %d videos, %d performers, %d tags, %d studios",
+			report.VideosAnalyzed, report.PerformersLinked, report.TagsApplied, report.StudiosLinked)
+	}()
+
+	respondSuccess(c, nil, "Path analysis started")
+}
+
 // locateVideoFile handles GET /api/v1/videos/:id/locate
 // Searches the video's library folder for files matching its filename.
 func locateVideoFile(c *gin.Context) {

@@ -88,6 +88,23 @@
 									<small class="text-success">{{ getTaskProgress('video_thumbnail_generation') }}%</small>
 								</div>
 							</div>
+							<hr class="my-4" />
+
+							<!-- Run Path Analysis -->
+							<div class="task-item">
+								<div class="task-info">
+									<h6>Run Path Analysis</h6>
+									<p class="text-light mb-0">Auto-link performers, tags, and studios based on video folder and file names</p>
+								</div>
+								<button class="btn btn-warning mt-3" @click="runPathAnalysis" :disabled="isTaskRunning('path_analysis')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('path_analysis') ? 'spinner' : 'link']"
+										:spin="isTaskRunning('path_analysis')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('path_analysis') ? 'Analysing...' : 'Run Path Analysis' }}
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -489,6 +506,16 @@ export default {
 			} catch (error) {
 				console.error('Failed to generate video thumbnails:', error)
 				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start video thumbnail generation')
+			}
+		},
+
+		async runPathAnalysis() {
+			try {
+				await videosAPI.runPathAnalysis()
+				this.$toast.success('Path Analysis Started', 'Auto-linking performers, tags, and studios from folder and file names. Watch the Activity page for progress!')
+			} catch (error) {
+				console.error('Failed to start path analysis:', error)
+				this.$toast.error('Path Analysis Failed', error.response?.data?.error || 'Failed to start path analysis')
 			}
 		},
 
