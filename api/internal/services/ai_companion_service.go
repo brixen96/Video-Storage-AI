@@ -63,7 +63,7 @@ type CompanionEvent struct {
 // NewAICompanionService creates and initializes the AI Companion
 func NewAICompanionService() *AICompanionService {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &AICompanionService{
+	svc := &AICompanionService{
 		db:                database.GetDB(),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -74,6 +74,11 @@ func NewAICompanionService() *AICompanionService {
 		lastActivityCheck: time.Now(),
 		isRunning:         false,
 	}
+	// Register post-scan path analysis hook
+	OnScanComplete = func(libraryID int64, addedCount int) {
+		go svc.RunPathAnalysisAndReport(libraryID, addedCount)
+	}
+	return svc
 }
 
 // Start begins the AI Companion background service
@@ -682,6 +687,15 @@ func getLMToolDefinitions() []lmToolDefinition {
 				"library_name": map[string]interface{}{"type": "string", "description": "Library name to check for unlinked videos (e.g. 'Edited' or 'Backup')"},
 				"limit":        map[string]interface{}{"type": "number", "description": "Max results to return (default: 20)"},
 			}, "required": []string{"library_name"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name: "auto_link_by_path",
+			Description: "Automatically link performers, tags, and studios to videos by analysing their file path and folder names. Each folder component is matched exactly against the database — no guessing. The only fixed rules are: folders named 'RL'→Regular tag, 'A'→Zoo tag, '3D'→3D tag. Everything else is matched against the real performers/tags/studios in the DB. Safe to run without user confirmation since it only ADDS links, never removes anything. Run dry_run=true first to preview what would be applied.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name":   map[string]interface{}{"type": "string", "description": "Restrict to a specific library name (optional — omit to process all libraries)"},
+				"only_unlinked":  map[string]interface{}{"type": "boolean", "description": "Only process videos that have no performers yet (default: true)"},
+				"dry_run":        map[string]interface{}{"type": "boolean", "description": "Preview what would be applied without making changes (default: false)"},
+			}},
 		}},
 	}
 }
@@ -2999,9 +3013,79 @@ func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{
 			"videos":         unlinked,
 		}, nil
 
+	case "auto_link_by_path":
+		libraryName, _ := args["library_name"].(string)
+		onlyUnlinked := true
+		if v, ok := args["only_unlinked"].(bool); ok {
+			onlyUnlinked = v
+		}
+		dryRun := false
+		if v, ok := args["dry_run"].(bool); ok {
+			dryRun = v
+		}
+
+		svc := NewPathAnalysisService()
+
+		var libraryID int64
+		if libraryName != "" {
+			s.db.QueryRow(`SELECT id FROM libraries WHERE LOWER(name) LIKE LOWER(?)`, "%"+libraryName+"%").Scan(&libraryID)
+		}
+
+		report, err := svc.RunAutoLink(libraryID, onlyUnlinked, dryRun)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+
+		action := "Applied"
+		if dryRun {
+			action = "Would apply (dry run)"
+		}
+		return map[string]interface{}{
+			"dry_run":           dryRun,
+			"videos_analyzed":  report.VideosAnalyzed,
+			"performers_linked": report.PerformersLinked,
+			"tags_applied":     report.TagsApplied,
+			"studios_linked":   report.StudiosLinked,
+			"summary": fmt.Sprintf("%s: %d performer links, %d tags, %d studio links across %d videos",
+				action, report.PerformersLinked, report.TagsApplied, report.StudiosLinked, report.VideosAnalyzed),
+		}, nil
+
 	default:
 		return map[string]interface{}{"error": fmt.Sprintf("Unknown tool: %s", name)}, nil
 	}
+}
+
+// RunPathAnalysisAndReport is called after a library scan to auto-link by path
+// and emit a proactive companion event with the results.
+func (s *AICompanionService) RunPathAnalysisAndReport(libraryID int64, addedCount int) {
+	svc := NewPathAnalysisService()
+	report, err := svc.RunAutoLink(libraryID, true, false)
+	if err != nil {
+		log.Printf("[PathAnalysis] Error: %v", err)
+		return
+	}
+	if report.PerformersLinked == 0 && report.TagsApplied == 0 && report.StudiosLinked == 0 {
+		return // nothing to report
+	}
+	parts := []string{}
+	if report.PerformersLinked > 0 {
+		parts = append(parts, fmt.Sprintf("**%d** performer links", report.PerformersLinked))
+	}
+	if report.TagsApplied > 0 {
+		parts = append(parts, fmt.Sprintf("**%d** tags", report.TagsApplied))
+	}
+	if report.StudiosLinked > 0 {
+		parts = append(parts, fmt.Sprintf("**%d** studio links", report.StudiosLinked))
+	}
+	msg := fmt.Sprintf("🗂️ Path analysis complete after scan (%d new videos): applied %s based on folder structure.",
+		addedCount, strings.Join(parts, ", "))
+	s.emitEvent(CompanionEvent{
+		Type:      "insight",
+		Source:    "path_analysis",
+		Message:   msg,
+		Severity:  "info",
+		Timestamp: time.Now(),
+	})
 }
 
 // fetchSiteInfo fetches a page and returns structural info for scraper config suggestions
@@ -3245,6 +3329,13 @@ For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk
 ## Memory & Architecture
 Your memory (save_memory/recall_memories tools) is stored in the local SQLite database on this PC — NOT on OpenRouter or any cloud. OpenRouter is stateless and handles inference only; it has zero persistent state between requests. All persistence (memories, chat history, library data) lives entirely in the app's local database.
 
+## Path-Based Auto-Linking (Maid Duty)
+You have the auto_link_by_path tool. It scans video file paths, matches folder names against the real performers/tags/studios in the DB, and applies links automatically. It is completely safe (only adds, never removes). Run it proactively when:
+- A library scan just completed and new videos were added
+- The user asks about unlinked or untagged videos
+- The health report shows high % of videos with no performers
+Always run dry_run=true first and report what would be applied, then run for real.
+
 ## Saving Memories
 When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.
 
@@ -3453,6 +3544,13 @@ For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk
 
 ## Memory & Architecture
 Your memory (save_memory/recall_memories tools) is stored in the local SQLite database on this PC — NOT on OpenRouter or any cloud. OpenRouter is stateless and handles inference only; it has zero persistent state between requests. All persistence (memories, chat history, library data) lives entirely in the app's local database.
+
+## Path-Based Auto-Linking (Maid Duty)
+You have the auto_link_by_path tool. It scans video file paths, matches folder names against the real performers/tags/studios in the DB, and applies links automatically. It is completely safe (only adds, never removes). Run it proactively when:
+- A library scan just completed and new videos were added
+- The user asks about unlinked or untagged videos
+- The health report shows high % of videos with no performers
+Always run dry_run=true first and report what would be applied, then run for real.
 
 ## Saving Memories
 When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.

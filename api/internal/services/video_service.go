@@ -948,6 +948,11 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	}
 	_ = s.activityService.CompleteTask(int64(activity.ID), msg)
 
+	// Trigger path-based auto-linking for newly added videos
+	if added > 0 && OnScanComplete != nil {
+		go OnScanComplete(libraryID, int(added))
+	}
+
 	return nil
 }
 
