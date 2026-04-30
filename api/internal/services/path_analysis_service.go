@@ -249,7 +249,7 @@ func (s *PathAnalysisService) loadEntityMap(query string) (map[string]int64, err
 		var id int64
 		var name string
 		if rows.Scan(&id, &name) == nil {
-			m[strings.ToLower(name)] = id
+			m[strings.ToLower(strings.TrimSpace(name))] = id
 		}
 	}
 	return m, nil

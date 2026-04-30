@@ -3015,7 +3015,7 @@ func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{
 
 	case "auto_link_by_path":
 		libraryName, _ := args["library_name"].(string)
-		onlyUnlinked := true
+		onlyUnlinked := false
 		if v, ok := args["only_unlinked"].(bool); ok {
 			onlyUnlinked = v
 		}
