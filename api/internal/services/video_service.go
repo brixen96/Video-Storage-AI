@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	appconfig "github.com/brixen96/video-storage-ai/internal/config"
@@ -1290,12 +1291,26 @@ func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 
 	log.Printf("Grouped libraries - Server: %d, Local: %d", len(serverLibraries), len(localLibraries))
 
+	// Track per-library completion for outer activity progress
+	totalLibraries := int64(len(libraries))
+	var completedLibraries int64
+	onLibraryDone := func(libName string) {
+		completed := atomic.AddInt64(&completedLibraries, 1)
+		if activity != nil {
+			progress := int(completed * 100 / totalLibraries)
+			s.activityService.UpdateProgressLog(
+				int64(activity.ID), progress,
+				fmt.Sprintf("Completed %d/%d libraries (last: %s)", completed, totalLibraries, libName),
+			)
+		}
+	}
+
 	// Process server libraries with limited concurrency
 	if len(serverLibraries) > 0 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.generatePreviewsForLibraries(serverLibraries, config.ServerMaxConcurrent, previewDir, "SERVER")
+			s.generatePreviewsForLibraries(serverLibraries, config.ServerMaxConcurrent, previewDir, "SERVER", onLibraryDone)
 		}()
 	}
 
@@ -1304,7 +1319,7 @@ func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.generatePreviewsForLibraries(localLibraries, config.LocalMaxConcurrent, previewDir, "LOCAL")
+			s.generatePreviewsForLibraries(localLibraries, config.LocalMaxConcurrent, previewDir, "LOCAL", onLibraryDone)
 		}()
 	}
 
@@ -1320,7 +1335,7 @@ func (s *VideoService) GenerateAllPreviews(config ParallelScanConfig) error {
 }
 
 // generatePreviewsForLibraries generates previews for all videos in the given libraries with controlled concurrency
-func (s *VideoService) generatePreviewsForLibraries(libraries []models.Library, maxConcurrent int, previewDir string, driveType string) {
+func (s *VideoService) generatePreviewsForLibraries(libraries []models.Library, maxConcurrent int, previewDir string, driveType string, onDone func(libName string)) {
 	// Create semaphore to limit concurrency
 	sem := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
@@ -1344,6 +1359,7 @@ func (s *VideoService) generatePreviewsForLibraries(libraries []models.Library, 
 			} else {
 				log.Printf("[%s] Successfully generated previews for library %s (Duration: %s)", driveType, lib.Name, duration)
 			}
+			onDone(lib.Name)
 		}(library)
 	}
 
