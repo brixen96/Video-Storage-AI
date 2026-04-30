@@ -833,25 +833,28 @@ func deleteAIMemory(c *gin.Context) {
 	})
 }
 
-// getAIConfig returns the AI/LM Studio configuration
+// getAIConfig returns the AI provider configuration
 func getAIConfig(c *gin.Context) {
 	db := database.GetDB()
 	var config models.AIConfig
-	err := db.QueryRow(`SELECT id, lm_studio_url, model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.LMStudioURL, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
+	err := db.QueryRow(`SELECT id, COALESCE(api_url, lm_studio_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
 	)
 	if err != nil {
-		// Return defaults if not found
 		config = models.AIConfig{
 			ID:          1,
-			LMStudioURL: "http://localhost:1234",
-			ModelName:   "",
+			APIURL:      "https://openrouter.ai/api",
+			APIKey:      "",
+			ModelName:   "mistralai/mistral-nemo",
 			Temperature: 0.7,
 			MaxTokens:   2000,
 			Enabled:     true,
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
+	}
+	if config.APIURL == "" || config.APIURL == "http://localhost:1234" {
+		config.APIURL = "https://openrouter.ai/api"
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -860,7 +863,7 @@ func getAIConfig(c *gin.Context) {
 	})
 }
 
-// updateAIConfig updates the AI/LM Studio configuration
+// updateAIConfig updates the AI provider configuration
 func updateAIConfig(c *gin.Context) {
 	var config models.AIConfig
 	if err := c.ShouldBindJSON(&config); err != nil {
@@ -874,9 +877,9 @@ func updateAIConfig(c *gin.Context) {
 	db := database.GetDB()
 	_, err := db.Exec(`
 		UPDATE ai_config SET
-			lm_studio_url = ?, model_name = ?, temperature = ?, max_tokens = ?, enabled = ?, updated_at = ?
+			api_url = ?, api_key = ?, model_name = ?, temperature = ?, max_tokens = ?, enabled = ?, updated_at = ?
 		WHERE id = 1`,
-		config.LMStudioURL, config.ModelName, config.Temperature, config.MaxTokens, config.Enabled, time.Now(),
+		config.APIURL, config.APIKey, config.ModelName, config.Temperature, config.MaxTokens, config.Enabled, time.Now(),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(

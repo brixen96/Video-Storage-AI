@@ -318,31 +318,46 @@ func (s *AICompanionService) GetFullContext() string {
 	return ctx.String()
 }
 
-// GetAIConfig retrieves the AI/LM Studio configuration from the database
+// GetAIConfig retrieves the AI provider configuration from the database
 func (s *AICompanionService) GetAIConfig() models.AIConfig {
 	config := models.AIConfig{
 		ID:          1,
-		LMStudioURL: "http://localhost:1234",
+		APIURL:      "https://openrouter.ai/api",
+		ModelName:   "mistralai/mistral-nemo",
 		Temperature: 0.7,
 		MaxTokens:   2000,
 		Enabled:     true,
 	}
-	s.db.QueryRow(`SELECT id, lm_studio_url, model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.LMStudioURL, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
+	s.db.QueryRow(`SELECT id, COALESCE(api_url, lm_studio_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
 	)
+	if config.APIURL == "" || config.APIURL == "http://localhost:1234" {
+		config.APIURL = "https://openrouter.ai/api"
+	}
+	if config.ModelName == "" {
+		config.ModelName = "mistralai/mistral-nemo"
+	}
 	return config
 }
 
-// TestLMStudioConnection tests connectivity to LM Studio
+// TestLMStudioConnection tests connectivity to the configured AI provider
 func (s *AICompanionService) TestLMStudioConnection() map[string]interface{} {
 	config := s.GetAIConfig()
 	result := map[string]interface{}{
 		"connected": false,
-		"url":       config.LMStudioURL,
+		"url":       config.APIURL,
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(config.LMStudioURL + "/v1/models")
+	req, err := http.NewRequest("GET", config.APIURL+"/v1/models", nil)
+	if err != nil {
+		result["error"] = fmt.Sprintf("Invalid URL: %v", err)
+		return result
+	}
+	if config.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		result["error"] = fmt.Sprintf("Connection failed: %v", err)
 		return result
@@ -361,7 +376,7 @@ func (s *AICompanionService) TestLMStudioConnection() map[string]interface{} {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &modelsResp); err != nil {
-		result["error"] = "Invalid response from LM Studio"
+		result["error"] = "Invalid response from AI provider"
 		return result
 	}
 
@@ -3201,12 +3216,12 @@ func (s *AICompanionService) ChatLLM(message string, history []map[string]string
 		return "", fmt.Errorf("LLM disabled in config")
 	}
 
-	log.Printf("[AI] ChatLLM called - URL: %s, Model: %s, Message: %.80s...", config.LMStudioURL, config.ModelName, message)
+	log.Printf("[AI] ChatLLM called - URL: %s, Model: %s, Message: %.80s...", config.APIURL, config.ModelName, message)
 	startTime := time.Now()
 
 	// Build system prompt with full app context
 	appContext := s.GetFullContext()
-	systemPrompt := `You are the AI Companion for a Video Storage application. You have direct access to the app's database and systems through tool calls.
+	systemPrompt := "You are the AI Companion for a Video Storage application, powered by " + config.ModelName + ` via OpenRouter. You have direct access to the app's database and systems through tool calls.
 
 You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health.
 
@@ -3245,14 +3260,13 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 	// Tool calling loop (max 5 iterations)
 	for iteration := 0; iteration < 5; iteration++ {
 		reqBody := map[string]interface{}{
+			"model":       config.ModelName,
 			"messages":    messages,
 			"tools":       tools,
+			"tool_choice": "auto",
 			"temperature": config.Temperature,
 			"max_tokens":  config.MaxTokens,
 			"stream":      false,
-		}
-		if config.ModelName != "" {
-			reqBody["model"] = config.ModelName
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -3261,10 +3275,18 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 		}
 
 		client := &http.Client{Timeout: 120 * time.Second}
-		resp, err := client.Post(config.LMStudioURL+"/v1/chat/completions", "application/json", bytes.NewReader(bodyBytes))
+		req, err := http.NewRequest("POST", config.APIURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
 		if err != nil {
-			log.Printf("[AI] LM Studio connection failed after %v: %v", time.Since(startTime), err)
-			return "", fmt.Errorf("LM Studio connection failed: %w", err)
+			return "", fmt.Errorf("failed to build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if config.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("[AI] AI provider connection failed after %v: %v", time.Since(startTime), err)
+			return "", fmt.Errorf("AI provider connection failed: %w", err)
 		}
 		defer resp.Body.Close()
 
@@ -3397,7 +3419,7 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 	}
 
 	appContext := s.GetFullContext()
-	systemPrompt := `You are the AI Companion for a Video Storage application. You have direct access to the app's database and systems through tool calls.
+	systemPrompt := "You are the AI Companion for a Video Storage application, powered by " + config.ModelName + ` via OpenRouter. You have direct access to the app's database and systems through tool calls.
 
 You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health.
 
@@ -3438,14 +3460,13 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 
 	for iteration := 0; iteration < 5; iteration++ {
 		reqBody := map[string]interface{}{
+			"model":       config.ModelName,
 			"messages":    messages,
 			"tools":       tools,
+			"tool_choice": "auto",
 			"temperature": config.Temperature,
 			"max_tokens":  config.MaxTokens,
 			"stream":      true,
-		}
-		if config.ModelName != "" {
-			reqBody["model"] = config.ModelName
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -3453,9 +3474,17 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		resp, err := client.Post(config.LMStudioURL+"/v1/chat/completions", "application/json", bytes.NewReader(bodyBytes))
+		req, err := http.NewRequest("POST", config.APIURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
 		if err != nil {
-			return fmt.Errorf("LM Studio connection failed: %w", err)
+			return fmt.Errorf("failed to build request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if config.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+config.APIKey)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("AI provider connection failed: %w", err)
 		}
 
 		var accContent strings.Builder

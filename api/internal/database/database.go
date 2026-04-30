@@ -1418,6 +1418,14 @@ func runMigrations() error {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_video_links_backup  ON video_links(backup_video_id)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_video_links_status  ON video_links(status)`)
 
+	// Migration 54: Switch AI provider from LM Studio to OpenRouter (add api_key, rename url column)
+	DB.Exec(`ALTER TABLE ai_config ADD COLUMN api_key TEXT DEFAULT ''`)
+	DB.Exec(`ALTER TABLE ai_config ADD COLUMN api_url TEXT DEFAULT 'https://openrouter.ai/api'`)
+	// Copy existing lm_studio_url into api_url if it's not the old LM Studio default
+	DB.Exec(`UPDATE ai_config SET api_url = lm_studio_url WHERE lm_studio_url != 'http://localhost:1234' AND lm_studio_url != ''`)
+	// Ensure default row has the OpenRouter URL
+	DB.Exec(`UPDATE ai_config SET api_url = 'https://openrouter.ai/api', model_name = CASE WHEN model_name = '' THEN 'mistralai/mistral-nemo' ELSE model_name END WHERE id = 1 AND (api_url IS NULL OR api_url = '')`)
+
 	return nil
 }
 

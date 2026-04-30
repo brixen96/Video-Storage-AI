@@ -394,7 +394,7 @@
 						<div class="card-header d-flex justify-content-between align-items-center">
 							<h5 class="mb-0">
 								<font-awesome-icon :icon="['fas', 'robot']" class="me-2 text-info" />
-								LM Studio (AI Companion)
+								OpenRouter (AI Companion)
 							</h5>
 							<div class="d-flex align-items-center gap-2">
 								<span :class="['badge', aiConfigStatus.connected ? 'bg-success' : 'bg-secondary']">
@@ -407,19 +407,23 @@
 						</div>
 						<div class="card-body">
 							<div class="row g-3 mb-3">
-								<div class="col-md-8">
-									<label class="form-label text-muted small">LM Studio URL</label>
-									<input v-model="aiConfig.lmStudioUrl" type="text" class="form-control bg-dark text-white border-secondary" placeholder="http://localhost:1234" />
+								<div class="col-md-6">
+									<label class="form-label text-muted small">API URL</label>
+									<input v-model="aiConfig.apiUrl" type="text" class="form-control bg-dark text-white border-secondary" placeholder="https://openrouter.ai/api" />
+								</div>
+								<div class="col-md-6">
+									<label class="form-label text-muted small">API Key</label>
+									<input v-model="aiConfig.apiKey" type="password" class="form-control bg-dark text-white border-secondary" placeholder="sk-or-..." autocomplete="new-password" />
+								</div>
+							</div>
+							<div class="row g-3 mb-3">
+								<div class="col-md-4">
+									<label class="form-label text-muted small">Model</label>
+									<input v-model="aiConfig.modelName" type="text" class="form-control bg-dark text-white border-secondary" placeholder="mistralai/mistral-nemo" />
 								</div>
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Max Tokens</label>
 									<input v-model.number="aiConfig.maxTokens" type="number" class="form-control bg-dark text-white border-secondary" min="100" max="8192" />
-								</div>
-							</div>
-							<div class="row g-3 mb-3">
-								<div class="col-md-8">
-									<label class="form-label text-muted small">Model Name (leave blank for default)</label>
-									<input v-model="aiConfig.modelName" type="text" class="form-control bg-dark text-white border-secondary" placeholder="Auto-detect loaded model" />
 								</div>
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Temperature ({{ aiConfig.temperature }})</label>
@@ -745,10 +749,11 @@ export default {
 			showJDPassword: false,
 			testingJD: false,
 			savingJD: false,
-			// AI / LM Studio settings
+			// AI / OpenRouter settings
 			aiConfig: {
-				lmStudioUrl: 'http://localhost:1234',
-				modelName: '',
+				apiUrl: 'https://openrouter.ai/api',
+				apiKey: '',
+				modelName: 'mistralai/mistral-nemo',
 				temperature: 0.7,
 				maxTokens: 2000,
 				enabled: true,
@@ -908,15 +913,16 @@ export default {
 				this.testingJD = false
 			}
 		},
-		// AI / LM Studio methods
+		// AI / OpenRouter methods
 		async loadAIConfig() {
 			try {
 				const response = await aiAPI.getConfig()
 				const data = response.data?.data || response.data || {}
 				this.aiConfig = {
-					lmStudioUrl: data.lmStudioUrl || 'http://localhost:1234',
-					modelName: data.modelName || '',
-					temperature: data.temperature || 0.7,
+					apiUrl: data.apiUrl || 'https://openrouter.ai/api',
+					apiKey: data.apiKey || '',
+					modelName: data.modelName || 'mistralai/mistral-nemo',
+					temperature: data.temperature ?? 0.7,
 					maxTokens: data.maxTokens || 2000,
 					enabled: data.enabled !== false,
 				}

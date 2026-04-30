@@ -2,14 +2,15 @@ package models
 
 import "time"
 
-// AIConfig represents the LM Studio AI configuration
+// AIConfig represents the AI provider configuration (OpenRouter or compatible)
 type AIConfig struct {
-	ID           int64     `json:"id"`
-	LMStudioURL  string    `json:"lmStudioUrl"`
-	ModelName    string    `json:"modelName"`
-	Temperature  float64   `json:"temperature"`
-	MaxTokens    int       `json:"maxTokens"`
-	Enabled      bool      `json:"enabled"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID          int64     `json:"id"`
+	APIURL      string    `json:"apiUrl"`
+	APIKey      string    `json:"apiKey"`
+	ModelName   string    `json:"modelName"`
+	Temperature float64   `json:"temperature"`
+	MaxTokens   int       `json:"maxTokens"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
