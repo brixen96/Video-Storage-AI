@@ -54,7 +54,7 @@ const routes = [
 	{
 		path: '/activity',
 		name: 'Activity',
-		component: () => import(/* webpackChunkName: "activity" */ '@/views/ActivityDashboard.vue'),
+		component: () => import(/* webpackChunkName: "activity" */ '@/views/ActivityPage.vue'),
 	},
 	{
 		path: '/settings',
