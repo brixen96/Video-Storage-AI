@@ -86,8 +86,14 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		// SQLite LIKE is case-insensitive for ASCII by default.
 		words := strings.Fields(query.Query)
 		for _, word := range words {
-			conditions = append(conditions, "(v.title LIKE ? OR v.file_path LIKE ?)")
-			args = append(args, "%"+word+"%", "%"+word+"%")
+			like := "%" + word + "%"
+			conditions = append(conditions, `(
+				v.title LIKE ? OR v.file_path LIKE ?
+				OR EXISTS (SELECT 1 FROM video_performers vp JOIN performers p ON p.id = vp.performer_id WHERE vp.video_id = v.id AND p.name LIKE ?)
+				OR EXISTS (SELECT 1 FROM video_tags vt JOIN tags t ON t.id = vt.tag_id WHERE vt.video_id = v.id AND t.name LIKE ?)
+				OR EXISTS (SELECT 1 FROM video_studios vs JOIN studios s ON s.id = vs.studio_id WHERE vs.video_id = v.id AND s.name LIKE ?)
+			)`)
+			args = append(args, like, like, like, like, like)
 		}
 	}
 
