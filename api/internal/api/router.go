@@ -74,6 +74,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			libraries.PUT("/:id", updateLibrary)                       // Update library
 			libraries.DELETE("/:id", deleteLibrary)                    // Delete library
 			libraries.POST("/:id/generate-thumbnails", generateThumbnailsForFolder) // Generate thumbnails for folder
+			libraries.GET("/:id/analyze-structure", analyzeLibraryStructure)         // Analyze folder structure
+			libraries.POST("/:id/apply-structure", applyLibraryStructurePlan)        // Apply structure plan
 		}
 
 		// Videos endpoints
@@ -95,6 +97,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.PATCH("/content-type/folder", updateFolderContentType) // Update content type for folder recursively
 			videos.PATCH("/performer/folder", linkPerformerToFolder)       // Link performer to all videos in a folder
 			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
+			videos.GET("/:id/locate", locateVideoFile)              // Locate missing video by filename search
+			videos.PATCH("/:id/remap", remapVideoPath)              // Remap video to new file path
+			videos.POST("/missing/cleanup", deleteMissingVideos)    // Bulk-delete missing video records
 		}
 
 		// Conversion endpoints
@@ -283,6 +288,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			scraper.DELETE("/videos/source/:source", deleteScrapedVideosBySourceHandler)      // Delete videos by source hostname
 			scraper.POST("/videos/bulk-delete", bulkDeleteScrapedVideosHandler) // Bulk delete scraped videos by IDs
 			scraper.GET("/videos/:id", getScrapedVideoHandler)             // Get single scraped video
+			scraper.GET("/videos/:id/library-match", findLibraryMatchHandler) // Find matching library videos
 			scraper.POST("/videos/:id/mark-downloaded", markScrapedVideoDownloadedHandler)     // Mark video as downloaded
 			scraper.DELETE("/videos/:id/mark-downloaded", unmarkScrapedVideoDownloadedHandler) // Remove downloaded mark
 			scraper.GET("/proxy-image", proxyScraperImageHandler)             // Proxy CDN image with correct Referer
@@ -491,8 +497,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			system.PUT("/config", updateAppConfig)             // Update persisted app config
 			system.GET("/update/check", checkForUpdate)        // Check GitHub for a newer release
 			system.POST("/update/install", installUpdate)      // Download and apply an update
-			system.GET("/services", getServicesStatus)          // Query Windows service status
-			system.POST("/services/control", controlService)   // Start / stop / restart a service
+			system.GET("/services", getServicesStatus)           // Query Windows service status
+			system.POST("/services/control", controlService)    // Start / stop / restart a service
+			system.POST("/build-and-deploy", buildAndDeploy)    // Run build.bat + restart services
 		}
 
 		// Notification endpoints
@@ -550,6 +557,16 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			lists.DELETE("/:id/videos", removeFromListHandler)   // Remove videos from list
 			lists.POST("/:id/reorder", reorderListItemsHandler)  // Reorder items in list
 			lists.PUT("/:id/items/:itemId/notes", updateItemNotesHandler) // Update item notes
+		}
+
+		// Video Links (Edited↔Backup pairing) endpoints
+		videoLinks := v1.Group("/video-links")
+		{
+			videoLinks.POST("/suggest", suggestVideoLinksHandler)             // Run matching engine + save suggestions
+			videoLinks.GET("", getVideoLinksHandler)                          // Get links for review (?edited_library_id=&status=)
+			videoLinks.PATCH("/:id", updateVideoLinkStatusHandler)            // Confirm / reject a single link
+			videoLinks.POST("/bulk-status", bulkUpdateVideoLinkStatusHandler) // Bulk confirm / reject
+			videoLinks.GET("/for-video/:id", getVideoLinkForVideoHandler)     // Get confirmed link for a video
 		}
 
 		// Site health check

@@ -197,6 +197,133 @@ func (s *ConversionService) ConvertVideoToMP4(videoID int64) (*models.Video, err
 	return createdVideo, nil
 }
 
+// StartConversionAsync validates the request, creates an activity, and starts
+// ffmpeg in a background goroutine. It returns the activity immediately so the
+// caller can respond with HTTP 202 + the activity ID for progress polling.
+func (s *ConversionService) StartConversionAsync(videoID int64) (*models.Activity, error) {
+	// --- Validation (synchronous, fast) ---
+	video, err := s.videoService.GetByID(videoID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get video: %w", err)
+	}
+
+	if strings.ToLower(filepath.Ext(video.FilePath)) == ".mp4" {
+		return nil, fmt.Errorf("video is already in MP4 format")
+	}
+
+	if video.ConvertedTo != nil {
+		// Already has a conversion — return a synthetic completed activity rather than re-converting.
+		return nil, fmt.Errorf("video has already been converted (converted video ID: %d)", *video.ConvertedTo)
+	}
+
+	outputPath := strings.TrimSuffix(video.FilePath, filepath.Ext(video.FilePath)) + "_converted.mp4"
+
+	// Check if converted record already exists in DB
+	if existingMarks, err := s.videoService.GetVideoMarksByPath(outputPath); err == nil && existingMarks != nil {
+		return nil, fmt.Errorf("converted video already exists on disk/database")
+	}
+
+	// --- Create activity (synchronous) ---
+	activity, err := s.activityService.Create(&models.ActivityLogCreate{
+		TaskType: "video_conversion",
+		Status:   "running",
+		Message:  fmt.Sprintf("Converting %s to MP4", filepath.Base(video.FilePath)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create activity: %w", err)
+	}
+
+	// --- Background work ---
+	go func() {
+		// Build FFmpeg command
+		cmd := exec.Command("ffmpeg",
+			"-i", video.FilePath,
+			"-c:v", "libx264",
+			"-preset", "medium",
+			"-crf", "23",
+			"-c:a", "aac",
+			"-b:a", "192k",
+			"-movflags", "+faststart",
+			"-y",
+			outputPath,
+		)
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			errMsg := fmt.Sprintf("FFmpeg conversion failed: %v\nOutput: %s", err, string(output))
+			log.Printf(errMsg)
+			s.activityService.FailTask(int(activity.ID), errMsg)
+			return
+		}
+
+		// Stat output file
+		fileInfo, err := os.Stat(outputPath)
+		if err != nil {
+			s.activityService.FailTask(int(activity.ID), fmt.Sprintf("Failed to stat output file: %v", err))
+			return
+		}
+
+		// Extract metadata
+		metadata, err := s.mediaService.ExtractMetadata(outputPath)
+		if err != nil {
+			log.Printf("Warning: Failed to extract metadata from converted file: %v", err)
+		}
+
+		// Create video record
+		newVideo := &models.VideoCreate{
+			LibraryID: video.LibraryID,
+			Title:     video.Title + " (Converted)",
+			FilePath:  outputPath,
+			FileSize:  fileInfo.Size(),
+		}
+		if metadata != nil {
+			newVideo.Duration = metadata.Duration
+			newVideo.Codec = metadata.Codec
+			newVideo.Resolution = fmt.Sprintf("%dx%d", metadata.Width, metadata.Height)
+			newVideo.Bitrate = metadata.Bitrate
+			newVideo.FPS = metadata.FrameRate
+		}
+
+		createdVideo, err := s.videoService.Create(newVideo)
+		if err != nil {
+			s.activityService.FailTask(int(activity.ID), fmt.Sprintf("Failed to create video record: %v", err))
+			return
+		}
+
+		// Link videos
+		if err := s.videoService.UpdateConversionLink(video.ID, createdVideo.ID, true); err != nil {
+			log.Printf("Warning: Failed to update original video conversion link: %v", err)
+		}
+		if err := s.videoService.UpdateConversionLink(createdVideo.ID, video.ID, false); err != nil {
+			log.Printf("Warning: Failed to update converted video original link: %v", err)
+		}
+
+		// Copy relationships
+		if err := s.videoService.CopyPerformers(video.ID, createdVideo.ID); err != nil {
+			log.Printf("Warning: Failed to copy performers: %v", err)
+		}
+		if err := s.videoService.CopyTags(video.ID, createdVideo.ID); err != nil {
+			log.Printf("Warning: Failed to copy tags: %v", err)
+		}
+		if err := s.videoService.CopyStudios(video.ID, createdVideo.ID); err != nil {
+			log.Printf("Warning: Failed to copy studios: %v", err)
+		}
+		if err := s.videoService.CopyGroups(video.ID, createdVideo.ID); err != nil {
+			log.Printf("Warning: Failed to copy groups: %v", err)
+		}
+		if err := s.videoService.CopyMetadata(video.ID, createdVideo.ID); err != nil {
+			log.Printf("Warning: Failed to copy metadata: %v", err)
+		}
+
+		s.activityService.CompleteTask(
+			int64(activity.ID),
+			fmt.Sprintf("Successfully converted to MP4: %s (ID: %d)", filepath.Base(outputPath), createdVideo.ID),
+		)
+	}()
+
+	return activity, nil
+}
+
 // CheckFFmpegInstalled checks if FFmpeg is installed and available
 func (s *ConversionService) CheckFFmpegInstalled() bool {
 	cmd := exec.Command("ffmpeg", "-version")

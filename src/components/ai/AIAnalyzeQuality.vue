@@ -63,8 +63,8 @@
 					</div>
 					<div class="quality-info mt-2">
 						<span class="badge bg-primary me-2">{{ result.resolution }}</span>
-						<span class="badge me-2" :class="result.quality_score >= 0.8 ? 'bg-success' : result.quality_score >= 0.6 ? 'bg-warning' : 'bg-danger'">
-							Score: {{ (result.quality_score * 100).toFixed(0) }}%
+						<span class="badge me-2" :class="result.quality_score >= 80 ? 'bg-success' : result.quality_score >= 60 ? 'bg-warning' : 'bg-danger'">
+							Score: {{ result.quality_score.toFixed(0) }}%
 						</span>
 						<div class="mt-1">
 							<small v-for="(issue, idx) in result.issues" :key="idx" class="text-warning d-block">

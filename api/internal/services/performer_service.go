@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -270,14 +271,24 @@ func (s *PerformerService) CleanupEmptyPerformers() (int64, error) {
 
 // Search searches performers by name
 func (s *PerformerService) Search(searchTerm string) ([]models.Performer, error) {
-	query := `
+	var whereClauses []string
+	var args []interface{}
+	for _, word := range strings.Fields(searchTerm) {
+		whereClauses = append(whereClauses, "name LIKE ?")
+		args = append(args, "%"+word+"%")
+	}
+	where := "1=1"
+	if len(whereClauses) > 0 {
+		where = strings.Join(whereClauses, " AND ")
+	}
+	query := fmt.Sprintf(`
 		SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
 		FROM performers
-		WHERE name LIKE ?
+		WHERE %s
 		ORDER BY name ASC
-	`
+	`, where)
 
-	rows, err := s.db.Query(query, "%"+searchTerm+"%")
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search performers: %w", err)
 	}
@@ -381,26 +392,35 @@ func (s *PerformerService) GetAllPaginated(limit, offset int) ([]models.Performe
 
 // SearchPaginated searches performers with pagination
 func (s *PerformerService) SearchPaginated(searchTerm string, limit, offset int) ([]models.Performer, int64, error) {
-	searchPattern := "%" + searchTerm + "%"
+	var whereClauses []string
+	var args []interface{}
+	for _, word := range strings.Fields(searchTerm) {
+		whereClauses = append(whereClauses, "name LIKE ?")
+		args = append(args, "%"+word+"%")
+	}
+	where := "1=1"
+	if len(whereClauses) > 0 {
+		where = strings.Join(whereClauses, " AND ")
+	}
 
 	// Get total count
 	var total int64
-	countQuery := "SELECT COUNT(*) FROM performers WHERE name LIKE ?"
-	err := s.db.QueryRow(countQuery, searchPattern).Scan(&total)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM performers WHERE %s", where)
+	err := s.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count performers: %w", err)
 	}
 
 	// Get paginated results
-	query := `
+	query := fmt.Sprintf(`
         SELECT id, name, preview_path, thumbnail_path, folder_path, video_count, category, metadata, created_at, updated_at
         FROM performers
-        WHERE name LIKE ?
+        WHERE %s
         ORDER BY name ASC
         LIMIT ? OFFSET ?
-    `
+    `, where)
 
-	rows, err := s.db.Query(query, searchPattern, limit, offset)
+	rows, err := s.db.Query(query, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query performers: %w", err)
 	}

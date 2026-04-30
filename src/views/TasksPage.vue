@@ -287,13 +287,57 @@
 						</div>
 					</div>
 				</div>
+			<!-- App Control -->
+			<div class="row g-3 mt-3">
+				<div class="col-12">
+					<div class="card task-card">
+						<div class="card-header">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'power-off']" class="me-2" />
+								App Control
+							</h5>
+						</div>
+						<div class="card-body">
+							<div class="row g-3">
+								<!-- Restart Services -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Restart Services</h6>
+											<p class="text-light mb-0">Restart both the API and Web services without rebuilding. The page will briefly become unavailable.</p>
+										</div>
+										<button class="btn btn-warning mt-3" @click="restartServices" :disabled="appControlRunning">
+											<font-awesome-icon :icon="['fas', appControlRunning ? 'spinner' : 'redo']" :spin="appControlRunning" class="me-2" />
+											{{ appControlRunning ? 'Restarting...' : 'Restart Services' }}
+										</button>
+									</div>
+								</div>
+
+								<!-- Build & Deploy -->
+								<div class="col-md-6">
+									<div class="task-item">
+										<div class="task-info">
+											<h6>Build &amp; Deploy</h6>
+											<p class="text-light mb-0">Run build.bat — builds the frontend and API, then restarts services. Takes ~5 minutes. The app will be unavailable during the build.</p>
+										</div>
+										<button class="btn btn-danger mt-3" @click="buildAndDeploy" :disabled="appControlRunning">
+											<font-awesome-icon :icon="['fas', appControlRunning ? 'spinner' : 'hammer']" :spin="appControlRunning" class="me-2" />
+											{{ appControlRunning ? 'Building...' : 'Build & Deploy' }}
+										</button>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 			</div>
 		</div>
 	</div>
 </template>
 
 <script>
-import { performersAPI, databaseAPI, videosAPI } from '@/services/api'
+import { performersAPI, databaseAPI, videosAPI, systemAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
 
 export default {
@@ -309,6 +353,7 @@ export default {
 			},
 			wsUnsubscribe: null,
 			isDbOperationRunning: false,
+			appControlRunning: false,
 		}
 	},
 	mounted() {
@@ -419,11 +464,8 @@ export default {
 					local_max_concurrent: 8,
 				}
 
-				const response = await videosAPI.scanAllParallel(config)
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Scan Started', 'Library scan has been initiated. Watch the progress above!')
-				}
+				await videosAPI.scanAllParallel(config)
+				this.$toast.success('Scan Started', 'Library scan has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to scan libraries:', error)
 				this.$toast.error('Scan Failed', error.response?.data?.error || 'Failed to start library scan')
@@ -432,11 +474,8 @@ export default {
 
 		async generatePreviews() {
 			try {
-				const response = await videosAPI.generatePreviews()
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Preview Generation Started', 'Preview generation has been initiated. Watch the progress above!')
-				}
+				await videosAPI.generatePreviews()
+				this.$toast.success('Preview Generation Started', 'Preview generation has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to generate previews:', error)
 				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start preview generation')
@@ -445,11 +484,8 @@ export default {
 
 		async generateVideoThumbnails() {
 			try {
-				const response = await videosAPI.generateThumbnails()
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Thumbnail Generation Started', 'Video thumbnail generation has been initiated. Watch the progress above!')
-				}
+				await videosAPI.generateThumbnails()
+				this.$toast.success('Thumbnail Generation Started', 'Video thumbnail generation has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to generate video thumbnails:', error)
 				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start video thumbnail generation')
@@ -458,11 +494,8 @@ export default {
 
 		async scanPerformers() {
 			try {
-				const response = await performersAPI.scan()
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Performer Scan Started', 'Performer scan has been initiated. Watch the progress above!')
-				}
+				await performersAPI.scan()
+				this.$toast.success('Performer Scan Started', 'Performer scan has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to scan performers:', error)
 				this.$toast.error('Scan Failed', error.response?.data?.error || 'Failed to start performer scan')
@@ -471,11 +504,8 @@ export default {
 
 		async generatePerformerThumbnails() {
 			try {
-				const response = await performersAPI.generateThumbnails()
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Thumbnail Generation Started', 'Performer thumbnail generation has been initiated. Watch the progress above!')
-				}
+				await performersAPI.generateThumbnails()
+				this.$toast.success('Thumbnail Generation Started', 'Performer thumbnail generation has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to generate performer thumbnails:', error)
 				this.$toast.error('Generation Failed', error.response?.data?.error || 'Failed to start thumbnail generation')
@@ -484,11 +514,8 @@ export default {
 
 		async fetchAllMetadata() {
 			try {
-				const response = await performersAPI.fetchAllMetadata()
-
-				if (response.status === 202 || response.status === 200) {
-					this.$toast.success('Metadata Fetch Started', 'Metadata fetching has been initiated. Watch the progress above!')
-				}
+				await performersAPI.fetchAllMetadata()
+				this.$toast.success('Metadata Fetch Started', 'Metadata fetching has been initiated. Watch the progress above!')
 			} catch (error) {
 				console.error('Failed to fetch metadata:', error)
 				this.$toast.error('Fetch Failed', error.response?.data?.error || 'Failed to start metadata fetch')
@@ -623,6 +650,34 @@ export default {
 				this.$toast.error('Clear Failed', error.message || 'Failed to clear activity logs')
 			} finally {
 				this.isDbOperationRunning = false
+			}
+		},
+
+		async restartServices() {
+			if (!confirm('Restart both API and Web services? The app will be briefly unavailable.')) return
+			this.appControlRunning = true
+			try {
+				await systemAPI.controlService('both', 'restart')
+				this.$toast.success('Restart Initiated', 'Services are restarting. Reload the page in ~10 seconds.')
+			} catch (error) {
+				console.error('Failed to restart services:', error)
+				this.$toast.error('Restart Failed', error.response?.data?.error || 'Failed to restart services')
+			} finally {
+				this.appControlRunning = false
+			}
+		},
+
+		async buildAndDeploy() {
+			if (!confirm('Run Build & Deploy?\n\nThis will:\n1. Stop services\n2. Build frontend (~2 min)\n3. Build API (~1 min)\n4. Restart services\n\nThe app will be unavailable for ~5 minutes.')) return
+			this.appControlRunning = true
+			try {
+				await systemAPI.buildAndDeploy()
+				this.$toast.success('Build Started', 'Build & Deploy launched. The app will restart automatically in ~5 minutes.')
+			} catch (error) {
+				console.error('Failed to start build:', error)
+				this.$toast.error('Build Failed', error.response?.data?.error || 'Failed to start build')
+			} finally {
+				this.appControlRunning = false
 			}
 		},
 	},

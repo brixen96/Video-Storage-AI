@@ -59,7 +59,12 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	baseQuery := `
 		SELECT DISTINCT v.id, v.library_id, v.title, v.file_path, v.file_size, v.duration, v.codec,
 		       v.resolution, v.bitrate, v.fps, v.thumbnail_path, v.preview_path, v.date, v.rating, v.description,
-		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.content_type, v.created_at, v.updated_at, v.last_played_at, v.play_count
+		       v.is_favorite, v.is_pinned, v.not_interested, v.in_edit_list, v.content_type, v.created_at, v.updated_at, v.last_played_at, v.play_count,
+		       COALESCE(v.is_missing, 0),
+		       (SELECT CASE WHEN vl.edited_video_id = v.id THEN vl.backup_video_id ELSE vl.edited_video_id END
+		        FROM video_links vl
+		        WHERE (vl.edited_video_id = v.id OR vl.backup_video_id = v.id) AND vl.status = 'confirmed'
+		        LIMIT 1) AS linked_video_id
 		FROM videos v
 	`
 
@@ -75,8 +80,14 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	}
 
 	if query.Query != "" {
-		conditions = append(conditions, "(v.title LIKE ? OR v.file_path LIKE ?)")
-		args = append(args, "%"+query.Query+"%", "%"+query.Query+"%")
+		// Split into words so every word must appear somewhere in the title/path (AND logic).
+		// e.g. "milf big ass" matches "MILF with a big ass" because each word is present.
+		// SQLite LIKE is case-insensitive for ASCII by default.
+		words := strings.Fields(query.Query)
+		for _, word := range words {
+			conditions = append(conditions, "(v.title LIKE ? OR v.file_path LIKE ?)")
+			args = append(args, "%"+word+"%", "%"+word+"%")
+		}
 	}
 
 	if query.Resolution != "" {
@@ -176,6 +187,11 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		args = append(args, *query.InEditList)
 	}
 
+	// By default hide missing-file videos; only show them when explicitly requested
+	if !query.ShowMissing {
+		conditions = append(conditions, "COALESCE(v.is_missing, 0) = 0")
+	}
+
 	// Build the WHERE clause
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -266,11 +282,13 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		var description sql.NullString
 		var previewPath sql.NullString
 		var contentType sql.NullString
+		var linkedVideoID sql.NullInt64
 		err := rows.Scan(
 			&video.ID, &video.LibraryID, &video.Title, &video.FilePath, &video.FileSize, &video.Duration,
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath, &previewPath,
 			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 			&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+			&video.IsMissing, &linkedVideoID,
 		)
 		if err != nil {
 			log.Printf("Failed to scan video row: %v", err)
@@ -291,6 +309,9 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		}
 		if contentType.Valid {
 			video.ContentType = contentType.String
+		}
+		if linkedVideoID.Valid {
+			video.LinkedVideoID = &linkedVideoID.Int64
 		}
 
 		videos = append(videos, video)
@@ -320,11 +341,16 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	var date sql.NullString
 	var description sql.NullString
 	var contentType sql.NullString
+	var linkedVideoID sql.NullInt64
 
 	query := `
 		SELECT id, library_id, title, file_path, file_size, duration, codec, resolution,
 		       bitrate, fps, thumbnail_path, date, rating, description, is_favorite, is_pinned,
-		       not_interested, in_edit_list, content_type, created_at, updated_at, last_played_at, play_count
+		       not_interested, in_edit_list, content_type, created_at, updated_at, last_played_at, play_count,
+		       (SELECT CASE WHEN vl.edited_video_id = videos.id THEN vl.backup_video_id ELSE vl.edited_video_id END
+		        FROM video_links vl
+		        WHERE (vl.edited_video_id = videos.id OR vl.backup_video_id = videos.id) AND vl.status = 'confirmed'
+		        LIMIT 1) AS linked_video_id
 		FROM videos
 		WHERE id = ?
 	`
@@ -334,6 +360,7 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 		&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath,
 		&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 		&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
+		&linkedVideoID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -354,6 +381,9 @@ func (s *VideoService) GetByID(id int64) (*models.Video, error) {
 	}
 	if contentType.Valid {
 		video.ContentType = contentType.String
+	}
+	if linkedVideoID.Valid {
+		video.LinkedVideoID = &linkedVideoID.Int64
 	}
 
 	// Load relationships
@@ -669,27 +699,41 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	}
 
 	// Scan for video files
-	videoFiles, err := s.findVideoFiles(library.Path)
+	videoFiles, skippedDirs, err := s.findVideoFiles(library.Path)
 	if err != nil {
+		// Give a helpful hint when the path looks like a mapped network drive.
+		// Windows services run as SYSTEM and have no access to user-mapped drives (Y:, Z:, etc.).
+		// The fix is to use UNC paths (\\server\share\...) or run the service as the user account.
+		failMsg := fmt.Sprintf("Failed to scan directory: %v", err)
+		if len(library.Path) >= 2 && library.Path[1] == ':' {
+			failMsg += " — mapped drive letters are not accessible to Windows services. Use a UNC path (\\\\server\\share\\...) or change the service logon account to your user in services.msc."
+		}
 		consoleLogSvc.LogAPI("error", "Failed to scan directory for videos", map[string]interface{}{
 			"library_id":   libraryID,
 			"library_name": library.Name,
 			"library_path": library.Path,
 			"error":        err.Error(),
+			"hint":         "If path uses a mapped drive letter, use a UNC path instead",
 		})
-		if err := s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to scan directory: %v", err)); err != nil {
+		if err := s.activityService.FailTask(activity.ID, failMsg); err != nil {
 			log.Printf("Failed to fail task: %v", err)
 		}
 		return fmt.Errorf("failed to scan directory: %w", err)
 	}
 
 	total := len(videoFiles)
-	consoleLogSvc.LogAPI("info", fmt.Sprintf("Found %d video files in library: %s", total, library.Name), map[string]interface{}{
-		"library_id":     libraryID,
-		"library_name":   library.Name,
-		"total_files":    total,
-	})
-	if err := s.activityService.UpdateProgress(activity.ID, 0, fmt.Sprintf("Found %d video files", total)); err != nil {
+	logFields := map[string]interface{}{
+		"library_id":   libraryID,
+		"library_name": library.Name,
+		"total_files":  total,
+	}
+	progressMsg := fmt.Sprintf("Found %d video files", total)
+	if len(skippedDirs) > 0 {
+		logFields["skipped_dirs"] = skippedDirs
+		progressMsg += fmt.Sprintf(" (%d folder(s) skipped — access denied, check SMB credentials)", len(skippedDirs))
+	}
+	consoleLogSvc.LogAPI("info", fmt.Sprintf("Found %d video files in library: %s", total, library.Name), logFields)
+	if err := s.activityService.UpdateProgress(activity.ID, 0, progressMsg); err != nil {
 		log.Printf("Failed to update progress: %v", err)
 	}
 
@@ -794,24 +838,19 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 			ThumbnailDir:  thumbnailDir,
 		}
 
-		expectedThumbnail := mediaService.GetThumbnailPath(thumbnailConfig)
-		thumbnailPath := ""
-		if expectedThumbnail != nil {
-			thumbnailPath = expectedThumbnail.RelativePath
-		}
-
-		// Create video record with library ID and thumbnail path
+		// Create video record — thumbnail_path is intentionally empty here.
+		// The parallel thumbnail worker sets it only after successful generation,
+		// so the frontend never sees a path that points to a non-existent file.
 		create := &models.VideoCreate{
-			LibraryID:     libraryID,
-			Title:         filepath.Base(filePath),
-			FilePath:      filePath,
-			FileSize:      metadata.Size,
-			Duration:      metadata.Duration,
-			Codec:         metadata.Codec,
-			Resolution:    resolution,
-			Bitrate:       metadata.Bitrate,
-			FPS:           metadata.FrameRate,
-			ThumbnailPath: thumbnailPath,
+			LibraryID:  libraryID,
+			Title:      filepath.Base(filePath),
+			FilePath:   filePath,
+			FileSize:   metadata.Size,
+			Duration:   metadata.Duration,
+			Codec:      metadata.Codec,
+			Resolution: resolution,
+			Bitrate:    metadata.Bitrate,
+			FPS:        metadata.FrameRate,
 		}
 
 		video, err := s.Create(create)
@@ -846,17 +885,68 @@ func (s *VideoService) ScanLibrary(libraryID int64) error {
 	wg.Wait()
 	log.Println("All thumbnail generation workers completed")
 
+	// ── Reconciliation pass ──────────────────────────────────────────────────
+	// Check every video in this library against the filesystem.
+	// Mark files that no longer exist as is_missing=1; clear the flag for any
+	// that have come back (e.g. re-mounted network share).
+	if err := s.activityService.UpdateProgress(activity.ID, 99, "Reconciling file paths…"); err != nil {
+		log.Printf("Failed to update progress: %v", err)
+	}
+
+	nowMissing := 0
+	nowRecovered := 0
+	libRows, err := s.db.Query(`SELECT id, file_path, COALESCE(is_missing,0) FROM videos WHERE library_id = ?`, libraryID)
+	if err == nil {
+		type libVideo struct {
+			id        int64
+			path      string
+			isMissing bool
+		}
+		var libVideos []libVideo
+		for libRows.Next() {
+			var lv libVideo
+			if libRows.Scan(&lv.id, &lv.path, &lv.isMissing) == nil {
+				libVideos = append(libVideos, lv)
+			}
+		}
+		libRows.Close()
+
+		for _, lv := range libVideos {
+			_, statErr := os.Stat(lv.path)
+			fileGone := statErr != nil
+			if fileGone && !lv.isMissing {
+				s.db.Exec(`UPDATE videos SET is_missing = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, lv.id)
+				log.Printf("[SCAN] Marked missing: %s", lv.path)
+				nowMissing++
+			} else if !fileGone && lv.isMissing {
+				s.db.Exec(`UPDATE videos SET is_missing = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, lv.id)
+				log.Printf("[SCAN] Recovered: %s", lv.path)
+				nowRecovered++
+			}
+		}
+	}
+	// ─────────────────────────────────────────────────────────────────────────
+
 	// Log scan completion
 	consoleLogSvc.LogAPI("info", fmt.Sprintf("Library scan completed: %s", library.Name), map[string]interface{}{
-		"library_id":     libraryID,
-		"library_name":   library.Name,
-		"total_files":    total,
-		"videos_added":   added,
-		"videos_skipped": skipped,
+		"library_id":      libraryID,
+		"library_name":    library.Name,
+		"total_files":     total,
+		"videos_added":    added,
+		"videos_skipped":  skipped,
+		"now_missing":     nowMissing,
+		"now_recovered":   nowRecovered,
 	})
 
 	// Complete activity
-	_ = s.activityService.CompleteTask(int64(activity.ID), fmt.Sprintf("Scan complete: %d videos added, %d skipped", added, skipped))
+	msg := fmt.Sprintf("Scan complete: %d added, %d skipped", added, skipped)
+	if nowMissing > 0 {
+		msg += fmt.Sprintf(", %d missing", nowMissing)
+	}
+	if nowRecovered > 0 {
+		msg += fmt.Sprintf(", %d recovered", nowRecovered)
+	}
+	_ = s.activityService.CompleteTask(int64(activity.ID), msg)
 
 	return nil
 }
@@ -1067,12 +1157,21 @@ func (s *VideoService) isLocalDrive(path string, localDrives []string) bool {
 }
 
 // findVideoFiles recursively finds all video files in a directory
-func (s *VideoService) findVideoFiles(dir string) ([]string, error) {
+func (s *VideoService) findVideoFiles(dir string) ([]string, []string, error) {
 	var videoFiles []string
+	var skippedPaths []string
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return err
+			if path == dir {
+				// Root library path itself is inaccessible — fail hard so the caller surfaces a clear error.
+				return err
+			}
+			// Subdirectory or file is inaccessible (e.g. expired SMB session, permission denied).
+			// Log and skip rather than aborting the entire scan.
+			log.Printf("[SCAN] Skipping inaccessible path %q: %v", path, err)
+			skippedPaths = append(skippedPaths, path)
+			return filepath.SkipDir
 		}
 
 		if info.IsDir() {
@@ -1090,7 +1189,11 @@ func (s *VideoService) findVideoFiles(dir string) ([]string, error) {
 		return nil
 	})
 
-	return videoFiles, err
+	if len(skippedPaths) > 0 {
+		log.Printf("[SCAN] Walk completed with %d inaccessible path(s) skipped in %s", len(skippedPaths), dir)
+	}
+
+	return videoFiles, skippedPaths, err
 }
 
 // videoExists checks if a video with the given file path already exists
@@ -1309,12 +1412,16 @@ func (s *VideoService) generatePreviewsForLibrary(libraryID int64, previewDir st
 		go func(workerID int) {
 			defer wg.Done()
 			for job := range previewJobs {
-				// Skip if preview already exists
+				// Skip if preview already exists AND frames are on disk
 				if job.video.PreviewPath != "" {
-					previewMutex.Lock()
-					skipped++
-					previewMutex.Unlock()
-					continue
+					firstFrame := filepath.Join(previewDir, job.video.PreviewPath, "frame_001.jpg")
+					if _, statErr := os.Stat(firstFrame); !os.IsNotExist(statErr) {
+						previewMutex.Lock()
+						skipped++
+						previewMutex.Unlock()
+						continue
+					}
+					// Path set in DB but file missing — regenerate
 				}
 
 				// Skip if video has no duration
@@ -1407,11 +1514,11 @@ func (s *VideoService) GenerateAllThumbnails() error {
 		log.Printf("Failed to create activity log: %v", err)
 	}
 
-	// Get all videos without thumbnails
+	// Get all videos — we'll check thumbnail file existence in Go to also catch
+	// records that have a path set but whose file was never actually generated.
 	query := `
-		SELECT id, library_id, file_path, duration
+		SELECT id, library_id, file_path, duration, COALESCE(thumbnail_path,'')
 		FROM videos
-		WHERE thumbnail_path IS NULL OR thumbnail_path = ''
 		ORDER BY id ASC
 	`
 
@@ -1424,6 +1531,12 @@ func (s *VideoService) GenerateAllThumbnails() error {
 	}
 	defer rows.Close()
 
+	// Get the configured thumbnail directory so we can check file existence.
+	thumbnailBaseDir := os.Getenv("THUMBNAIL_DIR")
+	if thumbnailBaseDir == "" {
+		thumbnailBaseDir = filepath.Join(appconfig.DataDir(), "thumbnails")
+	}
+
 	type videoInfo struct {
 		ID        int64
 		LibraryID int64
@@ -1434,11 +1547,20 @@ func (s *VideoService) GenerateAllThumbnails() error {
 	var videos []videoInfo
 	for rows.Next() {
 		var v videoInfo
-		if err := rows.Scan(&v.ID, &v.LibraryID, &v.FilePath, &v.Duration); err != nil {
+		var thumbPath string
+		if err := rows.Scan(&v.ID, &v.LibraryID, &v.FilePath, &v.Duration, &thumbPath); err != nil {
 			log.Printf("Failed to scan video: %v", err)
 			continue
 		}
-		videos = append(videos, v)
+		// Only queue if thumbnail is missing or the file doesn't actually exist on disk.
+		if thumbPath == "" {
+			videos = append(videos, v)
+			continue
+		}
+		fullThumbPath := filepath.Join(thumbnailBaseDir, strings.TrimPrefix(thumbPath, "thumbnails/"))
+		if _, statErr := os.Stat(fullThumbPath); os.IsNotExist(statErr) {
+			videos = append(videos, v)
+		}
 	}
 
 	if len(videos) == 0 {
@@ -1476,16 +1598,13 @@ func (s *VideoService) GenerateAllThumbnails() error {
 					continue
 				}
 
-				// Get thumbnail directory
-				thumbnailDir := filepath.Join(library.Path, ".thumbnails")
-
 				// Generate thumbnail
 				config := ThumbnailConfig{
 					LibraryID:     video.LibraryID,
 					LibraryPath:   library.Path,
 					VideoFilePath: video.FilePath,
 					Duration:      video.Duration,
-					ThumbnailDir:  thumbnailDir,
+					ThumbnailDir:  thumbnailBaseDir,
 				}
 
 				result, err := mediaService.GenerateThumbnailHierarchical(config)
@@ -2126,4 +2245,91 @@ func (s *VideoService) LinkPerformerToFolderVideos(folderPath string, performerI
 
 	log.Printf("LinkPerformerToFolderVideos: linked performer %d to %d videos in folder %s", performerID, linked, folderPath)
 	return linked, nil
+}
+
+// LocateFile searches the video's library directory for files matching the video's filename.
+// Returns up to 10 candidate paths (absolute) that share the same base filename (case-insensitive).
+func (s *VideoService) LocateFile(videoID int64) ([]string, error) {
+	// Load video and its library path
+	var filePath string
+	var libraryID int64
+	err := s.db.QueryRow(`SELECT file_path, library_id FROM videos WHERE id = ?`, videoID).Scan(&filePath, &libraryID)
+	if err != nil {
+		return nil, fmt.Errorf("video not found: %w", err)
+	}
+
+	var libraryPath string
+	err = s.db.QueryRow(`SELECT path FROM libraries WHERE id = ?`, libraryID).Scan(&libraryPath)
+	if err != nil {
+		return nil, fmt.Errorf("library not found: %w", err)
+	}
+
+	targetName := strings.ToLower(filepath.Base(filePath))
+	var candidates []string
+	const maxResults = 10
+
+	_ = filepath.WalkDir(libraryPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if len(candidates) >= maxResults {
+			return filepath.SkipAll
+		}
+		if strings.ToLower(d.Name()) == targetName {
+			candidates = append(candidates, path)
+		}
+		return nil
+	})
+
+	return candidates, nil
+}
+
+// RemapVideoPath updates a video's file_path and clears is_missing.
+// Returns an error if newPath does not exist on disk.
+func (s *VideoService) RemapVideoPath(videoID int64, newPath string) error {
+	if _, err := os.Stat(newPath); err != nil {
+		return fmt.Errorf("file not found at new path: %w", err)
+	}
+	info, _ := os.Stat(newPath)
+	newSize := info.Size()
+
+	_, err := s.db.Exec(
+		`UPDATE videos SET file_path = ?, file_size = ?, is_missing = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		newPath, newSize, videoID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to remap video path: %w", err)
+	}
+	log.Printf("[MISSING] Remapped video %d → %s", videoID, newPath)
+	return nil
+}
+
+// DeleteMissingVideos bulk-deletes all is_missing=1 videos.
+// If libraryID > 0, only that library is affected.
+// Returns the count of deleted records.
+func (s *VideoService) DeleteMissingVideos(libraryID int64) (int64, error) {
+	var result interface {
+		RowsAffected() (int64, error)
+	}
+	var err error
+
+	if libraryID > 0 {
+		result, err = s.db.Exec(
+			`DELETE FROM videos WHERE COALESCE(is_missing, 0) = 1 AND library_id = ?`, libraryID,
+		)
+	} else {
+		result, err = s.db.Exec(
+			`DELETE FROM videos WHERE COALESCE(is_missing, 0) = 1`,
+		)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete missing videos: %w", err)
+	}
+
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	log.Printf("[MISSING] Deleted %d missing video records (library_id=%d)", count, libraryID)
+	return count, nil
 }

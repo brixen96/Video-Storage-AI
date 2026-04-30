@@ -14,7 +14,10 @@ type ScraperTabsService struct {
 
 // NewScraperTabsService creates a new scraper tabs service
 func NewScraperTabsService(db *sql.DB) *ScraperTabsService {
-	return &ScraperTabsService{db: db}
+	svc := &ScraperTabsService{db: db}
+	// Reset any jobs that were left in running/pending state from a previous session (e.g. service crash/restart)
+	db.Exec(`UPDATE scraper_tab_jobs SET status = 'failed', completed_at = CURRENT_TIMESTAMP WHERE status IN ('running', 'pending')`)
+	return svc
 }
 
 // ScraperTab represents a saved scraper configuration

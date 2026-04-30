@@ -20,16 +20,17 @@ type AutoUpdateHandler func(scraperType string, configJSON string, maxPages int)
 
 // SchedulerService handles automated job scheduling and execution
 type SchedulerService struct {
-	db                  *sql.DB
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	scraperService      *ScraperService
-	activityService     *ActivityService
-	notificationService *NotificationService
-	autoUpdateHandler   AutoUpdateHandler
-	running             bool
-	runningJobs         map[int64]*JobExecution
-	mu                  sync.RWMutex
+	db                      *sql.DB
+	ctx                     context.Context
+	cancel                  context.CancelFunc
+	scraperService          *ScraperService
+	activityService         *ActivityService
+	notificationService     *NotificationService
+	linkVerificationService *LinkVerificationService
+	autoUpdateHandler       AutoUpdateHandler
+	running                 bool
+	runningJobs             map[int64]*JobExecution
+	mu                      sync.RWMutex
 }
 
 // JobExecution represents a running job
@@ -44,14 +45,15 @@ func NewSchedulerService(db *sql.DB, scraperService *ScraperService, activitySer
 	ctx, cancel := context.WithCancel(context.Background())
 	notificationService := NewNotificationService(db)
 	return &SchedulerService{
-		db:                  db,
-		ctx:                 ctx,
-		cancel:              cancel,
-		scraperService:      scraperService,
-		activityService:     activityService,
-		notificationService: notificationService,
-		running:             false,
-		runningJobs:         make(map[int64]*JobExecution),
+		db:                      db,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		scraperService:          scraperService,
+		activityService:         activityService,
+		notificationService:     notificationService,
+		linkVerificationService: NewLinkVerificationService(db, activityService),
+		running:                 false,
+		runningJobs:             make(map[int64]*JobExecution),
 	}
 }
 
@@ -346,11 +348,17 @@ func (s *SchedulerService) executeVerifyLinks(ctx context.Context, job *models.S
 		}
 	}
 
-	// This would call the link verification service
-	// For now, return success placeholder
+	threadID := *job.TargetID
+	if err := s.linkVerificationService.VerifyThreadLinks(threadID); err != nil {
+		return &models.JobResult{
+			Success: false,
+			Message: fmt.Sprintf("Link verification failed for thread %d: %v", threadID, err),
+		}
+	}
+
 	return &models.JobResult{
 		Success: true,
-		Message: fmt.Sprintf("Link verification completed for thread %d", *job.TargetID),
+		Message: fmt.Sprintf("Link verification completed for thread %d", threadID),
 	}
 }
 

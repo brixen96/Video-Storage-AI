@@ -41,6 +41,12 @@
 				@error="previewVideoError = true"
 			/>
 
+			<!-- Missing file overlay -->
+			<div v-if="video.is_missing" class="missing-overlay" title="File not found on disk">
+				<font-awesome-icon :icon="['fas', 'video-slash']" />
+				<span>File Missing</span>
+			</div>
+
 			<!-- Status Badges (top right) -->
 			<div class="status-badges">
 				<div v-if="video.is_favorite" class="badge-favorite" title="Favorite">
@@ -60,6 +66,9 @@
 				<div v-if="video.converted_to" class="badge-has-conversion" title="Has MP4 conversion available">
 					<font-awesome-icon :icon="['fas', 'check']" />
 					Converted
+				</div>
+				<div v-if="video.linked_video_id" class="badge-linked" title="Has a linked version in another library">
+					<font-awesome-icon :icon="['fas', 'link']" />
 				</div>
 			</div>
 
@@ -310,9 +319,9 @@ export default {
 				.slice(0, 2)
 		},
 		async handleClick() {
-			// For scraped videos, open the source URL in Firefox
-			if (this.video.is_scraped && this.video.source_url) {
-				await this.openInFirefox(this.video.source_url)
+			// For scraped videos, emit play so the parent can decide (e.g. show modal)
+			if (this.video.is_scraped) {
+				this.$emit('play', this.video)
 				return
 			}
 			// For regular videos, open video player page in new tab

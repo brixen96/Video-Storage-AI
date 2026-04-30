@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,8 +67,78 @@ func Initialize(cfg *config.Config) error {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
+	// One-time data fixes
+	backfillScrapedVideoContentType(DB)
+
 	log.Println("Database connection established")
 	return nil
+}
+
+// backfillScrapedVideoContentType updates scraped_videos rows that have no meaningful
+// content_type by looking up the matching scraper_tab's content_type by source domain.
+// Also ensures built-in scrapers like LuxureTV have their tab marked as zoo.
+func backfillScrapedVideoContentType(db *sql.DB) {
+	// Ensure the LuxureTV scraper tab is classified as zoo
+	if _, err := db.Exec(`UPDATE scraper_tabs SET content_type = 'zoo' WHERE site_type = 'luxuretv' AND (content_type = '' OR content_type = 'regular' OR content_type IS NULL)`); err != nil {
+		log.Printf("[DB] Failed to fix LuxureTV tab content_type: %v", err)
+	}
+
+	// Build domain -> content_type map using Go URL parsing for reliable matching
+	tabRows, err := db.Query(`SELECT base_url, content_type FROM scraper_tabs WHERE is_active = 1 AND content_type != '' AND content_type != 'regular'`)
+	if err != nil {
+		log.Printf("[DB] Failed to query scraper_tabs for backfill: %v", err)
+		return
+	}
+	tabMap := make(map[string]string) // bare domain (no www) -> content_type
+	for tabRows.Next() {
+		var baseURL, ct string
+		if tabRows.Scan(&baseURL, &ct) == nil {
+			if parsed, parseErr := url.Parse(baseURL); parseErr == nil {
+				host := strings.TrimPrefix(parsed.Hostname(), "www.")
+				if host != "" {
+					tabMap[host] = ct
+				}
+			}
+		}
+	}
+	tabRows.Close()
+
+	if len(tabMap) == 0 {
+		return
+	}
+
+	// Find scraped_videos with unset/regular content_type
+	videoRows, err := db.Query(`SELECT id, source FROM scraped_videos WHERE (content_type IS NULL OR content_type = '' OR content_type = 'regular') AND source != ''`)
+	if err != nil {
+		log.Printf("[DB] Failed to query scraped_videos for backfill: %v", err)
+		return
+	}
+	type videoUpdate struct {
+		id int64
+		ct string
+	}
+	var updates []videoUpdate
+	for videoRows.Next() {
+		var id int64
+		var source string
+		if videoRows.Scan(&id, &source) == nil {
+			cleanSource := strings.TrimPrefix(source, "www.")
+			if ct, ok := tabMap[cleanSource]; ok {
+				updates = append(updates, videoUpdate{id, ct})
+			}
+		}
+	}
+	videoRows.Close()
+
+	updated := 0
+	for _, u := range updates {
+		if _, execErr := db.Exec(`UPDATE scraped_videos SET content_type = ? WHERE id = ?`, u.ct, u.id); execErr == nil {
+			updated++
+		}
+	}
+	if updated > 0 {
+		log.Printf("[DB] Backfilled content_type on %d scraped_videos from scraper_tabs", updated)
+	}
 }
 
 // GetDB returns the database instance
@@ -1326,6 +1397,26 @@ func runMigrations() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_created ON ai_chat_messages(created_at DESC)`)
+
+	// Migration 52: Track missing video files
+	DB.Exec(`ALTER TABLE videos ADD COLUMN is_missing BOOLEAN DEFAULT 0`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_videos_is_missing ON videos(is_missing) WHERE is_missing = 1`)
+
+	// Migration 53: Edited↔Backup video links
+	DB.Exec(`CREATE TABLE IF NOT EXISTS video_links (
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		edited_video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+		backup_video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+		confidence      REAL    NOT NULL DEFAULT 0.0,
+		status          TEXT    NOT NULL DEFAULT 'suggested',
+		match_reasons   TEXT    NOT NULL DEFAULT '[]',
+		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(edited_video_id, backup_video_id)
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_video_links_edited  ON video_links(edited_video_id)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_video_links_backup  ON video_links(backup_video_id)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_video_links_status  ON video_links(status)`)
 
 	return nil
 }

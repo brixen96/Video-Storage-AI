@@ -365,9 +365,10 @@ func startScraperJobHandler(c *gin.Context) {
 
 		// Build scrape request from tab configuration
 		scrapeRequest := services.ScrapeVideoRequest{
-			URL:        request.URL,
-			SiteType:   tab.SiteType,
-			ActivityID: activityID,
+			URL:         request.URL,
+			SiteType:    tab.SiteType,
+			ContentType: tab.ContentType,
+			ActivityID:  activityID,
 			Options: services.ScrapeOptions{
 				DownloadVideo:    false,
 				ExtractMetadata:  true,

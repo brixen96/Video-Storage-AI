@@ -7,10 +7,10 @@
 					<div class="scraped-modal-header">
 						<h5 class="scraped-modal-title" :title="video.title">{{ video.title }}</h5>
 						<div class="scraped-modal-header-actions">
-							<a :href="video.source_url || video.url" target="_blank" class="btn btn-sm btn-outline-primary">
-								<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-1" />
-								Open Source
-							</a>
+							<button class="btn btn-sm btn-outline-primary" @click="scrapersAPI.openURL(video.source_url || video.url).catch(() => window.open(video.source_url || video.url, '_blank'))">
+								<font-awesome-icon :icon="['fab', 'firefox-browser']" class="me-1" />
+								Open in Firefox
+							</button>
 							<button class="btn btn-sm btn-warning" @click="download" :disabled="jdBusy">
 								<font-awesome-icon :icon="['fas', jdBusy ? 'spinner' : 'cloud-download-alt']" :spin="jdBusy" class="me-1" />
 								Download
@@ -95,6 +95,37 @@
 								{{ t.name }}
 							</span>
 						</div>
+
+						<!-- Library Match Panel -->
+						<div v-if="matchLoading || libraryMatches.length > 0" class="library-match-panel mt-3">
+							<div class="match-panel-header">
+								<font-awesome-icon :icon="['fas', 'database']" class="me-1" />
+								<span v-if="matchLoading" class="text-muted">Checking library…</span>
+								<span v-else class="text-warning fw-semibold">
+									<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="me-1" />
+									Possibly already in library ({{ libraryMatches.length }})
+								</span>
+							</div>
+							<div v-if="!matchLoading" class="match-list">
+								<div
+									v-for="m in libraryMatches"
+									:key="m.id"
+									class="match-item"
+									@click="openLibraryVideo(m.id)"
+									title="Open in library"
+								>
+									<div class="match-title">{{ m.title }}</div>
+									<div class="match-meta">
+										<span class="match-lib">{{ m.library_name }}</span>
+										<span v-if="m.duration" class="match-dur">{{ formatDuration(m.duration) }}</span>
+										<span class="match-score" :class="m.score >= 0.7 ? 'score-high' : m.score >= 0.5 ? 'score-mid' : 'score-low'">
+											{{ Math.round(m.score * 100) }}%
+										</span>
+										<span v-for="r in (m.reasons || [])" :key="r" class="match-reason">{{ r }}</span>
+									</div>
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -106,7 +137,7 @@
 /* eslint-disable no-undef */
 import { ref, computed, watch } from 'vue'
 import { useFormatters } from '@/composables/useFormatters'
-import { scrapersAPI, jdownloaderAPI } from '@/services/api'
+import { scrapersAPI, jdownloaderAPI, scraperMatchAPI } from '@/services/api'
 
 const props = defineProps({
 	video: { type: Object, default: null },
@@ -120,6 +151,10 @@ const directUrl = ref(null)
 const iframeUrl = ref(null)
 const extracting = ref(false)
 const jdBusy = ref(false)
+
+// ── Library match ─────────────────────────────────────────────────────────────
+const libraryMatches = ref([])
+const matchLoading = ref(false)
 
 // ── Metadata ──────────────────────────────────────────────────────────────────
 const parsedMeta = computed(() => {
@@ -163,7 +198,17 @@ const embedSrc = computed(() => {
 watch(() => props.video, async (v) => {
 	directUrl.value = null
 	iframeUrl.value = null
+	libraryMatches.value = []
 	if (!v) return
+
+	// Library match check (fire-and-forget, non-blocking)
+	if (v.id) {
+		matchLoading.value = true
+		scraperMatchAPI.findLibraryMatch(v.id)
+			.then(res => { libraryMatches.value = res?.data?.matches ?? res?.matches ?? [] })
+			.catch(() => {})
+			.finally(() => { matchLoading.value = false })
+	}
 
 	const url = v.source_url || v.url
 	if (!url) return
@@ -201,6 +246,11 @@ const download = async () => {
 		}
 	} catch { /* silent */ }
 	finally { jdBusy.value = false }
+}
+
+// ── Open library video in new tab ────────────────────────────────────────────
+const openLibraryVideo = (videoId) => {
+	window.open(`/watch/${videoId}`, '_blank')
 }
 
 // ── Unmark downloaded ────────────────────────────────────────────────────────
@@ -340,5 +390,85 @@ const unmarkDownloaded = async () => {
 .scraped-modal-leave-to .scraped-modal {
 	transform: scale(0.95);
 	opacity: 0;
+}
+
+/* Library match panel */
+.library-match-panel {
+	background: rgba(255, 193, 7, 0.06);
+	border: 1px solid rgba(255, 193, 7, 0.25);
+	border-radius: 8px;
+	padding: 0.6rem 0.75rem;
+}
+
+.match-panel-header {
+	font-size: 0.8rem;
+	margin-bottom: 0.4rem;
+	opacity: 0.9;
+}
+
+.match-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+
+.match-item {
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	padding: 0.4rem 0.6rem;
+	cursor: pointer;
+	transition: background 0.15s, border-color 0.15s;
+}
+
+.match-item:hover {
+	background: rgba(255, 255, 255, 0.09);
+	border-color: rgba(255, 193, 7, 0.4);
+}
+
+.match-title {
+	font-size: 0.8rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: #fff;
+}
+
+.match-meta {
+	display: flex;
+	gap: 0.4rem;
+	flex-wrap: wrap;
+	align-items: center;
+	margin-top: 0.2rem;
+}
+
+.match-lib {
+	font-size: 0.68rem;
+	color: #00d9ff;
+	opacity: 0.8;
+}
+
+.match-dur {
+	font-size: 0.68rem;
+	color: rgba(255, 255, 255, 0.5);
+}
+
+.match-score {
+	font-size: 0.68rem;
+	font-weight: 600;
+	padding: 0.05rem 0.35rem;
+	border-radius: 4px;
+}
+
+.score-high { background: rgba(40, 167, 69, 0.3); color: #5cdd82; }
+.score-mid  { background: rgba(255, 193,  7, 0.3); color: #ffc107; }
+.score-low  { background: rgba(108, 117, 125, 0.3); color: #adb5bd; }
+
+.match-reason {
+	font-size: 0.65rem;
+	background: rgba(255, 255, 255, 0.1);
+	border-radius: 3px;
+	padding: 0.05rem 0.3rem;
+	color: rgba(255, 255, 255, 0.6);
 }
 </style>

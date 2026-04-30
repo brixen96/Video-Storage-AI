@@ -389,7 +389,7 @@ func resetMetadata(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(performer, "Metadata reset successfully"))
 }
 
-// resetPreviews resets performer preview videos (placeholder for now)
+// resetPreviews deletes the performer's thumbnail, clears the DB path, and regenerates it from the preview video
 func resetPreviews(c *gin.Context) {
 	svc := ensurePerformerService()
 	idStr := c.Param("id")

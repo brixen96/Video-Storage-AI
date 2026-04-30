@@ -15,7 +15,7 @@
 			</button>
 			<input v-model="sexuriaItemSearch" class="scraper-tab-search" type="text" placeholder="Search Sexuria items..." />
 			<div class="scraper-tab-topbar-actions">
-				<span v-if="filteredSexuriaItems.length > 0" class="scraper-video-count">{{ filteredSexuriaItems.length.toLocaleString() }} / {{ sexuriaItems.length.toLocaleString() }}</span>
+				<span v-if="sexuriaTotalCount > 0" class="scraper-video-count">{{ sexuriaTotalCount.toLocaleString() }} items</span>
 				<button class="btn btn-sm" :class="sexuriaSelectionMode ? 'btn-primary' : 'btn-outline-secondary'" @click="toggleSexuriaSelectionMode" title="Select mode">
 					<font-awesome-icon :icon="['fas', sexuriaSelectionMode ? 'times' : 'check-square']" />
 				</button>
@@ -129,7 +129,7 @@
 					<div class="d-flex justify-content-between align-items-center mb-2">
 						<h6 class="mb-0">
 							<font-awesome-icon :icon="['fas', 'file-video']" class="me-2" />
-							Sexuria Items ({{ filteredSexuriaItems.length }} / {{ sexuriaItems.length }})
+							Sexuria Items ({{ sexuriaTotalCount.toLocaleString() }})
 						</h6>
 						<div class="d-flex gap-2">
 							<button class="btn btn-sm btn-outline-info" @click="loadSexuriaItems" :disabled="sexuriaLoading">
@@ -387,7 +387,7 @@
 						</div>
 					</Teleport>
 					<!-- Pagination -->
-					<div v-if="filteredSexuriaItems.length > itemsPerPage" class="pagination-controls p-3">
+					<div v-if="sexuriaTotalPages > 1" class="pagination-controls p-3">
 						<div class="d-flex justify-content-center align-items-center flex-column gap-2">
 							<div class="btn-group">
 								<button
@@ -397,10 +397,10 @@
 								>
 									<font-awesome-icon :icon="['fas', 'chevron-left']" />
 								</button>
-								<button class="btn btn-sm btn-outline-secondary disabled">Page {{ sexuriaItemPage }} / {{ Math.ceil(filteredSexuriaItems.length / itemsPerPage) }}</button>
+								<button class="btn btn-sm btn-outline-secondary disabled">Page {{ sexuriaItemPage }} / {{ sexuriaTotalPages }}</button>
 								<button
 									class="btn btn-sm btn-outline-secondary"
-									:disabled="sexuriaItemPage >= Math.ceil(filteredSexuriaItems.length / itemsPerPage)"
+									:disabled="sexuriaItemPage >= sexuriaTotalPages"
 									@click="sexuriaItemPage++; window.scrollTo({ top: 0, behavior: 'smooth' })"
 								>
 									<font-awesome-icon :icon="['fas', 'chevron-right']" />
@@ -408,8 +408,8 @@
 							</div>
 							<span class="text-muted small">
 								Showing {{ (sexuriaItemPage - 1) * itemsPerPage + 1 }} -
-								{{ Math.min(sexuriaItemPage * itemsPerPage, filteredSexuriaItems.length) }}
-								of {{ filteredSexuriaItems.length }} items
+								{{ Math.min(sexuriaItemPage * itemsPerPage, sexuriaTotalCount) }}
+								of {{ sexuriaTotalCount.toLocaleString() }} items
 							</span>
 						</div>
 					</div>
@@ -439,7 +439,7 @@
 							<StatCard :value="sexuriaStats.total_items || 0" label="Items" :icon="['fas', 'file-video']" icon-class="videos" />
 							<StatCard :value="Object.keys(sexuriaStats.host_counts || {}).length" label="Hosts" :icon="['fas', 'server']" icon-class="posts" />
 							<StatCard :value="sexuriaActiveJob ? 1 : 0" label="Active" :icon="['fas', 'spinner']" icon-class="active" />
-							<StatCard :value="sexuriaItems.length" label="Loaded" :icon="['fas', 'database']" icon-class="links" />
+							<StatCard :value="sexuriaTotalCount" label="Loaded" :icon="['fas', 'database']" icon-class="links" />
 						</div>
 					</div>
 				</div>
@@ -619,6 +619,8 @@ const sexuriaHostFilter      = ref('')
 const sexuriaCategoryFilter  = ref('')
 const sexuriaItemSort        = ref('newest')
 const sexuriaItemPage        = ref(1)
+const sexuriaTotalCount      = ref(0)
+const sexuriaTotalPages      = ref(1)
 
 const selectAllSexuriaItems = () => _selectAllSexuria(sexuriaItems.value)
 
@@ -697,7 +699,13 @@ const sexuriaAdvancedSearch = ref({
 
 // ── Debounced search ──────────────────────────────────────────────────────────
 const debouncedSexuriaSearch = useDebouncedRef(sexuriaItemSearch)
-watch(sexuriaCategoryFilter, () => { sexuriaItemPage.value = 1 })
+
+// Reload from server whenever any filter or sort changes
+watch(debouncedSexuriaSearch, () => { sexuriaItemPage.value = 1; loadSexuriaItems() })
+watch(sexuriaCategoryFilter,  () => { sexuriaItemPage.value = 1; loadSexuriaItems() })
+watch(sexuriaHostFilter,      () => { sexuriaItemPage.value = 1; loadSexuriaItems() })
+watch(sexuriaItemSort,        () => { sexuriaItemPage.value = 1; loadSexuriaItems() })
+watch(sexuriaItemPage,        () => loadSexuriaItems())
 
 // ── Computed ──────────────────────────────────────────────────────────────────
 const availableSexuriaTags = computed(() => {
@@ -728,15 +736,9 @@ const availableSexuriaCategories = computed(() => {
 })
 
 const filteredSexuriaItems = computed(() => {
+	// Search, category, host, and sort are handled server-side.
+	// Only apply client-side filters that require cached detail data.
 	let items = [...sexuriaItems.value]
-	if (sexuriaCategoryFilter.value)
-		items = items.filter((item) => item.category === sexuriaCategoryFilter.value)
-	if (debouncedSexuriaSearch.value) {
-		const search = debouncedSexuriaSearch.value.toLowerCase()
-		items = items.filter((item) => (item.title && item.title.toLowerCase().includes(search)) || (item.uploader && item.uploader.toLowerCase().includes(search)))
-	}
-	if (sexuriaHostFilter.value)
-		items = items.filter((item) => item.tags && item.tags.includes(sexuriaHostFilter.value))
 	if (sexuriaTagFilter.value.length > 0) {
 		items = items.filter((item) => {
 			const cachedDetails = sexuriaDetailsCache.value[item.url]
@@ -751,19 +753,10 @@ const filteredSexuriaItems = computed(() => {
 			return sexuriaPornstarFilter.value.some((star) => cachedDetails.porn_stars.includes(star))
 		})
 	}
-	switch (sexuriaItemSort.value) {
-		case 'newest':     items.sort((a, b) => new Date(b.discovered_at) - new Date(a.discovered_at)); break
-		case 'oldest':     items.sort((a, b) => new Date(a.discovered_at) - new Date(b.discovered_at)); break
-		case 'title-asc':  items.sort((a, b) => (a.title || '').localeCompare(b.title || '')); break
-		case 'title-desc': items.sort((a, b) => (b.title || '').localeCompare(a.title || '')); break
-	}
 	return items
 })
 
-const paginatedSexuriaItems = computed(() => {
-	const start = (sexuriaItemPage.value - 1) * itemsPerPage
-	return filteredSexuriaItems.value.slice(start, start + itemsPerPage)
-})
+const paginatedSexuriaItems = computed(() => filteredSexuriaItems.value)
 
 const currentSexuriaScreenshot = computed(() => {
 	const { screenshots, currentIndex } = sexuriaScreenshotModal.value
@@ -788,14 +781,33 @@ const loadSexuriaStats = async () => {
 const loadSexuriaItems = async () => {
 	sexuriaLoading.value = true
 	try {
-		const data = await scrapersAPI.sexuria.getItems({ limit: 10000 })
-		if (data.success && data.data) sexuriaItems.value = data.data.items || []
+		const sortMap = {
+			'newest':     { sort: 'discovered_at', order: 'desc' },
+			'oldest':     { sort: 'discovered_at', order: 'asc' },
+			'title-asc':  { sort: 'title',         order: 'asc' },
+			'title-desc': { sort: 'title',         order: 'desc' },
+		}
+		const { sort, order } = sortMap[sexuriaItemSort.value] || sortMap['newest']
+		const data = await scrapersAPI.sexuria.getItems({
+			page:     sexuriaItemPage.value,
+			limit:    itemsPerPage,
+			search:   debouncedSexuriaSearch.value || undefined,
+			category: sexuriaCategoryFilter.value || undefined,
+			host:     sexuriaHostFilter.value || undefined,
+			sort,
+			order,
+		})
+		if (data.success && data.data) {
+			sexuriaItems.value     = data.data.items || []
+			sexuriaTotalCount.value = data.data.total || 0
+			sexuriaTotalPages.value = data.data.totalPages || Math.ceil((data.data.total || 0) / itemsPerPage) || 1
+		}
 	} catch (e) { console.error('Error loading Sexuria items:', e) }
 	finally { sexuriaLoading.value = false }
 }
 
 const clearSexuriaItems = async () => {
-	if (!confirm(`Are you sure you want to delete all ${sexuriaItems.value.length} Sexuria items? This cannot be undone.`)) return
+	if (!confirm(`Are you sure you want to delete all ${sexuriaTotalCount.value} Sexuria items? This cannot be undone.`)) return
 	try {
 		const data = await scrapersAPI.sexuria.clearItems()
 		if (data.success) {

@@ -412,12 +412,7 @@ func (s *PornHubScraperService) GetPornHubKeywords() []string {
 // CheckForNewVideos checks for new videos since last checkpoint
 func (s *PornHubScraperService) CheckForNewVideos(keywords []string, maxPages int, activityID int) (*models.NewContentResult, error) {
 	if len(keywords) == 0 {
-		return &models.NewContentResult{
-			ScraperType:   "pornhub",
-			NewItemsFound: 0,
-			CheckedAt:     time.Now(),
-			Details:       map[string]interface{}{"message": "No keywords configured"},
-		}, nil
+		return nil, fmt.Errorf("no keywords configured — add at least one keyword in the auto-update settings")
 	}
 
 	result := &models.NewContentResult{

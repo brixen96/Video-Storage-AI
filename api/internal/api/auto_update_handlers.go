@@ -287,17 +287,13 @@ func triggerAutoUpdateCheck(scraperType string, config *models.ScraperAutoUpdate
 
 	if checkErr != nil {
 		activitySvc.FailTask(activity.ID, checkErr.Error())
-		// Disable so it doesn't keep retrying a failing site
-		autoUpdateSvc.ToggleEnabled(scraperType, false)
-		// Add a visible error entry to the dashboard feed
+		// Add a visible error entry to the dashboard feed but keep the scraper enabled
+		// so it retries on the next scheduled interval.
 		displayName, icon, _ := models.GetScraperDisplayInfo(scraperType)
-		if displayName == scraperType {
-			displayName = scraperType
-		}
 		dashboardSvc.AddFeedItem(&models.DashboardFeedItem{
 			ItemType:    "error",
-			Title:       displayName + ": Auto-Scraper Disabled",
-			Message:     "Scraper failed and was automatically disabled — " + checkErr.Error(),
+			Title:       displayName + ": Check Failed",
+			Message:     "Auto-check encountered an error — " + checkErr.Error(),
 			Icon:        icon,
 			Color:       "danger",
 			ScraperType: scraperType,

@@ -3,8 +3,11 @@ package api
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -120,28 +123,40 @@ func scrapeVideoHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, models.SuccessResponse(video, "Video scraped successfully"))
 }
 
-// getScrapedVideosHandler retrieves all scraped videos
+// getScrapedVideosHandler retrieves scraped videos with server-side pagination and filtering
 func getScrapedVideosHandler(c *gin.Context) {
 	svc := ensureVideoScraperService()
 
-	// Check if we want to include tab info
-	includeTabInfo := c.Query("includeTabInfo") == "true"
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "24"))
 
-	// Check if filtering by source
-	source := c.Query("source")
-
-	var videos []*services.ScrapedVideo
-	var err error
-
-	if source != "" {
-		// Filter by source for better performance
-		videos, err = svc.GetScrapedVideosBySource(source)
-	} else if includeTabInfo {
-		videos, err = svc.GetScrapedVideosWithTabInfo()
-	} else {
-		videos, err = svc.GetScrapedVideos()
+	q := services.ScrapedVideosQuery{
+		Page:           page,
+		Limit:          limit,
+		Source:         c.Query("source"),
+		ContentType:    c.Query("content_type"),
+		Search:         c.Query("search"),
+		SortBy:         c.Query("sort_by"),
+		SortOrder:      c.Query("sort_order"),
+		DurationFilter: c.Query("duration_filter"),
+		IncludeTabInfo: c.Query("includeTabInfo") == "true",
+		OnlyDownloaded: c.Query("downloaded_only") == "true",
+		AuthorSearch:   c.Query("author"),
+	}
+	if v, err := strconv.Atoi(c.Query("min_rating")); err == nil && v > 0 {
+		q.MinRating = v
+	}
+	if v, err := strconv.Atoi(c.Query("min_views")); err == nil && v > 0 {
+		q.MinViews = v
+	}
+	if s := c.Query("include_tags"); s != "" {
+		q.IncludeKeywords = strings.Split(s, ",")
+	}
+	if s := c.Query("exclude_tags"); s != "" {
+		q.ExcludeKeywords = strings.Split(s, ",")
 	}
 
+	result, err := svc.GetScrapedVideosPaginated(q)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to retrieve scraped videos",
@@ -150,7 +165,7 @@ func getScrapedVideosHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(videos, "Scraped videos retrieved successfully"))
+	c.JSON(http.StatusOK, models.SuccessResponse(result, "Scraped videos retrieved successfully"))
 }
 
 // testScraperHandler tests the scraper on a URL without saving to database
@@ -386,6 +401,168 @@ func getScrapedVideoHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(video, "Video retrieved successfully"))
+}
+
+// findLibraryMatchHandler searches the video library for videos that may already
+// contain the same content as a scraped video, ranked by title word overlap + duration.
+// GET /api/v1/scraper/videos/:id/library-match
+func findLibraryMatchHandler(c *gin.Context) {
+	svc := ensureVideoScraperService()
+
+	var videoID int64
+	if _, err := fmt.Sscanf(c.Param("id"), "%d", &videoID); err != nil {
+		respondBadRequest(c, "invalid video id", err)
+		return
+	}
+
+	scraped, err := svc.GetScrapedVideoByID(videoID)
+	if err != nil {
+		respondInternalError(c, "scraped video not found", err)
+		return
+	}
+
+	// Build word set from scraped title (reuse same stop-word logic as video_links_service)
+	titleWords := scraperTitleWords(scraped.Title)
+	if len(titleWords) == 0 {
+		respondSuccess(c, gin.H{"matches": []interface{}{}}, "")
+		return
+	}
+
+	// Build LIKE conditions — each word must appear somewhere in library title
+	db := database.GetDB()
+	var conditions []string
+	var args []interface{}
+	for w := range titleWords {
+		conditions = append(conditions, "LOWER(v.title) LIKE ?")
+		args = append(args, "%"+w+"%")
+	}
+	where := strings.Join(conditions, " OR ")
+
+	// Fetch candidates (OR: any word matches)
+	rows, err := db.Query(fmt.Sprintf(`
+		SELECT v.id, v.title, v.file_path, COALESCE(v.duration, 0), l.name
+		FROM videos v
+		INNER JOIN libraries l ON l.id = v.library_id
+		WHERE (%s) AND COALESCE(v.is_missing, 0) = 0
+		LIMIT 200`, where), args...)
+	if err != nil {
+		respondInternalError(c, "failed to query library", err)
+		return
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		ID          int64   `json:"id"`
+		Title       string  `json:"title"`
+		FilePath    string  `json:"file_path"`
+		Duration    float64 `json:"duration"`
+		LibraryName string  `json:"library_name"`
+		Score       float64 `json:"score"`
+		Reasons     []string `json:"reasons"`
+	}
+
+	scrapedDur := float64(scraped.Duration)
+
+	var matches []candidate
+	for rows.Next() {
+		var cand candidate
+		if rows.Scan(&cand.ID, &cand.Title, &cand.FilePath, &cand.Duration, &cand.LibraryName) != nil {
+			continue
+		}
+
+		libWords := scraperTitleWords(cand.Title)
+		nameScore := scraperWordOverlap(titleWords, libWords)
+		durScore := scraperDurationScore(scrapedDur, cand.Duration)
+
+		var combined float64
+		if scrapedDur > 0 && cand.Duration > 0 {
+			combined = 0.5*nameScore + 0.5*durScore
+		} else {
+			combined = nameScore
+		}
+
+		if combined < 0.25 {
+			continue
+		}
+
+		cand.Score = math.Round(combined*100) / 100
+		if nameScore >= 0.4 {
+			cand.Reasons = append(cand.Reasons, "title")
+		}
+		if durScore >= 0.65 {
+			cand.Reasons = append(cand.Reasons, "duration")
+		}
+		matches = append(matches, cand)
+	}
+
+	// Sort by score desc, cap at 5
+	sort.Slice(matches, func(i, j int) bool { return matches[i].Score > matches[j].Score })
+	if len(matches) > 5 {
+		matches = matches[:5]
+	}
+
+	respondSuccess(c, gin.H{"matches": matches, "scraped_title": scraped.Title}, "")
+}
+
+// ── helpers used by findLibraryMatchHandler ───────────────────────────────────
+
+var scraperStopWords = map[string]bool{
+	"the": true, "a": true, "an": true, "and": true, "or": true, "of": true,
+	"in": true, "at": true, "to": true, "for": true, "on": true, "with": true,
+	"mp4": true, "mkv": true, "avi": true, "wmv": true, "mov": true,
+}
+
+func scraperTitleWords(title string) map[string]bool {
+	lower := strings.ToLower(title)
+	for _, ch := range []string{".", "_", "-", "(", ")", "[", "]", "/"} {
+		lower = strings.ReplaceAll(lower, ch, " ")
+	}
+	words := make(map[string]bool)
+	for _, w := range strings.Fields(lower) {
+		if len(w) >= 3 && !scraperStopWords[w] {
+			words[w] = true
+		}
+	}
+	return words
+}
+
+func scraperWordOverlap(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range a {
+		if b[w] {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+func scraperDurationScore(a, b float64) float64 {
+	if a == 0 || b == 0 {
+		return 0
+	}
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	switch {
+	case diff <= 5:
+		return 1.0
+	case diff <= 30:
+		return 0.85
+	case diff <= 60:
+		return 0.65
+	case diff <= 120:
+		return 0.40
+	default:
+		return 0
+	}
 }
 
 // fetchAndParseVideoPage fetches a URL and extracts a direct video URL and any player iframe URL from the HTML.

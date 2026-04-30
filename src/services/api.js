@@ -48,6 +48,8 @@ export const librariesAPI = {
 	delete: (id, signal) => api.delete(`/libraries/${id}`, { signal }),
 	browse: (id, path = '', metadata = false, signal) => api.get(`/libraries/${id}/browse`, { params: { path, metadata: metadata ? 'true' : 'false' }, signal }),
 	generateThumbnails: (id, path = '', signal) => api.post(`/libraries/${id}/generate-thumbnails`, null, { params: { path }, signal }),
+	analyzeStructure: (id, signal) => api.get(`/libraries/${id}/analyze-structure`, { signal }),
+	applyStructure: (id, plan, signal) => api.post(`/libraries/${id}/apply-structure`, plan, { signal }),
 }
 
 export const performersAPI = {
@@ -92,6 +94,9 @@ export const videosAPI = {
 	getThumbnail: (id) => `http://localhost:8080/api/v1/videos/${id}/thumbnail`,
 	openInExplorer: (id, signal) => api.post(`/videos/${id}/open-in-explorer`, {}, { signal }),
 	updateVideoMarksByPath: (filePath, marks, signal) => api.patch('/videos/marks-by-path', { file_path: filePath, ...marks }, { signal }),
+	locateFile: (id) => api.get(`/videos/${id}/locate`),
+	remapPath: (id, filePath) => api.patch(`/videos/${id}/remap`, { file_path: filePath }),
+	cleanupMissing: (libraryId) => api.post('/videos/missing/cleanup', { library_id: libraryId || 0 }),
 }
 
 export const studiosAPI = {
@@ -291,6 +296,21 @@ export const autoUpdateAPI = {
 	toggle: (type, enabled) => api.post(`/auto-update/configs/${type}/toggle`, { enabled }),
 	checkNow: (type) => api.post(`/auto-update/configs/${type}/check-now`),
 	getStatus: () => api.get('/auto-update/status'),
+}
+
+// Video Links API (Edited↔Backup pairing)
+export const videoLinksAPI = {
+	suggest: (editedLibraryId, backupLibraryId) =>
+		api.post('/video-links/suggest', { edited_library_id: editedLibraryId, backup_library_id: backupLibraryId }),
+	getLinks: (editedLibraryId, status = '') =>
+		api.get('/video-links', { params: { edited_library_id: editedLibraryId, status: status || undefined } }),
+	updateStatus: (id, status) => api.patch(`/video-links/${id}`, { status }),
+	bulkUpdateStatus: (ids, status) => api.post('/video-links/bulk-status', { ids, status }),
+	getLinkForVideo: (videoId) => api.get(`/video-links/for-video/${videoId}`),
+}
+
+export const scraperMatchAPI = {
+	findLibraryMatch: (scrapedVideoId) => api.get(`/scraper/videos/${scrapedVideoId}/library-match`),
 }
 
 // Scraper thread watch API
@@ -563,6 +583,7 @@ export const systemAPI = {
 	installUpdate: (downloadURL) => api.post('/system/update/install', { download_url: downloadURL }),
 	getServices: () => api.get('/system/services'),
 	controlService: (service, action) => api.post('/system/services/control', { service, action }),
+	buildAndDeploy: () => api.post('/system/build-and-deploy'),
 }
 
 export default api

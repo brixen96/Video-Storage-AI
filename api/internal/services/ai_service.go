@@ -544,48 +544,90 @@ func (s *AIService) AnalyzeQuality(videoIDs []int64) ([]QualityAnalysis, error) 
 }
 
 func (s *AIService) analyzeVideoQuality(video models.Video) QualityAnalysis {
-	// In production, this would use FFprobe to get actual video metadata
-	// For now, we'll simulate based on filename patterns
 	filename := strings.ToLower(video.FilePath)
+
+	resolution := video.Resolution
+	codec := strings.ToLower(video.Codec)
+	bitrate := video.Bitrate
+	fps := video.FPS
+	duration := video.Duration
+
+	// Fall back to filename guesses only when DB metadata is missing
+	if resolution == "" {
+		if strings.Contains(filename, "4k") || strings.Contains(filename, "2160p") {
+			resolution = "2160p"
+		} else if strings.Contains(filename, "1080p") {
+			resolution = "1080p"
+		} else if strings.Contains(filename, "720p") {
+			resolution = "720p"
+		} else if strings.Contains(filename, "480p") {
+			resolution = "480p"
+		} else {
+			resolution = "unknown"
+		}
+	}
+	if codec == "" {
+		if strings.Contains(filename, "h265") || strings.Contains(filename, "hevc") {
+			codec = "h265"
+		} else {
+			codec = "h264"
+		}
+	}
+	if bitrate == 0 {
+		bitrate = 5000
+	}
+	if fps == 0 {
+		fps = 30.0
+	}
+	if duration == 0 {
+		duration = 0
+	}
 
 	analysis := QualityAnalysis{
 		VideoID:    video.ID,
 		VideoTitle: video.Title,
-		Resolution: "1080p",
-		Bitrate:    5000,
-		FrameRate:  30.0,
-		Codec:      "h264",
+		Resolution: resolution,
+		Bitrate:    int(bitrate),
+		FrameRate:  fps,
+		Codec:      codec,
 		FileSize:   video.FileSize,
-		Duration:   1800.0,
+		Duration:   duration,
 		Issues:     []string{},
 	}
 
-	// Detect resolution from filename
-	if strings.Contains(filename, "4k") || strings.Contains(filename, "2160p") {
-		analysis.Resolution = "2160p"
+	// Score based on resolution
+	resLower := strings.ToLower(resolution)
+	switch {
+	case strings.Contains(resLower, "2160") || strings.Contains(resLower, "4k"):
 		analysis.QualityScore = 95
-	} else if strings.Contains(filename, "1080p") {
-		analysis.Resolution = "1080p"
+	case strings.Contains(resLower, "1080"):
 		analysis.QualityScore = 85
-	} else if strings.Contains(filename, "720p") {
-		analysis.Resolution = "720p"
+	case strings.Contains(resLower, "720"):
 		analysis.QualityScore = 70
-	} else if strings.Contains(filename, "480p") {
-		analysis.Resolution = "480p"
+	case strings.Contains(resLower, "480"):
 		analysis.QualityScore = 50
-		analysis.Issues = append(analysis.Issues, "Low resolution")
+		analysis.Issues = append(analysis.Issues, "Low resolution (480p)")
+	default:
+		analysis.QualityScore = 60 // unknown — neutral
 	}
 
-	// Check for codec indicators
-	if strings.Contains(filename, "h265") || strings.Contains(filename, "hevc") {
-		analysis.Codec = "h265"
+	// Bonus for efficient codec
+	if codec == "h265" || codec == "hevc" || codec == "av1" {
 		analysis.QualityScore += 5
 	}
 
-	// Check file size relative to duration
-	if video.FileSize > 0 && video.FileSize < 100*1024*1024 { // Less than 100MB for a full video
-		analysis.Issues = append(analysis.Issues, "Unusually small file size for quality")
+	// Penalty for very small file size relative to duration (likely low bitrate)
+	if video.FileSize > 0 && duration > 300 && float64(video.FileSize) < float64(duration)*50*1024 {
+		analysis.Issues = append(analysis.Issues, "Unusually low bitrate for duration")
 		analysis.QualityScore -= 10
+	}
+
+	// Clamp to 0-100
+	if analysis.QualityScore > 100 {
+		analysis.QualityScore = 100
+	}
+	if analysis.QualityScore < 0 {
+		analysis.QualityScore = 0
 	}
 
 	return analysis

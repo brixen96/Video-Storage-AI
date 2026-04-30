@@ -87,12 +87,12 @@ export default {
 	computed: {
 		videoUrl() {
 			if (!this.video) return ''
-			// Use file_path to stream video from backend
-			return `http://localhost:8080/api/v1/videos/${this.video.id}/stream`
+			const origin = window.VSAI_API_URL || 'http://localhost:8080'
+			return `${origin}/api/v1/videos/${this.video.id}/stream`
 		},
 		mimeType() {
 			if (!this.video?.file_path) return 'video/mp4'
-			const ext = this.video.file_path.split('.').pop().toLowerCase()
+			const ext = this.video.file_path.replace(/\\/g, '/').split('/').pop().split('.').pop().toLowerCase()
 			const mimeTypes = {
 				mp4: 'video/mp4',
 				webm: 'video/webm',
@@ -102,6 +102,9 @@ export default {
 				mkv: 'video/x-matroska',
 				flv: 'video/x-flv',
 				wmv: 'video/x-ms-wmv',
+				m4v: 'video/mp4',
+				mpg: 'video/mpeg',
+				mpeg: 'video/mpeg',
 			}
 			return mimeTypes[ext] || 'video/mp4'
 		},

@@ -155,6 +155,7 @@ type ProgressCallback func(progress ScrapeProgress)
 type ScrapeVideoRequest struct {
 	URL               string        `json:"url"`
 	SiteType          string        `json:"site_type"`
+	ContentType       string        `json:"content_type"`      // Content type for all scraped videos (regular, zoo, 3d, etc.)
 	Options           ScrapeOptions `json:"options"`
 	StartPage         int           `json:"startPage"`         // Page to start from (for resume)
 	ActivityID        int64         `json:"-"`                 // Activity ID for pause checking (not JSON serialized)
@@ -504,6 +505,31 @@ func (s *VideoScraperService) scrapeGenericSite(video *ScrapedVideo, videoURL st
 	return nil
 }
 
+// preloadSeenURLs seeds a seenURLs map with all URLs already in the DB for the
+// given source hostname. This allows ScrapePage/ScrapePageWithProgress to stop
+// early during a re-scrape once they hit pages whose videos are all known.
+func (s *VideoScraperService) preloadSeenURLs(seenURLs map[string]bool, source string) {
+	if source == "" {
+		return
+	}
+	rows, err := s.db.Query("SELECT url FROM scraped_videos WHERE source = ?", source)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var u string
+		if rows.Scan(&u) == nil {
+			seenURLs[u] = true
+			count++
+		}
+	}
+	if count > 0 {
+		log.Printf("[SCRAPER] Pre-loaded %d existing URLs for source '%s' — will stop early when re-scraping known pages", count, source)
+	}
+}
+
 // ScrapePage scrapes a listing page for videos with pagination support
 func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult, error) {
 	parsedURL, err := url.Parse(req.URL)
@@ -560,8 +586,10 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 		}
 	}
 
-	// Track seen URLs to detect when we're scraping the same page over and over
+	// Track seen URLs to detect when we're scraping the same page over and over.
+	// Pre-populate from DB so re-scrapes stop early once they hit already-known pages.
 	seenURLs := make(map[string]bool)
+	s.preloadSeenURLs(seenURLs, source)
 	consecutiveDuplicates := 0
 
 	// Support resume from a specific page
@@ -615,6 +643,15 @@ func (s *VideoScraperService) ScrapePage(req ScrapeVideoRequest) (*ScrapeResult,
 			// No more videos found, stop pagination
 			fmt.Printf("No videos found on page %d, stopping pagination\n", page)
 			break
+		}
+
+		// Apply content_type from request to videos that don't have one set
+		if req.ContentType != "" && req.ContentType != "regular" {
+			for _, v := range videos {
+				if v.ContentType == "" || v.ContentType == "regular" {
+					v.ContentType = req.ContentType
+				}
+			}
 		}
 
 		// Check if all videos on this page are duplicates (already seen)
@@ -715,8 +752,10 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 		}
 	}
 
-	// Track seen URLs to detect when we're scraping the same page over and over
+	// Track seen URLs to detect when we're scraping the same page over and over.
+	// Pre-populate from DB so re-scrapes stop early once they hit already-known pages.
 	seenURLs := make(map[string]bool)
+	s.preloadSeenURLs(seenURLs, source)
 	consecutiveDuplicates := 0
 
 	// Support resume from a specific page
@@ -778,6 +817,15 @@ func (s *VideoScraperService) ScrapePageWithProgress(req ScrapeVideoRequest, pro
 			// No more videos found, stop pagination
 			fmt.Printf("No videos found on page %d, stopping pagination\n", page)
 			break
+		}
+
+		// Apply content_type from request to videos that don't have one set
+		if req.ContentType != "" && req.ContentType != "regular" {
+			for _, v := range videos {
+				if v.ContentType == "" || v.ContentType == "regular" {
+					v.ContentType = req.ContentType
+				}
+			}
 		}
 
 		// Check if all videos on this page are duplicates (already seen)
@@ -1499,6 +1547,24 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source, siteType string
 					})
 				}
 			}
+			// Fallback: scan all leaf elements within the link for text that looks exactly
+			// like a duration (e.g. "1:57 Min", "12:34"). Catches Tailwind-based sites
+			// (chezcathy.com) where the badge has no class matching standard selectors.
+			if duration == 0 {
+				durationOnlyRe := regexp.MustCompile(`^\s*\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:[Mm]in|[Ss]ec))?\s*$`)
+				sel.Find("*").Each(func(_ int, el *goquery.Selection) {
+					if duration > 0 || el.Children().Length() > 0 {
+						return // only leaf nodes
+					}
+					text := strings.TrimSpace(el.Text())
+					if durationOnlyRe.MatchString(text) {
+						if d := parseDuration(text); d > 0 {
+							duration = d
+						}
+					}
+				})
+			}
+
 			// Extract view count — search up to 4 ancestor levels + raw text scan
 			viewCount := 0
 			for _, container := range []*goquery.Selection{sel.Parent(), sel.Parent().Parent(), sel.Parent().Parent().Parent(), sel.Parent().Parent().Parent().Parent()} {
@@ -2008,7 +2074,6 @@ func (s *VideoScraperService) saveVideo(video *ScrapedVideo) error {
 		)
 	`
 
-	// Default content_type to "regular" if not set
 	contentType := video.ContentType
 	if contentType == "" {
 		contentType = "regular"
@@ -2152,6 +2217,7 @@ type ScrapedVideosQuery struct {
 	OnlyDownloaded  bool     // Only return videos that have been downloaded
 	MinRating       int      // Minimum rating (0–100); 0 means no filter
 	MinViews        int      // Minimum view count; 0 means no filter
+	IncludeTabInfo  bool     // Populate SourceTabName from scraper_tabs
 }
 
 // ScrapedVideosResult represents a paginated result of scraped videos
@@ -2226,8 +2292,10 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 		args = append(args, "%"+q.CategorySearch+"%")
 	}
 	if q.Search != "" {
-		conditions = append(conditions, "title LIKE ?")
-		args = append(args, "%"+q.Search+"%")
+		for _, word := range strings.Fields(q.Search) {
+			conditions = append(conditions, "title LIKE ?")
+			args = append(args, "%"+word+"%")
+		}
 	}
 	if q.Keyword != "" {
 		conditions = append(conditions, "tags LIKE ?")
@@ -2466,6 +2534,39 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 	}
 
 	totalPages := (total + q.Limit - 1) / q.Limit
+
+	// Optionally populate SourceTabName from scraper_tabs
+	if q.IncludeTabInfo && len(videos) > 0 {
+		type tabInfo struct {
+			Name        string
+			ContentType string
+		}
+		tabMap := make(map[string]tabInfo)
+		tabRows, err := s.db.Query(`SELECT base_url, name, content_type FROM scraper_tabs WHERE is_active = 1`)
+		if err == nil {
+			defer tabRows.Close()
+			for tabRows.Next() {
+				var baseURL, name, ct string
+				if tabRows.Scan(&baseURL, &name, &ct) == nil {
+					if parsedURL, err := url.Parse(baseURL); err == nil {
+						tabMap[parsedURL.Host] = tabInfo{Name: name, ContentType: ct}
+					}
+				}
+			}
+			for _, v := range videos {
+				if info, ok := tabMap[v.Source]; ok {
+					if v.SourceTabName == "" {
+						v.SourceTabName = info.Name
+					}
+					if v.ContentType == "" || v.ContentType == "regular" {
+						if info.ContentType != "" {
+							v.ContentType = info.ContentType
+						}
+					}
+				}
+			}
+		}
+	}
 
 	return &ScrapedVideosResult{
 		Videos:     videos,

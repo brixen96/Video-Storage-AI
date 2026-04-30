@@ -28,7 +28,6 @@ func ensureConversionService() *services.ConversionService {
 func convertVideoToMP4(c *gin.Context) {
 	svc := ensureConversionService()
 
-	// Get video ID from URL
 	idStr := c.Param("id")
 	videoID, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
@@ -36,24 +35,21 @@ func convertVideoToMP4(c *gin.Context) {
 		return
 	}
 
-	// Check if FFmpeg is installed
 	if !svc.CheckFFmpegInstalled() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "FFmpeg is not installed or not available in PATH"})
 		return
 	}
 
-	// Perform conversion (this may take a while)
-	// In a production app, this should be done asynchronously
-	convertedVideo, err := svc.ConvertVideoToMP4(videoID)
+	activity, err := svc.StartConversionAsync(videoID)
 	if err != nil {
-		log.Printf("Failed to convert video %d: %v", videoID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		log.Printf("Failed to start conversion for video %d: %v", videoID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, models.SuccessResponse(
-		convertedVideo,
-		"Video converted successfully to MP4",
+	c.JSON(http.StatusAccepted, models.SuccessResponse(
+		gin.H{"activity_id": activity.ID},
+		"Conversion started",
 	))
 }
 

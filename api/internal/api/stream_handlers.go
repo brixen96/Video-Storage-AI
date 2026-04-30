@@ -222,6 +222,7 @@ func streamVideoByID(c *gin.Context) {
 	// Check if file exists
 	fileInfo, err := os.Stat(fullPath)
 	if err != nil {
+		log.Printf("[STREAM] Cannot access file for video %d: path=%q err=%v", id, fullPath, err)
 		c.JSON(http.StatusNotFound, models.ErrorResponseMsg(
 			"File not found",
 			err.Error(),
@@ -240,6 +241,7 @@ func streamVideoByID(c *gin.Context) {
 	// Open file
 	file, err := os.Open(fullPath)
 	if err != nil {
+		log.Printf("[STREAM] Cannot open file for video %d: path=%q err=%v", id, fullPath, err)
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to open file",
 			err.Error(),

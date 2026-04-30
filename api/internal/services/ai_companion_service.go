@@ -199,6 +199,15 @@ func (s *AICompanionService) GetFullContext() string {
 		ctx.WriteString("\n")
 	}
 
+	// Video linking (Edited↔Backup pairing) stats
+	var confirmedLinks, suggestedLinks, rejectedLinks int
+	s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'confirmed'").Scan(&confirmedLinks)
+	s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'suggested'").Scan(&suggestedLinks)
+	s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'rejected'").Scan(&rejectedLinks)
+	if confirmedLinks+suggestedLinks+rejectedLinks > 0 {
+		ctx.WriteString(fmt.Sprintf("### Video Pairing (Edited↔Backup)\n- Confirmed links: %d | Suggested (pending review): %d | Rejected: %d\n\n", confirmedLinks, suggestedLinks, rejectedLinks))
+	}
+
 	// Scraper state
 	var scrapedVideoCount, threadCount, postCount int
 	s.db.QueryRow("SELECT COUNT(*) FROM scraped_videos").Scan(&scrapedVideoCount)
@@ -645,6 +654,19 @@ func getLMToolDefinitions() []lmToolDefinition {
 			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
 				"video_id": map[string]interface{}{"type": "number", "description": "ID of the video to toggle favorite on"},
 			}, "required": []string{"video_id"}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "get_video_link_stats",
+			Description: "Get statistics about Edited↔Backup video pairing: how many confirmed links exist, how many are pending review, which library has the most unlinked videos, and overall link coverage percentage. Use when the user asks about paired videos, library sync status, or 'how many Edited videos have a Backup counterpart'.",
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+		}},
+		{Type: "function", Function: lmToolFunction{
+			Name:        "get_unlinked_videos",
+			Description: "List videos in a specific library that do not have a confirmed link to a video in the paired library. Use this to find which Edited videos are missing a Backup counterpart (or vice versa). Pairs with get_video_link_stats to give a full picture.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name to check for unlinked videos (e.g. 'Edited' or 'Backup')"},
+				"limit":        map[string]interface{}{"type": "number", "description": "Max results to return (default: 20)"},
+			}, "required": []string{"library_name"}},
 		}},
 	}
 }
@@ -2861,6 +2883,101 @@ func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{
 			"action":      action,
 		}, nil
 
+	case "get_video_link_stats":
+		var confirmed, suggested, rejected int
+		s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'confirmed'").Scan(&confirmed)
+		s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'suggested'").Scan(&suggested)
+		s.db.QueryRow("SELECT COUNT(*) FROM video_links WHERE status = 'rejected'").Scan(&rejected)
+
+		// Per-library breakdown: how many videos have a confirmed link vs total
+		type libLinkStat struct {
+			Name      string
+			Total     int
+			Linked    int
+			Coverage  float64
+		}
+		libRows, err := s.db.Query(`
+			SELECT l.name, COUNT(v.id) AS total,
+			       SUM(CASE WHEN EXISTS (
+			           SELECT 1 FROM video_links vl
+			           WHERE (vl.edited_video_id = v.id OR vl.backup_video_id = v.id)
+			             AND vl.status = 'confirmed'
+			       ) THEN 1 ELSE 0 END) AS linked
+			FROM libraries l
+			LEFT JOIN videos v ON v.library_id = l.id
+			GROUP BY l.id ORDER BY l.name`)
+		libStats := []libLinkStat{}
+		if err == nil {
+			defer libRows.Close()
+			for libRows.Next() {
+				var ls libLinkStat
+				if libRows.Scan(&ls.Name, &ls.Total, &ls.Linked) == nil {
+					if ls.Total > 0 {
+						ls.Coverage = float64(ls.Linked) / float64(ls.Total) * 100
+					}
+					libStats = append(libStats, ls)
+				}
+			}
+		}
+
+		result := map[string]interface{}{
+			"confirmed_links":     confirmed,
+			"suggested_links":     suggested,
+			"rejected_links":      rejected,
+			"total_links":         confirmed + suggested + rejected,
+			"library_breakdown":   libStats,
+		}
+		return result, nil
+
+	case "get_unlinked_videos":
+		libraryName, _ := args["library_name"].(string)
+		limit := intArg(args, "limit", 20)
+		if limit > 100 {
+			limit = 100
+		}
+		if libraryName == "" {
+			return map[string]interface{}{"error": "library_name is required"}, nil
+		}
+
+		rows, err := s.db.Query(`
+			SELECT v.id, v.title, v.duration, COALESCE(v.is_missing, 0)
+			FROM videos v
+			INNER JOIN libraries l ON l.id = v.library_id
+			WHERE LOWER(l.name) LIKE LOWER(?)
+			  AND NOT EXISTS (
+			      SELECT 1 FROM video_links vl
+			      WHERE (vl.edited_video_id = v.id OR vl.backup_video_id = v.id)
+			        AND vl.status = 'confirmed'
+			  )
+			ORDER BY v.title ASC
+			LIMIT ?`, "%"+libraryName+"%", limit)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+		defer rows.Close()
+
+		type unlinkedEntry struct {
+			ID        int64   `json:"id"`
+			Title     string  `json:"title"`
+			Duration  float64 `json:"duration"`
+			IsMissing bool    `json:"is_missing"`
+		}
+		var unlinked []unlinkedEntry
+		for rows.Next() {
+			var e unlinkedEntry
+			if rows.Scan(&e.ID, &e.Title, &e.Duration, &e.IsMissing) == nil {
+				unlinked = append(unlinked, e)
+			}
+		}
+		if unlinked == nil {
+			unlinked = []unlinkedEntry{}
+		}
+		return map[string]interface{}{
+			"library":        libraryName,
+			"unlinked_count": len(unlinked),
+			"videos":         unlinked,
+		}, nil
+
 	default:
 		return map[string]interface{}{"error": fmt.Sprintf("Unknown tool: %s", name)}, nil
 	}
@@ -3100,7 +3217,7 @@ You can help organize videos: use scan_library_structure to understand how Backu
 You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
 You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
 You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
-You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite).
+You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite). For Edited↔Backup pairing: get_video_link_stats (coverage overview), get_unlinked_videos (find unmatched videos in a library).
 You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
 For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
 
@@ -3291,7 +3408,7 @@ You can help organize videos: use scan_library_structure to understand how Backu
 You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
 You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
 You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
-You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite).
+You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite). For Edited↔Backup pairing: get_video_link_stats (coverage overview), get_unlinked_videos (find unmatched videos in a library).
 You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
 For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
 

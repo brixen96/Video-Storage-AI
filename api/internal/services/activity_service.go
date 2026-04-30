@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
@@ -34,10 +35,19 @@ func SetWebSocketHub(hub WebSocketHub) {
 	wsHub = hub
 }
 
+var activityCleanupOnce sync.Once
+
 // NewActivityService creates a new activity service
 func NewActivityService() *ActivityService {
+	db := database.GetDB()
+	// Reset any activities left in running/paused state from a previous session.
+	// Uses sync.Once so this only runs once per process, even though NewActivityService
+	// is called from multiple handler files on every request.
+	activityCleanupOnce.Do(func() {
+		db.Exec(`UPDATE activity_logs SET status = 'failed', message = 'Interrupted by service restart', completed_at = CURRENT_TIMESTAMP WHERE status IN ('running', 'paused')`)
+	})
 	return &ActivityService{
-		db: database.GetDB(),
+		db: db,
 	}
 }
 

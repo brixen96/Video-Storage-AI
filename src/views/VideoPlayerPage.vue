@@ -55,8 +55,19 @@
 							<div class="error-content">
 								<font-awesome-icon :icon="['fas', 'exclamation-triangle']" size="3x" class="error-icon" />
 								<h4>Unable to Play Video</h4>
-								<p v-if="video?.extension === '.mkv'">MKV format is not natively supported by browsers. Consider converting to MP4.</p>
-								<p v-else>This video format may not be supported by your browser.</p>
+								<p v-if="!isBrowserPlayable && videoFileExt">
+									<strong>{{ videoFileExt.toUpperCase().slice(1) }}</strong> files are not natively supported by browsers.
+									<span v-if="video?.codec"> (Codec: {{ video.codec }})</span>
+									Consider converting to MP4.
+								</p>
+								<p v-else-if="video?.codec && ['hevc', 'h265', 'av1', 'prores'].includes(video.codec.toLowerCase())">
+									Codec <strong>{{ video.codec }}</strong> is not supported by your browser. Consider converting to MP4 (H.264).
+								</p>
+								<p v-else>
+									This video could not be played.
+									<span v-if="video?.codec"> (Codec: {{ video.codec }})</span>
+									<span v-if="videoFileExt"> Format: {{ videoFileExt }}</span>
+								</p>
 							</div>
 						</div>
 						<div v-if="loading" class="loading-overlay">
@@ -317,6 +328,36 @@
 				<!-- Sidebar Column -->
 				<div class="col-lg-3">
 					<div class="sidebar">
+						<!-- Linked Version Panel -->
+						<div v-if="linkedVideo" class="related-section linked-version-panel mb-4">
+							<h3 class="text-info">
+								<font-awesome-icon :icon="['fas', 'link']" class="me-2" />
+								Linked Version
+							</h3>
+							<div class="linked-video-card" @click="goToVideo(linkedVideo.id)">
+								<div class="related-thumbnail">
+									<img
+										v-if="linkedVideo.thumbnail_path"
+										:src="getThumbnailURL(linkedVideo)"
+										:alt="linkedVideo.title"
+									/>
+									<div v-else class="thumbnail-placeholder">
+										<font-awesome-icon :icon="['fas', 'video']" />
+									</div>
+									<div v-if="linkedVideo.duration" class="duration-badge">
+										{{ formatDuration(linkedVideo.duration) }}
+									</div>
+								</div>
+								<div class="related-info">
+									<div class="related-title">{{ linkedVideo.title }}</div>
+									<div class="related-meta">
+										<span v-if="linkedVideo.resolution" class="badge bg-primary me-1" style="font-size:0.65rem">{{ linkedVideo.resolution }}</span>
+										<span v-if="linkedVideo.file_size" class="text-muted" style="font-size:0.7rem">{{ formatFileSize(linkedVideo.file_size) }}</span>
+									</div>
+								</div>
+							</div>
+						</div>
+
 						<!-- Related Videos -->
 						<div class="related-section">
 							<h3>
@@ -394,6 +435,7 @@ export default {
 			showKeyboardHint: false,
 			keyboardHintTimer: null,
 			hoverRating: 0,
+			linkedVideo: null,
 		}
 	},
 	computed: {
@@ -447,23 +489,36 @@ export default {
 		},
 		videoUrl() {
 			if (!this.video) return ''
-			return `http://localhost:8080/api/v1/videos/${this.video.id}/stream`
+			const origin = window.VSAI_API_URL || 'http://localhost:8080'
+			return `${origin}/api/v1/videos/${this.video.id}/stream`
+		},
+		videoFileExt() {
+			if (!this.video?.file_path) return ''
+			const parts = this.video.file_path.replace(/\\/g, '/').split('/')
+			const filename = parts[parts.length - 1] || ''
+			const dot = filename.lastIndexOf('.')
+			return dot >= 0 ? filename.slice(dot).toLowerCase() : ''
 		},
 		videoMimeType() {
-			if (!this.video) return 'video/mp4'
-			const ext = this.video.extension?.toLowerCase() || ''
+			const ext = this.videoFileExt
 			const mimeTypes = {
 				'.mp4': 'video/mp4',
 				'.webm': 'video/webm',
 				'.ogg': 'video/ogg',
-				'.mkv': 'video/mp4',
+				'.mkv': 'video/x-matroska',
 				'.avi': 'video/x-msvideo',
 				'.mov': 'video/quicktime',
 				'.wmv': 'video/x-ms-wmv',
 				'.flv': 'video/x-flv',
 				'.m4v': 'video/mp4',
+				'.mpg': 'video/mpeg',
+				'.mpeg': 'video/mpeg',
 			}
 			return mimeTypes[ext] || 'video/mp4'
+		},
+		isBrowserPlayable() {
+			const playable = ['.mp4', '.webm', '.ogg', '.m4v', '.mpg', '.mpeg']
+			return playable.includes(this.videoFileExt)
 		},
 	},
 	created() {
@@ -510,6 +565,12 @@ export default {
 					await this.incrementPlayCount()
 				}
 
+				// Load confirmed linked video if one exists
+				this.linkedVideo = null
+				if (this.video?.linked_video_id) {
+					this.loadLinkedVideo(this.video.linked_video_id)
+				}
+
 				// For scraped videos, try to extract direct video URL in background
 				if (this.video && type === 'scraped') {
 					this.fetchDirectVideoUrl()
@@ -520,6 +581,14 @@ export default {
 				this.$router.push('/videos')
 			} finally {
 				this.loading = false
+			}
+		},
+		async loadLinkedVideo(linkedId) {
+			try {
+				const res = await videosAPI.getById(linkedId)
+				this.linkedVideo = res.data || res
+			} catch (err) {
+				console.error('Failed to load linked video:', err)
 			}
 		},
 		async loadRelatedVideos() {
@@ -841,6 +910,7 @@ export default {
 				this.relatedVideos = []
 				this.directVideoUrl = null
 				this.extractingVideoUrl = false
+				this.linkedVideo = null
 
 				// Load new video first, then load related videos
 				const videoType = this.$route.name === 'ScrapedVideoPlayer' ? 'scraped' : 'local'

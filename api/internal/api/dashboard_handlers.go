@@ -54,15 +54,9 @@ func getDashboardFeed(c *gin.Context) {
 
 	scraperType := c.Query("scraper_type")
 
-	// Get enabled scraper types for filtering
-	autoUpdateSvc := ensureAutoUpdateService()
-	enabledConfigs, _ := autoUpdateSvc.GetEnabledConfigs()
-	var enabledTypes []string
-	for _, cfg := range enabledConfigs {
-		enabledTypes = append(enabledTypes, cfg.ScraperType)
-	}
-
-	items, total, err := svc.GetFeedItems(limit, offset, scraperType, enabledTypes)
+	// No automatic enabled-only filter — show all history so disabled/errored scrapers
+	// don't silently vanish from the feed. User can filter via the scraper_type param.
+	items, total, err := svc.GetFeedItems(limit, offset, scraperType, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
 			"Failed to get feed items",
@@ -71,19 +65,9 @@ func getDashboardFeed(c *gin.Context) {
 		return
 	}
 
-	// Resolve display names for enabled scraper types that have feed items
+	// Resolve display names for all scraper types that have feed items
 	scraperTypes, _ := svc.GetDistinctScraperTypes()
-	enabledSet := make(map[string]bool)
-	for _, t := range enabledTypes {
-		enabledSet[t] = true
-	}
-	var filteredTypes []string
-	for _, t := range scraperTypes {
-		if enabledSet[t] {
-			filteredTypes = append(filteredTypes, t)
-		}
-	}
-	scraperTypeInfos := models.ResolveScraperTypeNames(database.DB, filteredTypes)
+	scraperTypeInfos := models.ResolveScraperTypeNames(database.DB, scraperTypes)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

@@ -245,13 +245,32 @@
 								<div class="vp-slider-track"></div>
 							</div>
 						</div>
+
+						<div class="vp-filter-group">
+							<label class="vp-toggle-label" style="cursor:pointer;" @click="filters.showMissing = !filters.showMissing; loadVideos()">
+								<font-awesome-icon :icon="['fas', 'video-slash']" :class="filters.showMissing ? 'text-danger' : 'text-muted'" />
+								Show Missing Files
+								<span v-if="filters.showMissing" class="badge bg-danger ms-1">ON</span>
+							</label>
+							<small class="text-muted d-block" style="font-size:0.75em;">Files no longer found on disk</small>
+						</div>
 					</div>
 				</div>
 			</div>
 
 			<!-- Main Content Area -->
-			<div class="vp-main-content p-0 m-0" :class="{ 'full-width': !showFilters }">
+			<div ref="mainContent" class="vp-main-content p-0 m-0" :class="{ 'full-width': !showFilters }">
 				<div class="container-fluid px-0">
+					<!-- Missing files banner -->
+					<div v-if="filters.showMissing && totalVideos > 0 && !loading" class="vp-missing-banner">
+						<font-awesome-icon :icon="['fas', 'exclamation-triangle']" class="text-danger me-2" />
+						<span>Showing <strong>{{ totalVideos }}</strong> missing file{{ totalVideos !== 1 ? 's' : '' }} — these videos no longer exist on disk.</span>
+						<button class="btn btn-sm btn-outline-danger ms-3" :disabled="missingCleanupLoading" @click="missingCleanupConfirm = true">
+							<font-awesome-icon :icon="['fas', 'broom']" />
+							{{ missingCleanupLoading ? 'Cleaning...' : 'Cleanup All' }}
+						</button>
+					</div>
+
 					<!-- Loading State -->
 					<div v-if="loading" class="vp-loading-state">
 						<div class="vp-loading-spinner">
@@ -344,8 +363,8 @@
 						:currentPage="currentPage"
 						:itemsPerPage="pageSize"
 						:totalItems="totalVideos"
-						@update:currentPage="currentPage = $event; loadVideos(); window.scrollTo({ top: 0, behavior: 'smooth' })"
-						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos(); window.scrollTo({ top: 0, behavior: 'smooth' })"
+						@update:currentPage="currentPage = $event; loadVideos(); $refs.mainContent.scrollTo({ top: 0, behavior: 'smooth' })"
+						@update:itemsPerPage="pageSize = $event; currentPage = 1; loadVideos(); $refs.mainContent.scrollTo({ top: 0, behavior: 'smooth' })"
 					/>
 				</div>
 			</div>
@@ -356,8 +375,16 @@
 			<!-- Scraped video options -->
 			<template v-if="contextMenu.video && contextMenu.video.is_scraped">
 				<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'external-link-alt']" />
-					Open in Browser
+					<font-awesome-icon :icon="['fas', 'play']" />
+					Watch
+				</div>
+				<div class="vp-context-menu-item" @click="openScrapedInFirefox(contextMenu.video)">
+					<font-awesome-icon :icon="['fab', 'firefox-browser']" />
+					Open in Firefox
+				</div>
+				<div class="vp-context-menu-item" @click="downloadScrapedVideo(contextMenu.video)">
+					<font-awesome-icon :icon="['fas', 'cloud-download-alt']" />
+					Download
 				</div>
 				<div class="vp-context-menu-item" @click="copyVideoUrl(contextMenu.video)">
 					<font-awesome-icon :icon="['fas', 'copy']" />
@@ -402,6 +429,30 @@
 					<font-awesome-icon :icon="['fas', 'folder-open']" />
 					Open in Explorer
 				</div>
+				<div
+					v-if="contextMenu.video?.linked_video_id"
+					class="vp-context-menu-item text-info"
+					@click="openLinkedVideo(contextMenu.video)"
+				>
+					<font-awesome-icon :icon="['fas', 'link']" />
+					Open Linked Video
+				</div>
+				<!-- Missing file actions -->
+				<template v-if="contextMenu.video?.is_missing">
+					<div class="vp-context-menu-divider"></div>
+					<div class="vp-context-menu-item text-warning" @click="openLocateModal(contextMenu.video)">
+						<font-awesome-icon :icon="['fas', 'search-location']" />
+						Locate File...
+					</div>
+					<div class="vp-context-menu-item text-warning" @click="openRemapModal(contextMenu.video)">
+						<font-awesome-icon :icon="['fas', 'route']" />
+						Remap Path...
+					</div>
+					<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
+						<font-awesome-icon :icon="['fas', 'trash']" />
+						Delete Record
+					</div>
+				</template>
 				<div class="vp-context-menu-divider"></div>
 				<div class="vp-context-menu-rate">
 					<span class="rate-label">Rate</span>
@@ -471,6 +522,95 @@
 			@cancel="deleteModal.show = false"
 		/>
 
+		<!-- Missing file cleanup confirm -->
+		<div v-if="missingCleanupConfirm" class="modal show d-block" tabindex="-1">
+			<div class="modal-dialog modal-dialog-centered">
+				<div class="modal-content text-bg-dark border-danger">
+					<div class="modal-header border-danger">
+						<h5 class="modal-title text-danger">
+							<font-awesome-icon :icon="['fas', 'exclamation-triangle']" />
+							Cleanup Missing Videos
+						</h5>
+						<button type="button" class="btn-close btn-close-white" @click="missingCleanupConfirm = false"></button>
+					</div>
+					<div class="modal-body">
+						<p>This will permanently delete all <strong>{{ totalVideos }} missing video records</strong> from the database.</p>
+						<p class="text-muted" style="font-size:0.85em;">Only the database entry is removed — no files on disk are touched. This affects the currently shown set (library filter applies).</p>
+					</div>
+					<div class="modal-footer border-danger">
+						<button class="btn btn-secondary" @click="missingCleanupConfirm = false">Cancel</button>
+						<button class="btn btn-danger" @click="confirmCleanupMissing">
+							<font-awesome-icon :icon="['fas', 'broom']" />
+							Delete All Records
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div v-if="missingCleanupConfirm" class="modal-backdrop show"></div>
+
+		<!-- Locate / Remap missing file modal -->
+		<div v-if="missingModal.show" class="modal show d-block" tabindex="-1">
+			<div class="modal-dialog modal-dialog-centered">
+				<div class="modal-content text-bg-dark border-warning">
+					<div class="modal-header border-warning">
+						<h5 class="modal-title text-warning">
+							<font-awesome-icon :icon="['fas', missingModal.mode === 'locate' ? 'search-location' : 'route']" />
+							{{ missingModal.mode === 'locate' ? 'Locate File' : 'Remap Path' }}
+						</h5>
+						<button type="button" class="btn-close btn-close-white" @click="missingModal.show = false"></button>
+					</div>
+					<div class="modal-body">
+						<p class="text-muted" style="font-size:0.85em;">{{ missingModal.video?.title }}</p>
+						<p class="text-muted" style="font-size:0.75em; word-break:break-all;">Was at: {{ missingModal.video?.file_path }}</p>
+
+						<!-- Locate mode -->
+						<template v-if="missingModal.mode === 'locate'">
+							<div v-if="missingModal.loading" class="text-center py-3">
+								<div class="spinner-border spinner-border-sm text-warning"></div>
+								<span class="ms-2 text-muted">Searching library folder...</span>
+							</div>
+							<div v-else-if="missingModal.candidates.length === 0" class="text-muted text-center py-2">
+								No matching files found in the library folder.
+							</div>
+							<div v-else>
+								<p class="text-warning" style="font-size:0.85em;">Found {{ missingModal.candidates.length }} candidate(s) — click to remap:</p>
+								<div v-for="path in missingModal.candidates" :key="path" class="missing-candidate" @click="confirmRemap(missingModal.video, path)">
+									<font-awesome-icon :icon="['fas', 'file-video']" class="text-muted me-2" />
+									<span>{{ path }}</span>
+								</div>
+							</div>
+						</template>
+
+						<!-- Manual remap mode -->
+						<template v-else>
+							<label class="form-label text-muted" style="font-size:0.85em;">New file path (must exist on disk):</label>
+							<input
+								v-model="missingModal.remapInput"
+								type="text"
+								class="form-control bg-dark text-light border-warning"
+								placeholder="e.g. D:\Videos\file.mp4"
+								@keydown.enter="confirmRemap(missingModal.video, missingModal.remapInput)"
+							/>
+						</template>
+					</div>
+					<div class="modal-footer border-warning">
+						<button class="btn btn-secondary" @click="missingModal.show = false">Cancel</button>
+						<button
+							v-if="missingModal.mode === 'remap'"
+							class="btn btn-warning"
+							:disabled="!missingModal.remapInput.trim()"
+							@click="confirmRemap(missingModal.video, missingModal.remapInput)"
+						>
+							<font-awesome-icon :icon="['fas', 'route']" />
+							Apply Remap
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div v-if="missingModal.show" class="modal-backdrop show"></div>
+
 		<!-- Add to List Modal -->
 		<AddToListModal
 			:visible="addToListModal.visible"
@@ -479,13 +619,20 @@
 			@close="addToListModal.visible = false"
 			@added="onAddedToList"
 		/>
+
+		<!-- Scraped Video Modal -->
+		<ScrapedVideoModal
+			:video="scrapedModalVideo"
+			@close="scrapedModalVideo = null"
+			@downloaded="scrapedModalVideo = null"
+		/>
 	</div>
 </template>
 
 <script>
 import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
-import { videosAPI, librariesAPI, getAssetURL } from '@/services/api'
+import { videosAPI, librariesAPI, scrapersAPI, jdownloaderAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
 import { BrowserPaginationControls } from '@/components/browser'
 import { DeleteConfirmationModal } from '@/components/shared'
@@ -497,6 +644,7 @@ const VideoPlayerModal = defineAsyncComponent(() => import('@/components/VideoPl
 const EditMetadataModal = defineAsyncComponent(() => import('@/components/EditMetadataModal.vue'))
 const AddTagModal = defineAsyncComponent(() => import('@/components/AddTagModal.vue'))
 const AddToListModal = defineAsyncComponent(() => import('@/components/AddToListModal.vue'))
+const ScrapedVideoModal = defineAsyncComponent(() => import('@/components/scraper/ScrapedVideoModal.vue'))
 
 export default {
 	name: 'VideosPage',
@@ -506,6 +654,7 @@ export default {
 		EditMetadataModal,
 		AddTagModal,
 		AddToListModal,
+		ScrapedVideoModal,
 		BrowserPaginationControls,
 		DeleteConfirmationModal,
 	},
@@ -532,6 +681,7 @@ export default {
 				contentType: null,
 				hasPreview: null,
 				missingMetadata: null,
+				showMissing: false,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,
@@ -565,8 +715,19 @@ export default {
 			showEditMetadata: false,
 			showTagModal: false,
 			videoForModal: null,
+			scrapedModalVideo: null,
 			bulkTagVideoIds: [],
 			previewingPerformer: null,
+			missingModal: {
+				show: false,
+				video: null,
+				candidates: [],
+				loading: false,
+				remapInput: '',
+				mode: 'locate', // 'locate' | 'remap'
+			},
+			missingCleanupConfirm: false,
+			missingCleanupLoading: false,
 			deleteModal: {
 				show: false,
 				video: null,
@@ -595,6 +756,7 @@ export default {
 			if (this.filters.contentType !== null) count++
 			if (this.filters.hasPreview) count++
 			if (this.filters.missingMetadata) count++
+			if (this.filters.showMissing) count++
 			if (this.filters.dateFrom) count++
 			if (this.filters.dateTo) count++
 			if (this.filters.minSize) count++
@@ -685,7 +847,6 @@ export default {
 		async loadVideos() {
 			this.loading = true
 			try {
-				// Check if we're loading scraped videos
 				if (this.selectedLibrary === 'scraped') {
 					await this.loadScrapedVideos()
 					return
@@ -709,6 +870,7 @@ export default {
 					content_type: this.filters.contentType || undefined,
 					has_preview: this.filters.hasPreview || undefined,
 					missing_metadata: this.filters.missingMetadata || undefined,
+					show_missing: this.filters.showMissing || undefined,
 					date_from: this.filters.dateFrom || undefined,
 					date_to: this.filters.dateTo || undefined,
 					min_size: this.filters.minSize ? this.filters.minSize * 1024 * 1024 : undefined,
@@ -728,68 +890,32 @@ export default {
 		},
 		async loadScrapedVideos() {
 			try {
-				// Fetch all scraped videos from all sources with tab info for source badges
-				const [tabVideosRes, pornHubVideosRes] = await Promise.all([
-					fetch('http://localhost:8080/api/v1/scraper/videos?includeTabInfo=true').then(r => r.json()),
-					fetch('http://localhost:8080/api/v1/scraper/pornhub/videos').then(r => r.json())
-				])
-
-				let allScrapedVideos = []
-
-				// Add tab videos
-				if (tabVideosRes.success && tabVideosRes.data) {
-					const tabVideos = Array.isArray(tabVideosRes.data) ? tabVideosRes.data : (tabVideosRes.data.videos || [])
-					allScrapedVideos = allScrapedVideos.concat(tabVideos)
+				// Map frontend sort fields to backend column names
+				const sortFieldMap = {
+					created_at: 'discovered_at',
+					play_count: 'view_count',
+					title: 'title',
+					duration: 'duration',
+					rating: 'rating',
 				}
 
-				// Add PornHub videos (mark them with source_tab_name for the badge)
-				if (pornHubVideosRes.success && pornHubVideosRes.data) {
-					const phVideos = Array.isArray(pornHubVideosRes.data) ? pornHubVideosRes.data : (pornHubVideosRes.data.videos || [])
-					// Tag PornHub videos with source tab name
-					phVideos.forEach(v => {
-						if (!v.source_tab_name) {
-							v.source_tab_name = 'PornHub'
-						}
-					})
-					allScrapedVideos = allScrapedVideos.concat(phVideos)
+				const params = {
+					page: this.currentPage,
+					limit: this.pageSize,
+					sort_by: sortFieldMap[this.sortBy] || 'discovered_at',
+					sort_order: this.sortOrder,
+					includeTabInfo: 'true',
 				}
+				if (this.searchQuery) params.search = this.searchQuery
+				if (this.filters.contentType) params.content_type = this.filters.contentType
+				if (this.filters.minDuration) params.duration_filter = 'long' // fallback; server has short/medium/long
 
-				// Map scraped videos to match the expected video format
-				let mappedVideos = allScrapedVideos.map(v => this.mapScrapedVideoToVideo(v))
+				const res = await scrapersAPI.getVideos(params)
+				if (!res.success) throw new Error('API error')
 
-				// Apply client-side search filter
-				if (this.searchQuery) {
-					const query = this.searchQuery.toLowerCase()
-					mappedVideos = mappedVideos.filter(v =>
-						(v.title && v.title.toLowerCase().includes(query)) ||
-						(v.uploader && v.uploader.toLowerCase().includes(query)) ||
-						(v.source && v.source.toLowerCase().includes(query))
-					)
-				}
-
-				// Apply client-side content type filter
-				if (this.filters.contentType) {
-					mappedVideos = mappedVideos.filter(v => v.content_type === this.filters.contentType)
-				}
-
-				// Apply client-side duration filter
-				if (this.filters.minDuration) {
-					const minSeconds = this.filters.minDuration * 60
-					mappedVideos = mappedVideos.filter(v => (v.duration || 0) >= minSeconds)
-				}
-				if (this.filters.maxDuration) {
-					const maxSeconds = this.filters.maxDuration * 60
-					mappedVideos = mappedVideos.filter(v => (v.duration || 0) <= maxSeconds)
-				}
-
-				// Apply client-side sorting
-				mappedVideos = this.sortScrapedVideos(mappedVideos)
-
-				// Apply client-side pagination
-				this.totalVideos = mappedVideos.length
-				const start = (this.currentPage - 1) * this.pageSize
-				const end = start + this.pageSize
-				this.videos = mappedVideos.slice(start, end)
+				const result = res.data
+				this.totalVideos = result.total
+				this.videos = (result.videos || []).map(v => this.mapScrapedVideoToVideo(v))
 			} catch (error) {
 				console.error('Failed to load scraped videos:', error)
 				this.$toast.error('Failed to load scraped videos')
@@ -815,7 +941,8 @@ export default {
 				id: scraped.id,
 				title: scraped.title || 'Untitled',
 				thumbnail_path: scraped.thumbnail_url || scraped.thumbnail_path,
-				preview_path: scraped.video_preview_url || null,
+				// video_preview_url is stored inside the metadata JSON, not as a top-level field
+				preview_path: metadata.video_preview_url || null,
 				thumbnail_frames: metadata.thumbnail_frames || [],
 				duration: scraped.duration || 0,
 				file_size: scraped.file_size || 0,
@@ -945,6 +1072,7 @@ export default {
 				contentType: null,
 				hasPreview: null,
 				missingMetadata: null,
+				showMissing: false,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,
@@ -1019,13 +1147,89 @@ export default {
 			this.$toast.success(`Added to ${listIds.length} list${listIds.length > 1 ? 's' : ''}`)
 		},
 		playVideo(video) {
-			// For scraped videos, navigate to our video player page
+			// For scraped videos, show the ScrapedVideoModal
 			if (video.is_scraped) {
-				this.$router.push(`/watch/scraped/${video.id}`)
+				this.scrapedModalVideo = video
+				this.hideContextMenu()
 				return
 			}
 			this.videoForModal = video
 			this.showVideoPlayer = true
+		},
+		openLinkedVideo(video) {
+			this.hideContextMenu()
+			if (video.linked_video_id) {
+				const route = this.$router.resolve(`/watch/${video.linked_video_id}`)
+				window.open(route.href, '_blank')
+			}
+		},
+		async openLocateModal(video) {
+			this.hideContextMenu()
+			this.missingModal = { show: true, video, candidates: [], loading: true, remapInput: '', mode: 'locate' }
+			try {
+				const res = await videosAPI.locateFile(video.id)
+				this.missingModal.candidates = (res.data || res).candidates || []
+			} catch {
+				this.missingModal.candidates = []
+			} finally {
+				this.missingModal.loading = false
+			}
+		},
+		openRemapModal(video) {
+			this.hideContextMenu()
+			this.missingModal = { show: true, video, candidates: [], loading: false, remapInput: '', mode: 'remap' }
+		},
+		async confirmRemap(video, newPath) {
+			if (!newPath?.trim()) return
+			try {
+				await videosAPI.remapPath(video.id, newPath.trim())
+				this.$toast.success('Video path updated')
+				this.missingModal.show = false
+				this.loadVideos()
+			} catch (e) {
+				this.$toast.error(e?.response?.data?.message || 'Remap failed')
+			}
+		},
+		async confirmCleanupMissing() {
+			this.missingCleanupConfirm = false
+			this.missingCleanupLoading = true
+			try {
+				const libraryId = this.selectedLibrary && this.selectedLibrary !== 'scraped' ? this.selectedLibrary : 0
+				const res = await videosAPI.cleanupMissing(libraryId)
+				const deleted = (res.data || res).deleted ?? 0
+				this.$toast.success(`Deleted ${deleted} missing video records`)
+				this.loadVideos()
+			} catch (e) {
+				this.$toast.error('Cleanup failed')
+			} finally {
+				this.missingCleanupLoading = false
+			}
+		},
+		openScrapedInFirefox(video) {
+			const url = video.source_url || video.url
+			if (url) scrapersAPI.openURL(url).catch(() => window.open(url, '_blank'))
+			this.hideContextMenu()
+		},
+		async downloadScrapedVideo(video) {
+			const url = video.source_url || video.url
+			if (!url) return
+			this.hideContextMenu()
+			const scraperFolder = video.source_tab_name || video.source || 'Scraper'
+			try {
+				const result = await jdownloaderAPI.sendLinks([{
+					url,
+					packageName: video.title || '',
+					downloadPath: `/output/${scraperFolder}`,
+					videoId: video.id ?? null,
+				}])
+				if (result?.successCount > 0) {
+					this.$toast.success('Sent to JDownloader')
+				} else {
+					this.$toast.warning('JDownloader: no links queued')
+				}
+			} catch {
+				this.$toast.error('Failed to send to JDownloader')
+			}
 		},
 		copyVideoUrl(video) {
 			if (video.source_url) {

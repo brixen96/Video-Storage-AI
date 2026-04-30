@@ -741,3 +741,43 @@ func buildServiceControlScript(names []string, action string) string {
 	sb.WriteString("del \"%~f0\"\r\n") // self-delete
 	return sb.String()
 }
+
+// buildAndDeploy handles POST /api/v1/system/build-and-deploy
+// Spawns build.bat as a detached process. The script stops services, rebuilds
+// both binaries and the frontend, then restarts services — so this process will
+// be killed mid-flight. We respond before launching.
+func buildAndDeploy(c *gin.Context) {
+	exePath, err := os.Executable()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Cannot determine exe path", err.Error()))
+		return
+	}
+
+	// build.bat lives one directory above the release/ folder
+	buildScript := filepath.Join(filepath.Dir(exePath), "..", "build.bat")
+	buildScript = filepath.Clean(buildScript)
+
+	if _, err := os.Stat(buildScript); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, models.ErrorResponseMsg("build.bat not found", buildScript))
+		return
+	}
+
+	// Write a tiny launcher that calls build.bat and deletes itself
+	launcher := filepath.Join(filepath.Dir(exePath), "build_launcher.bat")
+	script := fmt.Sprintf("@echo off\r\ncall \"%s\"\r\ndel \"%%~f0\"\r\n", buildScript)
+	if err := os.WriteFile(launcher, []byte(script), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to write launcher", err.Error()))
+		return
+	}
+
+	// Spawn detached so this process being killed doesn't abort the build
+	cmd := exec.Command("cmd", "/c", "start", "/b", "", launcher)
+	cmd.Dir = filepath.Dir(buildScript)
+	if err := cmd.Start(); err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to launch build", err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(nil,
+		"Build started — services will restart automatically when complete (~5 minutes)"))
+}

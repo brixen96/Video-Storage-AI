@@ -280,16 +280,7 @@ func generateAllPreviews(c *gin.Context) {
 		}
 	}()
 
-	c.JSON(http.StatusAccepted, gin.H{
-		"message": "Preview generation started",
-		"status":  "generating",
-		"config": gin.H{
-			"server_drives":         request.ServerDrives,
-			"local_drives":          request.LocalDrives,
-			"server_max_concurrent": request.ServerMaxConcurrent,
-			"local_max_concurrent":  request.LocalMaxConcurrent,
-		},
-	})
+	respondSuccess(c, nil, "Preview generation started")
 }
 
 // openInExplorer handles POST /api/v1/videos/:id/open-in-explorer
@@ -461,8 +452,71 @@ func generateVideoThumbnails(c *gin.Context) {
 		}
 	}()
 
-	c.JSON(http.StatusAccepted, models.SuccessResponse(
-		nil,
-		"Video thumbnail generation started",
-	))
+	respondSuccess(c, nil, "Video thumbnail generation started")
+}
+
+// locateVideoFile handles GET /api/v1/videos/:id/locate
+// Searches the video's library folder for files matching its filename.
+func locateVideoFile(c *gin.Context) {
+	svc := ensureVideoService()
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "Invalid video ID", err)
+		return
+	}
+
+	candidates, err := svc.LocateFile(id)
+	if err != nil {
+		respondInternalError(c, "Locate failed", err)
+		return
+	}
+
+	respondSuccess(c, gin.H{"candidates": candidates}, "")
+}
+
+// remapVideoPath handles PATCH /api/v1/videos/:id/remap
+// Updates the video's file_path and clears is_missing.
+func remapVideoPath(c *gin.Context) {
+	svc := ensureVideoService()
+
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "Invalid video ID", err)
+		return
+	}
+
+	var body struct {
+		FilePath string `json:"file_path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondBadRequest(c, "file_path is required", err)
+		return
+	}
+
+	if err := svc.RemapVideoPath(id, body.FilePath); err != nil {
+		respondInternalError(c, "Remap failed", err)
+		return
+	}
+
+	respondSuccess(c, nil, "Video path updated")
+}
+
+// deleteMissingVideos handles POST /api/v1/videos/missing/cleanup
+// Bulk-deletes all is_missing=1 records, optionally filtered by library_id.
+func deleteMissingVideos(c *gin.Context) {
+	svc := ensureVideoService()
+
+	var body struct {
+		LibraryID int64 `json:"library_id"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	count, err := svc.DeleteMissingVideos(body.LibraryID)
+	if err != nil {
+		respondInternalError(c, "Cleanup failed", err)
+		return
+	}
+
+	respondSuccess(c, gin.H{"deleted": count}, fmt.Sprintf("Deleted %d missing video records", count))
 }

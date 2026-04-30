@@ -3,6 +3,8 @@ import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 
 // Import solid icons
 import {
+	faHammer,
+	faPowerOff,
 	faHome,
 	faUsers,
 	faUser,
@@ -50,6 +52,7 @@ import {
 	faFilm,
 	faBookOpen,
 	faCheckCircle,
+	faSitemap,
 	faBirthdayCake,
 	faExternalLinkAlt,
 	faExclamationCircle,
@@ -102,6 +105,8 @@ import {
 	faFileExport,
 	faListCheck,
 	faBroom,
+	faSearchLocation,
+	faRoute,
 	faHdd,
 	faMinus,
 	faChartBar,
@@ -172,6 +177,12 @@ import {
 	faHeading,
 	faSkullCrossbones,
 	faHourglassEnd,
+	faEllipsisH,
+	faLinkSlash,
+	faFolderMinus,
+	faPlusCircle,
+	faMinusCircle,
+	faVideoSlash,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -182,6 +193,8 @@ import { faTwitter, faInstagram, faFirefoxBrowser } from '@fortawesome/free-bran
 
 // Add icons to library
 library.add(
+	faHammer,
+	faPowerOff,
 	faHome,
 	faUsers,
 	faUser,
@@ -231,6 +244,7 @@ library.add(
 	farHeart,
 	farStar,
 	faCheckCircle,
+	faSitemap,
 	faBirthdayCake,
 	faExternalLinkAlt,
 	faExclamationCircle,
@@ -286,6 +300,8 @@ library.add(
 	faFileExport,
 	faListCheck,
 	faBroom,
+	faSearchLocation,
+	faRoute,
 	faHdd,
 	faCircle,
 	faMinus,
@@ -356,7 +372,13 @@ library.add(
 	faEyeSlash,
 	faHeading,
 	faSkullCrossbones,
-	faHourglassEnd
+	faHourglassEnd,
+	faEllipsisH,
+	faLinkSlash,
+	faFolderMinus,
+	faPlusCircle,
+	faMinusCircle,
+	faVideoSlash
 )
 
 export default FontAwesomeIcon
