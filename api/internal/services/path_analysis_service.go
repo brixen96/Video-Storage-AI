@@ -3,11 +3,13 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"unicode"
 
 	"github.com/brixen96/video-storage-ai/internal/database"
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // OnScanComplete is called by VideoService after a scan adds new videos.
@@ -82,11 +84,30 @@ func (s *PathAnalysisService) RunAutoLink(libraryID int64, onlyUnlinked, dryRun 
 	}
 
 	report := &PathAnalysisReport{DryRun: dryRun}
+	total := len(videos)
+
+	// Track progress in the Activity page (skip for dry runs)
+	var actSvc *ActivityService
+	var actLog *models.ActivityLog
+	if !dryRun && total > 0 {
+		actSvc = NewActivityService()
+		scope := "all libraries"
+		if libraryID > 0 {
+			scope = fmt.Sprintf("library %d", libraryID)
+		}
+		actLog, _ = actSvc.StartTaskLog("path_analysis",
+			fmt.Sprintf("Auto-linking by path — %d videos (%s)", total, scope),
+			map[string]interface{}{"library_id": libraryID, "total_videos": total, "only_unlinked": onlyUnlinked},
+		)
+	}
 
 	var tx *sql.Tx
 	if !dryRun {
 		tx, err = s.db.Begin()
 		if err != nil {
+			if actLog != nil {
+				actSvc.FailTaskLog(actLog.ID, err.Error())
+			}
 			return nil, fmt.Errorf("begin transaction: %w", err)
 		}
 		defer func() {
@@ -96,8 +117,18 @@ func (s *PathAnalysisService) RunAutoLink(libraryID int64, onlyUnlinked, dryRun 
 		}()
 	}
 
-	for _, v := range videos {
+	for i, v := range videos {
 		report.VideosAnalyzed++
+
+		// Update activity progress every 1000 videos
+		if actLog != nil && total > 0 && (i+1)%1000 == 0 {
+			progress := int(float64(i+1) / float64(total) * 100)
+			if logErr := actSvc.UpdateProgressLog(actLog.ID, progress,
+				fmt.Sprintf("Processed %d/%d — %d performers, %d tags, %d studios linked so far",
+					i+1, total, report.PerformersLinked, report.TagsApplied, report.StudiosLinked)); logErr != nil {
+				log.Printf("[PathAnalysis] progress update failed: %v", logErr)
+			}
+		}
 
 		// Find the best (longest-matching) library root for this video
 		libRoot := v.libPath
@@ -139,9 +170,17 @@ func (s *PathAnalysisService) RunAutoLink(libraryID int64, onlyUnlinked, dryRun 
 
 	if !dryRun {
 		if err := tx.Commit(); err != nil {
+			if actLog != nil {
+				actSvc.FailTaskLog(actLog.ID, err.Error())
+			}
 			return nil, fmt.Errorf("commit: %w", err)
 		}
 		tx = nil
+		if actLog != nil {
+			actSvc.CompleteTaskLog(actLog.ID,
+				fmt.Sprintf("Linked %d performers, %d tags, %d studios across %d videos",
+					report.PerformersLinked, report.TagsApplied, report.StudiosLinked, total))
+		}
 	}
 
 	return report, nil
