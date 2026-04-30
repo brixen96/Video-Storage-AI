@@ -2440,10 +2440,6 @@ func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{
 	case "find_untagged_videos":
 		libFilter, _ := args["library_name"].(string)
 		perfFilter, _ := args["performer"].(string)
-		limit := intArg(args, "limit", 20)
-		if limit > 50 {
-			limit = 50
-		}
 
 		var conds []string
 		var qArgs []interface{}
@@ -2457,35 +2453,45 @@ func (s *AICompanionService) ExecuteTool(name string, args map[string]interface{
 			qArgs = append(qArgs, "%"+perfFilter+"%")
 		}
 		where := "WHERE " + strings.Join(conds, " AND ")
-		qArgs = append(qArgs, limit)
 
-		rows, err := s.db.Query(fmt.Sprintf(`
-			SELECT v.id, v.title, COALESCE(v.thumbnail_path,''), COALESCE(v.rating,0),
-			       COALESCE((SELECT GROUP_CONCAT(p.name,', ') FROM video_performers vp JOIN performers p ON p.id=vp.performer_id WHERE vp.video_id=v.id),'') AS performers
-			FROM videos v LEFT JOIN libraries l ON l.id=v.library_id
-			%s ORDER BY v.created_at DESC LIMIT ?`, where), qArgs...)
+		// Get total count
+		var totalCount int
+		s.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM videos v LEFT JOIN libraries l ON l.id=v.library_id %s`, where), qArgs...).Scan(&totalCount)
+
+		// Get compact ID list (max 200) and a 5-item sample for display
+		idRows, err := s.db.Query(fmt.Sprintf(`SELECT v.id FROM videos v LEFT JOIN libraries l ON l.id=v.library_id %s ORDER BY v.created_at DESC LIMIT 200`, where), qArgs...)
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-		results := []map[string]interface{}{}
-		for rows.Next() {
+		defer idRows.Close()
+		var videoIDs []int64
+		for idRows.Next() {
 			var id int64
-			var title, thumbPath, performers string
-			var rating int
-			if rows.Scan(&id, &title, &thumbPath, &rating, &performers) == nil {
-				results = append(results, map[string]interface{}{
-					"id": id, "title": title,
-					"thumbnail_path": thumbPath,
-					"rating":         rating,
-					"performers":     performers,
-				})
+			if idRows.Scan(&id) == nil {
+				videoIDs = append(videoIDs, id)
 			}
 		}
+
+		// 5-item sample with title only (no thumbnail paths)
+		sampleArgs := append(qArgs, 5)
+		sampleRows, _ := s.db.Query(fmt.Sprintf(`SELECT v.id, v.title FROM videos v LEFT JOIN libraries l ON l.id=v.library_id %s ORDER BY v.created_at DESC LIMIT ?`, where), sampleArgs...)
+		var sample []map[string]interface{}
+		if sampleRows != nil {
+			defer sampleRows.Close()
+			for sampleRows.Next() {
+				var id int64
+				var title string
+				if sampleRows.Scan(&id, &title) == nil {
+					sample = append(sample, map[string]interface{}{"id": id, "title": title})
+				}
+			}
+		}
+
 		return map[string]interface{}{
-			"untagged_videos": results,
-			"count":           len(results),
-			"note":            "For each video, call suggest_tags_for_video(video_id) then apply_tags_to_video(video_id, tags) to tag it.",
+			"total_count": totalCount,
+			"video_ids":   videoIDs,
+			"sample":      sample,
+			"note":        "Pass video_ids to bulk_apply_tags to tag all at once. Confirm with the user first.",
 		}, nil
 
 	case "get_library_health":
@@ -3236,7 +3242,18 @@ You can interact with the library: suggest_tags_for_video (recommends tags based
 You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
 For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
 
-Keep responses concise and formatted with markdown. Use bullet points and bold text for readability.
+## Memory & Architecture
+Your memory (save_memory/recall_memories tools) is stored in the local SQLite database on this PC — NOT on OpenRouter or any cloud. OpenRouter is stateless and handles inference only; it has zero persistent state between requests. All persistence (memories, chat history, library data) lives entirely in the app's local database.
+
+## Saving Memories
+When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.
+
+## Response Style
+- Be concise. Short bullet points over long paragraphs.
+- NEVER use markdown tables — the chat UI does not render them. Use bullet lists instead.
+- Never pad responses with disclaimers, caveats, or repetition.
+- If a tool gives you the answer, present the result directly — don't narrate what you're doing.
+- When listing videos or large result sets, show at most 5 items then summarise the rest ("...and X more").
 
 ` + appContext
 
@@ -3434,7 +3451,18 @@ You can interact with the library: suggest_tags_for_video (recommends tags based
 You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
 For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
 
-Keep responses concise and formatted with markdown. Use bullet points and bold text for readability.
+## Memory & Architecture
+Your memory (save_memory/recall_memories tools) is stored in the local SQLite database on this PC — NOT on OpenRouter or any cloud. OpenRouter is stateless and handles inference only; it has zero persistent state between requests. All persistence (memories, chat history, library data) lives entirely in the app's local database.
+
+## Saving Memories
+When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.
+
+## Response Style
+- Be concise. Short bullet points over long paragraphs.
+- NEVER use markdown tables — the chat UI does not render them. Use bullet lists instead.
+- Never pad responses with disclaimers, caveats, or repetition.
+- If a tool gives you the answer, present the result directly — don't narrate what you're doing.
+- When listing videos or large result sets, show at most 5 items then summarise the rest ("...and X more").
 
 ` + appContext
 
@@ -3492,6 +3520,7 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 		hasToolCalls := false
 
 		scanner := bufio.NewScanner(resp.Body)
+		scanner.Buffer(make([]byte, 512*1024), 512*1024) // 512KB per line — handles large tool result chunks
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.HasPrefix(line, "data: ") {
@@ -3551,6 +3580,10 @@ Keep responses concise and formatted with markdown. Use bullet points and bold t
 			}
 		}
 		resp.Body.Close()
+
+		if err := scanner.Err(); err != nil {
+			return fmt.Errorf("stream read error: %w", err)
+		}
 
 		if !hasToolCalls {
 			// Final answer already streamed; ensure non-empty
