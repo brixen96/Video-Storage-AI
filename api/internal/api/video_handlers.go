@@ -594,11 +594,13 @@ func refreshVideoMetadata(c *gin.Context) {
 }
 
 // bulkVideoOperation handles POST /api/v1/videos/bulk
-// Supported operations: "delete", "fetch_metadata", "analyze_path"
+// Supported operations: "delete", "fetch_metadata", "analyze_path", "mark_watched", "mark_not_interested"
 func bulkVideoOperation(c *gin.Context) {
 	var req struct {
-		Operation string  `json:"operation"`
-		VideoIDs  []int64 `json:"video_ids"`
+		Operation     string  `json:"operation"`
+		VideoIDs      []int64 `json:"video_ids"`
+		Watched       *bool   `json:"watched,omitempty"`
+		NotInterested *bool   `json:"not_interested,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondBadRequest(c, "invalid request", err)
@@ -666,6 +668,38 @@ func bulkVideoOperation(c *gin.Context) {
 			log.Printf("[Bulk] analyze_path: %d videos → %d performers, %d tags, %d studios", len(req.VideoIDs), perfs, tags, studios)
 		}()
 		respondSuccess(c, nil, fmt.Sprintf("Path analysis started for %d videos", len(req.VideoIDs)))
+
+	case "mark_watched":
+		if req.Watched == nil {
+			respondBadRequest(c, "watched field required", nil)
+			return
+		}
+		db := database.GetDB()
+		updated := 0
+		for _, id := range req.VideoIDs {
+			if _, err := db.Exec(`UPDATE videos SET watched = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, *req.Watched, id); err != nil {
+				log.Printf("[Bulk] mark_watched video %d: %v", id, err)
+			} else {
+				updated++
+			}
+		}
+		respondSuccess(c, gin.H{"updated": updated}, fmt.Sprintf("Marked %d videos as watched=%v", updated, *req.Watched))
+
+	case "mark_not_interested":
+		if req.NotInterested == nil {
+			respondBadRequest(c, "not_interested field required", nil)
+			return
+		}
+		db := database.GetDB()
+		updated := 0
+		for _, id := range req.VideoIDs {
+			if _, err := db.Exec(`UPDATE videos SET not_interested = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, *req.NotInterested, id); err != nil {
+				log.Printf("[Bulk] mark_not_interested video %d: %v", id, err)
+			} else {
+				updated++
+			}
+		}
+		respondSuccess(c, gin.H{"updated": updated}, fmt.Sprintf("Updated %d videos", updated))
 
 	default:
 		respondBadRequest(c, "unknown operation: "+req.Operation, nil)

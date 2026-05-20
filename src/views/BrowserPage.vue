@@ -113,9 +113,21 @@
 												<font-awesome-icon :icon="['fas', 'folder-plus']" class="me-2" />
 												Add to List
 											</button>
+											<button class="btn btn-sm btn-outline-info me-2" @click="markSelectedWatched(tabId, true)">
+												<font-awesome-icon :icon="['fas', 'eye']" class="me-2" />
+												Mark Watched
+											</button>
+											<button class="btn btn-sm btn-outline-warning me-2" @click="markSelectedWatched(tabId, false)">
+												<font-awesome-icon :icon="['fas', 'eye-slash']" class="me-2" />
+												Unmark Watched
+											</button>
+											<button class="btn btn-sm btn-outline-danger me-2" @click="markSelectedNotInterested(tabId)">
+												<font-awesome-icon :icon="['fas', 'ban']" class="me-2" />
+												Not Interested
+											</button>
 											<button class="btn btn-sm btn-outline-secondary" @click="clearSelection(tabId)">
 												<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
-												Clear Selection
+												Clear
 											</button>
 										</div>
 									</div>
@@ -1266,6 +1278,64 @@ export default {
 			this.addToListModal.video = null
 			this.addToListModal.videos = selectedVideos
 			this.addToListModal.visible = true
+		},
+
+		async markSelectedWatched(tabId, watched) {
+			const tab = this.tabs.find((t) => t.id === tabId)
+			if (!tab) return
+
+			const selectedPaths = this.selectedItems[tabId] || []
+			const selectedVideos = tab.items.filter(
+				(item) => selectedPaths.includes(item.path) && item.type === 'video' && item.id
+			)
+
+			if (selectedVideos.length === 0) {
+				this.$toast.warning('No Valid Videos', 'Selected videos need to be scanned first.')
+				return
+			}
+
+			const ids = selectedVideos.map((v) => v.id)
+			const label = watched ? 'watched' : 'unwatched'
+			const toastId = this.$toast.loading('Updating...', `Marking ${ids.length} video${ids.length !== 1 ? 's' : ''} as ${label}`)
+
+			try {
+				await videosAPI.bulk('mark_watched', ids, { watched })
+				selectedVideos.forEach((v) => { v.watched = watched })
+				this.$toast.removeToast(toastId)
+				this.$toast.success('Done', `${ids.length} video${ids.length !== 1 ? 's' : ''} marked as ${label}`, 4000)
+			} catch (error) {
+				this.$toast.removeToast(toastId)
+				this.$toast.error('Failed', 'Could not update watched status', 4000)
+			}
+		},
+
+		async markSelectedNotInterested(tabId) {
+			const tab = this.tabs.find((t) => t.id === tabId)
+			if (!tab) return
+
+			const selectedPaths = this.selectedItems[tabId] || []
+			const selectedVideos = tab.items.filter(
+				(item) => selectedPaths.includes(item.path) && item.type === 'video' && item.id
+			)
+
+			if (selectedVideos.length === 0) {
+				this.$toast.warning('No Valid Videos', 'Selected videos need to be scanned first.')
+				return
+			}
+
+			const ids = selectedVideos.map((v) => v.id)
+			const toastId = this.$toast.loading('Updating...', `Marking ${ids.length} video${ids.length !== 1 ? 's' : ''} as not interested`)
+
+			try {
+				await videosAPI.bulk('mark_not_interested', ids, { not_interested: true })
+				selectedVideos.forEach((v) => { v.not_interested = true })
+				this.$toast.removeToast(toastId)
+				this.$toast.success('Done', `${ids.length} video${ids.length !== 1 ? 's' : ''} marked as not interested`, 4000)
+				this.clearSelection(tabId)
+			} catch (error) {
+				this.$toast.removeToast(toastId)
+				this.$toast.error('Failed', 'Could not update status', 4000)
+			}
 		},
 
 		async removeFromList(item, list) {
