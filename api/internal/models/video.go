@@ -96,6 +96,7 @@ type VideoSearchQuery struct {
 	NotInterested *bool   `json:"not_interested" form:"not_interested"`
 	InEditList    *bool   `json:"in_edit_list" form:"in_edit_list"`
 	ShowMissing   bool    `json:"show_missing" form:"show_missing"` // Include missing (file not found) videos
+	NoPerformer   bool    `json:"no_performer" form:"no_performer"`  // Only videos with no performer linked
 	SortBy        string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
 	SortOrder     string  `json:"sort_order" form:"sort_order"` // asc, desc
 	Page          int     `json:"page" form:"page"`

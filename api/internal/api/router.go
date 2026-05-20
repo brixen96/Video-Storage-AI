@@ -92,12 +92,17 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.POST("/generate-previews", generateAllPreviews)    // Generate preview storyboards for all videos
 			videos.POST("/generate-thumbnails", generateVideoThumbnails) // Generate thumbnails for all videos
 			videos.POST("/path-analysis", runPathAnalysis)               // Run path-based auto-linking
+			videos.POST("/bulk", bulkVideoOperation)                      // Bulk operations: delete, fetch_metadata, analyze_path
+			videos.POST("/:id/analyze-path", analyzeSingleVideoPath)     // Run path analysis for a single video
+			videos.POST("/:id/fetch", refreshVideoMetadata)              // Re-read file metadata from disk via ffprobe
 			videos.POST("/:id/open-in-explorer", openInExplorer)   // Open video location in file explorer
 			videos.GET("/:id/stream", streamVideoByID)             // Stream video by ID
 			videos.PATCH("/marks-by-path", updateVideoMarksByPath) // Update marks by file path
 			videos.PATCH("/content-type/folder", updateFolderContentType) // Update content type for folder recursively
 			videos.PATCH("/performer/folder", linkPerformerToFolder)       // Link performer to all videos in a folder
 			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
+			videos.GET("/duplicates", getVideoDuplicates)           // Find duplicate videos by file size + duration
+			videos.POST("/quality-compare", qualityCompareVideos)   // Compare quality scores for a set of videos
 			videos.GET("/:id/locate", locateVideoFile)              // Locate missing video by filename search
 			videos.PATCH("/:id/remap", remapVideoPath)              // Remap video to new file path
 			videos.POST("/missing/cleanup", deleteMissingVideos)    // Bulk-delete missing video records
@@ -223,6 +228,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/analyze-thumbnail-quality", analyzeThumbnailQuality) // Analyze thumbnail quality
 
 			// AI Companion endpoints
+			ai.POST("/health-check", runVideoHealthCheck)    // Trigger AI video health check
 			ai.POST("/chat", aiCompanionChat)                // Chat with AI Companion
 			ai.POST("/chat/stream", aiCompanionChatStream)   // Chat with streaming SSE response
 			ai.GET("/chat/history", getChatHistory)          // Get persistent chat history

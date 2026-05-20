@@ -183,6 +183,8 @@ import {
 	faPlusCircle,
 	faMinusCircle,
 	faVideoSlash,
+	faUserSlash,
+	faHeartPulse,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -378,7 +380,9 @@ library.add(
 	faFolderMinus,
 	faPlusCircle,
 	faMinusCircle,
-	faVideoSlash
+	faVideoSlash,
+	faUserSlash,
+	faHeartPulse
 )
 
 export default FontAwesomeIcon

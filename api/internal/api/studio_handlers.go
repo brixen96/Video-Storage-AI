@@ -27,11 +27,11 @@ func getStudios(c *gin.Context) {
 	studios, err := svc.GetAll()
 	if err != nil {
 		log.Printf("Failed to get studios: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve studios"})
+		respondInternalError(c, "Failed to retrieve studios", err)
 		return
 	}
 
-	c.JSON(http.StatusOK, studios)
+	respondSuccess(c, studios, "")
 }
 
 // getStudio handles GET /api/v1/studios/:id

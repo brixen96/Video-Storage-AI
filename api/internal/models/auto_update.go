@@ -138,6 +138,7 @@ type DashboardStats struct {
 	RunningTasks            int `json:"running_tasks"`
 	PendingTasks            int `json:"pending_tasks"`
 	RecentNewItems          int `json:"recent_new_items"` // New items in last 24h
+	VideosWithoutPerformer  int `json:"videos_without_performer"`
 }
 
 // AutoUpdateConfigUpdate represents an update request for auto-update config

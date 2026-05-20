@@ -9,6 +9,7 @@
 		<ActivityTracker />
 		<AICompanionChat />
 		<GlobalSearch />
+		<ToastNotification ref="toast" />
 	</div>
 </template>
 
@@ -17,6 +18,7 @@ import { defineAsyncComponent } from 'vue'
 import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
 import GlobalSearch from '@/components/GlobalSearch.vue'
+import ToastNotification from '@/components/ToastNotification.vue'
 
 // Lazy load heavy component
 const AICompanionChat = defineAsyncComponent(() => import('@/components/AICompanionChat.vue'))
@@ -28,6 +30,7 @@ export default {
 		ActivityTracker,
 		AICompanionChat,
 		GlobalSearch,
+		ToastNotification,
 	},
 }
 </script>

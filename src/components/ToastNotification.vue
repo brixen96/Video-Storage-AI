@@ -1,26 +1,24 @@
 <template>
-	<teleport to="body">
-		<div class="toast-container">
-			<transition-group name="toast">
-				<div v-for="toast in toasts" :key="toast.id" :class="['toast', `toast-${toast.type}`]">
-					<div class="toast-icon">
-						<font-awesome-icon v-if="toast.type === 'success'" :icon="['fas', 'check-circle']" />
-						<font-awesome-icon v-else-if="toast.type === 'error'" :icon="['fas', 'exclamation-triangle']" />
-						<font-awesome-icon v-else-if="toast.type === 'warning'" :icon="['fas', 'exclamation-circle']" />
-						<font-awesome-icon v-else-if="toast.type === 'info'" :icon="['fas', 'info-circle']" />
-						<font-awesome-icon v-else :icon="['fas', 'spinner']" spin />
-					</div>
-					<div class="toast-content">
-						<div class="toast-title">{{ toast.title }}</div>
-						<div v-if="toast.message" class="toast-message">{{ toast.message }}</div>
-					</div>
-					<button class="toast-close" @click="removeToast(toast.id)">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
+	<div class="toast-container">
+		<transition-group name="toast">
+			<div v-for="toast in toasts" :key="toast.id" :class="['toast', `toast-${toast.type}`]">
+				<div class="toast-icon">
+					<font-awesome-icon v-if="toast.type === 'success'" :icon="['fas', 'check-circle']" />
+					<font-awesome-icon v-else-if="toast.type === 'error'" :icon="['fas', 'exclamation-triangle']" />
+					<font-awesome-icon v-else-if="toast.type === 'warning'" :icon="['fas', 'exclamation-circle']" />
+					<font-awesome-icon v-else-if="toast.type === 'info'" :icon="['fas', 'info-circle']" />
+					<font-awesome-icon v-else :icon="['fas', 'spinner']" spin />
 				</div>
-			</transition-group>
-		</div>
-	</teleport>
+				<div class="toast-content">
+					<div class="toast-title">{{ toast.title }}</div>
+					<div v-if="toast.message" class="toast-message">{{ toast.message }}</div>
+				</div>
+				<button class="toast-close" @click="removeToast(toast.id)">
+					<font-awesome-icon :icon="['fas', 'times']" />
+				</button>
+			</div>
+		</transition-group>
+	</div>
 </template>
 
 <script>

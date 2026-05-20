@@ -22,6 +22,7 @@
 			<DashboardStatCard :value="stats.total_threads" label="Threads" icon="comments" color="pink" to="/scraper" />
 			<DashboardStatCard :value="stats.total_performers" label="Performers" icon="users" color="green" to="/performers" />
 			<DashboardStatCard :value="stats.recent_new_items" label="New (24h)" icon="bell" color="orange" />
+			<DashboardStatCard :value="stats.videos_without_performer" label="Unlinked Videos" icon="user-slash" color="pink" to="/videos?no_performer=true" />
 		</div>
 
 		<!-- Top Bar: Running Tasks + Active Scrapers -->

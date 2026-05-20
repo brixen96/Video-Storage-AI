@@ -75,188 +75,23 @@
 
 		<div class="vp-page-content">
 			<!-- Left Sidebar (Filters) -->
-			<div v-if="showFilters" class="vp-filter-sidebar" :class="{ collapsed: !showFilters }">
-				<div class="vp-filter-panel">
-					<div class="vp-filter-header">
-						<div class="vp-filter-title-group">
-							<h3>
-								<font-awesome-icon :icon="['fas', 'sliders-h']" />
-								Filters & Sort
-							</h3>
-							<span v-if="activeFiltersCount > 0" class="vp-active-filters-badge">{{ activeFiltersCount }}</span>
-						</div>
-						<button class="vp-clear-filters-btn" @click="clearFilters" title="Clear all filters">
-							<font-awesome-icon :icon="['fas', 'times-circle']" />
-						</button>
-					</div>
-
-					<!-- Sort Section -->
-					<div class="vp-filter-section">
-						<div class="vp-section-header">
-							<font-awesome-icon :icon="['fas', 'sort']" />
-							<span>Sort</span>
-						</div>
-						<div class="vp-sort-controls">
-							<select v-model="sortBy" class="form-select form-select-sm" @change="loadVideos">
-								<option value="created_at">📅 Date Added</option>
-								<option value="title">🔤 Title</option>
-								<option value="duration">⏱️ Duration</option>
-								<option value="play_count">👁️ Views</option>
-							</select>
-							<div class="vp-sort-order-toggle">
-								<button :class="{ active: sortOrder === 'desc' }" @click=";(sortOrder = 'desc'), loadVideos()" title="Descending">
-									<font-awesome-icon :icon="['fas', 'sort-amount-down']" />
-								</button>
-								<button :class="{ active: sortOrder === 'asc' }" @click=";(sortOrder = 'asc'), loadVideos()" title="Ascending">
-									<font-awesome-icon :icon="['fas', 'sort-amount-up']" />
-								</button>
-							</div>
-						</div>
-					</div>
-
-					<!-- Content Filters -->
-					<div class="vp-filter-section">
-						<div class="vp-section-header">
-							<font-awesome-icon :icon="['fas', 'filter']" />
-							<span>Content</span>
-						</div>
-
-						<div v-if="performers.length > 0" class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'user']" />
-								Performers
-								<span v-if="filteredPerformers.length !== performers.length" class="vp-filter-note">({{ filteredPerformers.length }})</span>
-							</label>
-							<select v-model="filters.performerId" class="form-select form-select-sm" @change="loadVideos">
-								<option :value="null">All Performers</option>
-								<option v-for="performer in filteredPerformers" :key="performer.id" :value="performer.id">{{ performer.name }}</option>
-							</select>
-						</div>
-
-						<div v-if="studios.length > 0" class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'building']" />
-								Studios
-							</label>
-							<select v-model="filters.studioId" class="form-select form-select-sm" @change="onStudioChange">
-								<option :value="null">All Studios</option>
-								<option v-for="studio in studios" :key="studio.id" :value="studio.id">{{ studio.name }}</option>
-							</select>
-						</div>
-
-						<div v-if="filteredGroups.length > 0" class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'layer-group']" />
-								Groups
-							</label>
-							<select v-model="filters.groupId" class="form-select form-select-sm" @change="loadVideos">
-								<option :value="null">All Groups</option>
-								<option v-for="group in filteredGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
-							</select>
-						</div>
-
-						<div v-if="filteredTags.length > 0" class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'tags']" />
-								Tags
-								<span v-if="filters.selectedTags.length > 0" class="vp-filter-value">{{ filters.selectedTags.length }} selected</span>
-							</label>
-							<div class="vp-tags-multiselect">
-								<div
-									v-for="tag in filteredTags"
-									:key="tag.id"
-									class="vp-tag-item"
-									:class="{ selected: filters.selectedTags.includes(tag.id) }"
-									@click="toggleTag(tag.id)"
-								>
-									<font-awesome-icon v-if="tag.icon" :icon="['fas', tag.icon]" />
-									<span>{{ tag.name }}</span>
-								</div>
-							</div>
-						</div>
-
-						<div class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'list']" />
-								Content Type
-							</label>
-							<select v-model="filters.contentType" class="form-select form-select-sm" @change="loadVideos">
-								<option :value="null">All Types</option>
-								<option value="regular">Regular</option>
-								<option value="zoo">Zoo</option>
-								<option value="3d">3D</option>
-							</select>
-						</div>
-
-						<div class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'calendar']" />
-								Date Range
-							</label>
-							<input v-model="filters.dateFrom" type="date" class="form-control form-control-sm mb-2" placeholder="From" @change="loadVideos" />
-							<input v-model="filters.dateTo" type="date" class="form-control form-control-sm" placeholder="To" @change="loadVideos" />
-						</div>
-					</div>
-
-					<!-- Media Properties -->
-					<div class="vp-filter-section">
-						<div class="vp-section-header">
-							<font-awesome-icon :icon="['fas', 'cog']" />
-							<span>Media Properties</span>
-						</div>
-
-						<div class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'clock']" />
-								Duration
-								<span v-if="filters.minDuration || filters.maxDuration" class="vp-filter-value">
-									{{ filters.minDuration || 0 }}m - {{ filters.maxDuration || 180 }}m
-								</span>
-							</label>
-							<div class="vp-range-slider">
-								<input v-model.number="filters.minDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-min" @change="loadVideos" />
-								<input v-model.number="filters.maxDuration" type="range" min="0" max="180" step="5" class="vp-slider vp-slider-max" @change="loadVideos" />
-								<div class="vp-slider-track"></div>
-							</div>
-						</div>
-
-						<div class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'expand']" />
-								Resolution
-							</label>
-							<select v-model="filters.resolution" class="form-select form-select-sm" @change="loadVideos">
-								<option value="">All Resolutions</option>
-								<option value="3840x2160">🎬 4K (2160p)</option>
-								<option value="1920x1080">📺 1080p (Full HD)</option>
-								<option value="1280x720">📱 720p (HD)</option>
-							</select>
-						</div>
-
-						<div class="vp-filter-group">
-							<label>
-								<font-awesome-icon :icon="['fas', 'hdd']" />
-								File Size
-								<span v-if="filters.minSize || filters.maxSize" class="vp-filter-value"> {{ filters.minSize || 0 }}MB - {{ filters.maxSize || 10000 }}MB </span>
-							</label>
-							<div class="vp-range-slider">
-								<input v-model.number="filters.minSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-min" @change="loadVideos" />
-								<input v-model.number="filters.maxSize" type="range" min="0" max="10000" step="100" class="vp-slider vp-slider-max" @change="loadVideos" />
-								<div class="vp-slider-track"></div>
-							</div>
-						</div>
-
-						<div class="vp-filter-group">
-							<label class="vp-toggle-label" style="cursor:pointer;" @click="filters.showMissing = !filters.showMissing; loadVideos()">
-								<font-awesome-icon :icon="['fas', 'video-slash']" :class="filters.showMissing ? 'text-danger' : 'text-muted'" />
-								Show Missing Files
-								<span v-if="filters.showMissing" class="badge bg-danger ms-1">ON</span>
-							</label>
-							<small class="text-muted d-block" style="font-size:0.75em;">Files no longer found on disk</small>
-						</div>
-					</div>
-				</div>
-			</div>
+			<VideoFilterSidebar
+				v-if="showFilters"
+				:performers="performers"
+				:filtered-performers="filteredPerformers"
+				:studios="studios"
+				:filtered-studios="filteredStudios"
+				:groups="groups"
+				:filtered-groups="filteredGroups"
+				:tags="tags"
+				:filtered-tags="filteredTags"
+				:filters="filters"
+				:active-filters-count="activeFiltersCount"
+				v-model:sort-by="sortBy"
+				v-model:sort-order="sortOrder"
+				@change="loadVideos"
+				@clear="clearFilters"
+			/>
 
 			<!-- Main Content Area -->
 			<div ref="mainContent" class="vp-main-content p-0 m-0" :class="{ 'full-width': !showFilters }">
@@ -371,108 +206,14 @@
 		</div>
 
 		<!-- Context Menu -->
-		<div v-if="contextMenu.show" class="vp-context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
-			<!-- Scraped video options -->
-			<template v-if="contextMenu.video && contextMenu.video.is_scraped">
-				<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'play']" />
-					Watch
-				</div>
-				<div class="vp-context-menu-item" @click="openScrapedInFirefox(contextMenu.video)">
-					<font-awesome-icon :icon="['fab', 'firefox-browser']" />
-					Open in Firefox
-				</div>
-				<div class="vp-context-menu-item" @click="downloadScrapedVideo(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'cloud-download-alt']" />
-					Download
-				</div>
-				<div class="vp-context-menu-item" @click="copyVideoUrl(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'copy']" />
-					Copy URL
-				</div>
-				<div class="vp-context-menu-item" @click="openAddToListModal(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'folder-plus']" />
-					Add to List...
-				</div>
-				<div class="vp-context-menu-item text-muted" style="font-size: 0.8em; pointer-events: none;">
-					<font-awesome-icon :icon="['fas', 'globe']" />
-					Source: {{ contextMenu.video.source }}
-				</div>
-			</template>
-			<!-- Regular video options -->
-			<template v-else>
-				<div class="vp-context-menu-item" @click="playVideo(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'play']" />
-					Play
-				</div>
-				<div class="vp-context-menu-item" @click="quickToggleFavorite(contextMenu.video); hideContextMenu()">
-					<font-awesome-icon :icon="[contextMenu.video?.is_favorite ? 'fas' : 'far', 'heart']" />
-					{{ contextMenu.video?.is_favorite ? 'Unfavorite' : 'Favorite' }}
-				</div>
-				<div class="vp-context-menu-item" @click="editMetadata(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'edit']" />
-					Edit Metadata
-				</div>
-				<div class="vp-context-menu-item" @click="fetchMetadata(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'download']" />
-					Fetch Metadata
-				</div>
-				<div class="vp-context-menu-item" @click="openTagModal(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'tag']" />
-					Add Tags
-				</div>
-				<div class="vp-context-menu-item" @click="openAddToListModal(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'folder-plus']" />
-					Add to List...
-				</div>
-				<div class="vp-context-menu-item" @click="openInExplorer(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'folder-open']" />
-					Open in Explorer
-				</div>
-				<div
-					v-if="contextMenu.video?.linked_video_id"
-					class="vp-context-menu-item text-info"
-					@click="openLinkedVideo(contextMenu.video)"
-				>
-					<font-awesome-icon :icon="['fas', 'link']" />
-					Open Linked Video
-				</div>
-				<!-- Missing file actions -->
-				<template v-if="contextMenu.video?.is_missing">
-					<div class="vp-context-menu-divider"></div>
-					<div class="vp-context-menu-item text-warning" @click="openLocateModal(contextMenu.video)">
-						<font-awesome-icon :icon="['fas', 'search-location']" />
-						Locate File...
-					</div>
-					<div class="vp-context-menu-item text-warning" @click="openRemapModal(contextMenu.video)">
-						<font-awesome-icon :icon="['fas', 'route']" />
-						Remap Path...
-					</div>
-					<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
-						<font-awesome-icon :icon="['fas', 'trash']" />
-						Delete Record
-					</div>
-				</template>
-				<div class="vp-context-menu-divider"></div>
-				<div class="vp-context-menu-rate">
-					<span class="rate-label">Rate</span>
-					<font-awesome-icon
-						v-for="star in 5"
-						:key="star"
-						:icon="[star <= (contextMenuHoverRating || contextMenu.video?.rating || 0) ? 'fas' : 'far', 'star']"
-						class="ctx-star"
-						:class="{ 'ctx-star-filled': star <= (contextMenuHoverRating || contextMenu.video?.rating || 0) }"
-						@mouseenter="contextMenuHoverRating = star"
-						@mouseleave="contextMenuHoverRating = 0"
-						@click.stop="rateVideo(contextMenu.video, star)"
-					/>
-				</div>
-				<div class="vp-context-menu-item danger" @click="deleteVideo(contextMenu.video)">
-					<font-awesome-icon :icon="['fas', 'trash']" />
-					Delete
-				</div>
-			</template>
-		</div>
+		<VideoContextMenu
+			:show="contextMenu.show"
+			:x="contextMenu.x"
+			:y="contextMenu.y"
+			:video="contextMenu.video"
+			@action="handleContextMenuAction"
+			@hide="hideContextMenu"
+		/>
 
 		<!-- Bulk Actions Modal -->
 		<div v-if="showBulkActions" class="modal show d-block" tabindex="-1">
@@ -491,6 +232,10 @@
 							<button class="btn btn-outline-info" @click="bulkFetchMetadata">
 								<font-awesome-icon :icon="['fas', 'download']" />
 								Fetch Metadata
+							</button>
+							<button class="btn btn-outline-warning" @click="bulkAnalyzePath">
+								<font-awesome-icon :icon="['fas', 'link']" />
+								Analyze Path
 							</button>
 							<button class="btn btn-outline-danger" @click="bulkDelete">
 								<font-awesome-icon :icon="['fas', 'trash']" />
@@ -632,6 +377,8 @@
 <script>
 import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
+import VideoFilterSidebar from '@/components/VideoFilterSidebar.vue'
+import VideoContextMenu from '@/components/VideoContextMenu.vue'
 import { videosAPI, librariesAPI, scrapersAPI, jdownloaderAPI, getAssetURL } from '@/services/api'
 import settingsService from '@/services/settingsService'
 import { BrowserPaginationControls } from '@/components/browser'
@@ -650,6 +397,8 @@ export default {
 	name: 'VideosPage',
 	components: {
 		VideoCard,
+		VideoFilterSidebar,
+		VideoContextMenu,
 		VideoPlayerModal,
 		EditMetadataModal,
 		AddTagModal,
@@ -682,6 +431,7 @@ export default {
 				hasPreview: null,
 				missingMetadata: null,
 				showMissing: false,
+				noPerformer: false,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,
@@ -699,7 +449,6 @@ export default {
 				y: 0,
 				video: null,
 			},
-			contextMenuHoverRating: 0,
 			addToListModal: {
 				visible: false,
 				video: null,
@@ -757,6 +506,7 @@ export default {
 			if (this.filters.hasPreview) count++
 			if (this.filters.missingMetadata) count++
 			if (this.filters.showMissing) count++
+			if (this.filters.noPerformer) count++
 			if (this.filters.dateFrom) count++
 			if (this.filters.dateTo) count++
 			if (this.filters.minSize) count++
@@ -788,10 +538,12 @@ export default {
 			return groups
 		},
 		filteredTags() {
-			if (this.filters.contentType === null) {
+			if (!this.filters.contentType) {
 				return this.tags
 			}
-			return this.tags.filter(t => t.category === this.filters.contentType)
+			// Show tags whose category matches the selected content type, or tags with no
+			// category (they apply globally and should always be visible).
+			return this.tags.filter(tag => !tag.category || tag.category === this.filters.contentType)
 		},
 	},
 	created() {
@@ -802,6 +554,9 @@ export default {
 		this.formatDate = formatters.formatDate
 	},
 	mounted() {
+		if (this.$route.query.no_performer === 'true') {
+			this.filters.noPerformer = true
+		}
 		this.loadVideos()
 		this.loadPerformers()
 		this.loadStudios()
@@ -828,11 +583,16 @@ export default {
 	},
 	watch: {
 		'filters.contentType'() {
-			// Reset performer, studio, group, and tag filters when content type changes
+			// Reset performer/studio/group when content type changes (they are filtered by category).
 			this.filters.performerId = null
 			this.filters.studioId = null
 			this.filters.groupId = null
-			this.filters.selectedTags = []
+			// Drop any selected tags that don't belong to the new content type.
+			// filteredTags already reflects the new contentType at this point.
+			if (this.filters.contentType && this.filters.selectedTags.length > 0) {
+				const validIds = new Set(this.filteredTags.map(t => t.id))
+				this.filters.selectedTags = this.filters.selectedTags.filter(id => validIds.has(id))
+			}
 		},
 	},
 	methods: {
@@ -871,6 +631,7 @@ export default {
 					has_preview: this.filters.hasPreview || undefined,
 					missing_metadata: this.filters.missingMetadata || undefined,
 					show_missing: this.filters.showMissing || undefined,
+					no_performer: this.filters.noPerformer || undefined,
 					date_from: this.filters.dateFrom || undefined,
 					date_to: this.filters.dateTo || undefined,
 					min_size: this.filters.minSize ? this.filters.minSize * 1024 * 1024 : undefined,
@@ -1024,11 +785,6 @@ export default {
 				console.error('Failed to load tags:', error)
 			}
 		},
-		onStudioChange() {
-			// Reset group filter when studio changes
-			this.filters.groupId = null
-			this.loadVideos()
-		},
 		async loadLibraries() {
 			try {
 				const response = await librariesAPI.getAll()
@@ -1073,6 +829,7 @@ export default {
 				hasPreview: null,
 				missingMetadata: null,
 				showMissing: false,
+				noPerformer: false,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,
@@ -1300,6 +1057,17 @@ export default {
 				this.$toast.error('Bulk fetch failed')
 			}
 		},
+		async bulkAnalyzePath() {
+			try {
+				await videosAPI.bulk('analyze_path', this.selectedItems)
+				this.$toast.success(`Path analysis started for ${this.selectedItems.length} videos`)
+				this.showBulkActions = false
+				this.clearSelection()
+			} catch (error) {
+				console.error('Bulk analyze path failed:', error)
+				this.$toast.error('Bulk path analysis failed')
+			}
+		},
 		bulkDelete() {
 			this.deleteModal.isBulk = true
 			this.deleteModal.show = true
@@ -1374,19 +1142,60 @@ export default {
 			console.log('Toggle favorite:', video)
 			this.$toast.success(`Favorite toggled for ${video.title}`)
 		},
-		async openInExplorer(video) {
-			if (!video.file_path) {
+		async analyzePath(video) {
+			this.hideContextMenu()
+			const loadingId = this.$toast.loading('Analyzing path...', video?.title || '')
+			try {
+				const res = await videosAPI.analyzePath(video.id)
+				const r = res.data || res
+				this.$toast.removeToast(loadingId)
+				if (r.performers_linked === 0 && r.tags_applied === 0 && r.studios_linked === 0) {
+					this.$toast.info('No new links found', 'Path did not match any known performers, tags or studios', 5000)
+				} else {
+					this.$toast.success(
+						'Path analysis complete',
+						`Linked ${r.performers_linked} performer(s), ${r.tags_applied} tag(s), ${r.studios_linked} studio(s)`,
+						6000
+					)
+					this.loadVideos()
+				}
+			} catch (error) {
+				this.$toast.removeToast(loadingId)
+				console.error('Path analysis failed:', error)
+				this.$toast.error('Path analysis failed', error?.response?.data?.message || '', 5000)
+			}
+		},
+		openInExplorer(video) {
+			if (!video?.file_path) {
 				this.$toast.error('File path not available')
 				return
 			}
 
-			try {
-				await videosAPI.openInExplorer(video.id)
-				this.$toast.success('Opening file location...')
-			} catch (error) {
-				console.error('Failed to open in explorer:', error)
-				this.$toast.error('Failed to open file location')
+			const filePath = video.file_path
+			const lastSep = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+			const dir = lastSep > 0 ? filePath.substring(0, lastSep) : filePath
+
+			// execCommand works on HTTP/SMB origins where navigator.clipboard is blocked
+			const execCommandCopy = () => {
+				const el = document.createElement('textarea')
+				el.value = dir
+				el.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0'
+				document.body.appendChild(el)
+				el.select()
+				try { document.execCommand('copy') } catch (e) { /* ignore */ }
+				document.body.removeChild(el)
 			}
+
+			if (navigator.clipboard?.writeText) {
+				navigator.clipboard.writeText(dir).catch(execCommandCopy)
+			} else {
+				execCommandCopy()
+			}
+
+			this.$toast.info('Folder path copied to clipboard', dir, 8000)
+
+			// Best-effort: try backend (works when running as a regular process, not a service)
+			videosAPI.openInExplorer(video.id).catch(() => {})
 		},
 		onVideoPlayerClose() {
 			this.showVideoPlayer = false

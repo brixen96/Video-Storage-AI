@@ -1,15 +1,13 @@
 .toast-container {
 	position: fixed;
-	bottom: 2rem;
-	left: 50%;
-	transform: translateX(-50%);
+	top: 1rem;
+	right: 1rem;
 	z-index: 9999;
 	display: flex;
 	flex-direction: column;
 	gap: 0.75rem;
-	max-width: 500px;
+	max-width: 420px;
 	width: 100%;
-	padding: 0 1rem;
 }
 
 .toast {
@@ -106,10 +104,10 @@
 
 .toast-enter-from {
 	opacity: 0;
-	transform: translateY(100%);
+	transform: translateX(100%);
 }
 
 .toast-leave-to {
 	opacity: 0;
-	transform: translateY(100%);
+	transform: translateX(100%);
 }

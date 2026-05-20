@@ -89,6 +89,7 @@ export const videosAPI = {
 	generateThumbnails: (signal) => api.post('/videos/generate-thumbnails', {}, { signal }),
 	runPathAnalysis: (libraryId = 0, onlyUnlinked = false, dryRun = false, signal) =>
 		api.post('/videos/path-analysis', { library_id: libraryId, only_unlinked: onlyUnlinked, dry_run: dryRun }, { signal }),
+	analyzePath: (id, signal) => api.post(`/videos/${id}/analyze-path`, {}, { signal }),
 	fetchMetadata: (id, signal) => api.post(`/videos/${id}/fetch`, {}, { signal }),
 	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
 	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),
@@ -99,6 +100,8 @@ export const videosAPI = {
 	locateFile: (id) => api.get(`/videos/${id}/locate`),
 	remapPath: (id, filePath) => api.patch(`/videos/${id}/remap`, { file_path: filePath }),
 	cleanupMissing: (libraryId) => api.post('/videos/missing/cleanup', { library_id: libraryId || 0 }),
+	getDuplicates: () => api.get('/videos/duplicates'),
+	qualityCompare: (videoIds) => api.post('/videos/quality-compare', { video_ids: videoIds }),
 }
 
 export const studiosAPI = {
@@ -213,6 +216,9 @@ export const aiAPI = {
 
 	// Library analytics
 	getLibraryAnalytics: () => api.get('/ai/library-analytics'),
+
+	// Health check — auto-fix missing metadata, thumbnails, and unlinked performers
+	runHealthCheck: () => api.post('/ai/health-check'),
 
 	// Thumbnail quality
 	analyzeThumbnailQuality: (data) => api.post('/ai/analyze-thumbnail-quality', data),

@@ -9,3 +9,4 @@ export { default as BrowserPaginationControls } from './BrowserPaginationControl
 export { default as BrowserSearchFilterBar } from './BrowserSearchFilterBar.vue'
 export { default as BrowserBreadcrumbNav } from './BrowserBreadcrumbNav.vue'
 export { default as BrowserContextMenu } from './BrowserContextMenu.vue'
+export { default as BrowserAssignPerformerModal } from './BrowserAssignPerformerModal.vue'

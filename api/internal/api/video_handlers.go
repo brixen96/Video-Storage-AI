@@ -5,9 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 
+	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
@@ -284,57 +286,48 @@ func generateAllPreviews(c *gin.Context) {
 }
 
 // openInExplorer handles POST /api/v1/videos/:id/open-in-explorer
+// Note: when the backend runs as a Windows service (session 0), the explorer window
+// will not be visible on the user's desktop. The frontend shows the path as a fallback.
 func openInExplorer(c *gin.Context) {
 	svc := ensureVideoService()
 
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid video ID"})
+		respondBadRequest(c, "Invalid video ID", err)
 		return
 	}
 
-	// Get video to retrieve file path
 	video, err := svc.GetByID(id)
 	if err != nil {
-		log.Printf("Failed to get video %d: %v", id, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": "Video not found"})
+		respondInternalError(c, "Video not found", err)
 		return
 	}
 
 	if video.FilePath == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Video file path not available"})
+		respondBadRequest(c, "Video file path not available", nil)
 		return
 	}
 
-	// Open file location based on OS
+	dir := filepath.Dir(video.FilePath)
+
+	// Best-effort: try to open the file location. May not work from a Windows service context.
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		// Windows: Use explorer.exe with /select parameter to highlight the file
-		cmd = exec.Command("explorer", "/select,", video.FilePath)
+		winPath := filepath.FromSlash(video.FilePath)
+		cmd = exec.Command("explorer", "/select,"+winPath)
 	case "darwin":
-		// macOS: Use open command with -R flag to reveal in Finder
 		cmd = exec.Command("open", "-R", video.FilePath)
 	case "linux":
-		// Linux: Use xdg-open to open the directory (varies by desktop environment)
-		// Extract directory from file path
-		cmd = exec.Command("xdg-open", video.FilePath[:len(video.FilePath)-len(video.Title)])
-	default:
-		c.JSON(http.StatusNotImplemented, gin.H{"error": "Unsupported operating system"})
-		return
+		cmd = exec.Command("xdg-open", dir)
+	}
+	if cmd != nil {
+		if startErr := cmd.Start(); startErr != nil {
+			log.Printf("[Explorer] launch attempt failed: %v", startErr)
+		}
 	}
 
-	err = cmd.Start()
-	if err != nil {
-		log.Printf("Failed to open file location: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to open file location: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "File location opened successfully",
-		"path":    video.FilePath,
-	})
+	respondSuccess(c, gin.H{"path": video.FilePath, "dir": dir}, "")
 }
 
 // updateVideoMarksByPath handles PATCH /api/v1/videos/marks-by-path
@@ -479,6 +472,23 @@ func runPathAnalysis(c *gin.Context) {
 	respondSuccess(c, nil, "Path analysis started")
 }
 
+// analyzeSingleVideoPath handles POST /api/v1/videos/:id/analyze-path
+// Runs path analysis for a single video and returns what was linked.
+func analyzeSingleVideoPath(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "invalid video id", err)
+		return
+	}
+	svc := services.NewPathAnalysisService()
+	report, err := svc.RunAutoLinkForVideo(id)
+	if err != nil {
+		respondInternalError(c, "path analysis failed", err)
+		return
+	}
+	respondSuccess(c, report, fmt.Sprintf("Linked %d performers, %d tags, %d studios", report.PerformersLinked, report.TagsApplied, report.StudiosLinked))
+}
+
 // locateVideoFile handles GET /api/v1/videos/:id/locate
 // Searches the video's library folder for files matching its filename.
 func locateVideoFile(c *gin.Context) {
@@ -543,4 +553,137 @@ func deleteMissingVideos(c *gin.Context) {
 	}
 
 	respondSuccess(c, gin.H{"deleted": count}, fmt.Sprintf("Deleted %d missing video records", count))
+}
+
+// refreshVideoMetadata handles POST /api/v1/videos/:id/fetch
+// Re-reads file metadata from disk using ffprobe and updates the DB.
+func refreshVideoMetadata(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "invalid video id", err)
+		return
+	}
+
+	var filePath string
+	if err := database.GetDB().QueryRow(`SELECT file_path FROM videos WHERE id = ?`, id).Scan(&filePath); err != nil {
+		respondInternalError(c, "video not found", err)
+		return
+	}
+
+	mediaSvc := services.NewMediaService()
+	meta, err := mediaSvc.ExtractMetadata(filePath)
+	if err != nil {
+		respondInternalError(c, "failed to read file metadata", err)
+		return
+	}
+
+	resolution := ""
+	if meta.Width > 0 && meta.Height > 0 {
+		resolution = fmt.Sprintf("%dx%d", meta.Width, meta.Height)
+	}
+
+	if _, err := database.GetDB().Exec(
+		`UPDATE videos SET duration = ?, file_size = ?, codec = ?, resolution = ?, bitrate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		meta.Duration, meta.Size, meta.Codec, resolution, meta.Bitrate, id,
+	); err != nil {
+		respondInternalError(c, "failed to update metadata", err)
+		return
+	}
+
+	respondSuccess(c, meta, "Metadata refreshed from file")
+}
+
+// bulkVideoOperation handles POST /api/v1/videos/bulk
+// Supported operations: "delete", "fetch_metadata", "analyze_path"
+func bulkVideoOperation(c *gin.Context) {
+	var req struct {
+		Operation string  `json:"operation"`
+		VideoIDs  []int64 `json:"video_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondBadRequest(c, "invalid request", err)
+		return
+	}
+	if len(req.VideoIDs) == 0 {
+		respondBadRequest(c, "no video IDs provided", nil)
+		return
+	}
+
+	switch req.Operation {
+	case "delete":
+		svc := ensureVideoService()
+		deleted := 0
+		for _, id := range req.VideoIDs {
+			if err := svc.Delete(id); err != nil {
+				log.Printf("[Bulk] delete video %d: %v", id, err)
+			} else {
+				deleted++
+			}
+		}
+		respondSuccess(c, gin.H{"deleted": deleted}, fmt.Sprintf("Deleted %d of %d videos", deleted, len(req.VideoIDs)))
+
+	case "fetch_metadata":
+		go func() {
+			mediaSvc := services.NewMediaService()
+			db := database.GetDB()
+			updated := 0
+			for _, id := range req.VideoIDs {
+				var filePath string
+				if err := db.QueryRow(`SELECT file_path FROM videos WHERE id = ?`, id).Scan(&filePath); err != nil {
+					continue
+				}
+				meta, err := mediaSvc.ExtractMetadata(filePath)
+				if err != nil {
+					log.Printf("[Bulk] fetch_metadata video %d: %v", id, err)
+					continue
+				}
+				resolution := ""
+				if meta.Width > 0 && meta.Height > 0 {
+					resolution = fmt.Sprintf("%dx%d", meta.Width, meta.Height)
+				}
+				db.Exec(`UPDATE videos SET duration = ?, file_size = ?, codec = ?, resolution = ?, bitrate = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+					meta.Duration, meta.Size, meta.Codec, resolution, meta.Bitrate, id)
+				updated++
+			}
+			log.Printf("[Bulk] fetch_metadata: updated %d/%d videos", updated, len(req.VideoIDs))
+		}()
+		respondSuccess(c, nil, fmt.Sprintf("Metadata refresh started for %d videos", len(req.VideoIDs)))
+
+	case "analyze_path":
+		go func() {
+			pathSvc := services.NewPathAnalysisService()
+			perfs, tags, studios := 0, 0, 0
+			for _, id := range req.VideoIDs {
+				report, err := pathSvc.RunAutoLinkForVideo(id)
+				if err != nil {
+					log.Printf("[Bulk] analyze_path video %d: %v", id, err)
+					continue
+				}
+				perfs += report.PerformersLinked
+				tags += report.TagsApplied
+				studios += report.StudiosLinked
+			}
+			log.Printf("[Bulk] analyze_path: %d videos → %d performers, %d tags, %d studios", len(req.VideoIDs), perfs, tags, studios)
+		}()
+		respondSuccess(c, nil, fmt.Sprintf("Path analysis started for %d videos", len(req.VideoIDs)))
+
+	default:
+		respondBadRequest(c, "unknown operation: "+req.Operation, nil)
+	}
+}
+
+// getVideoDuplicates handles GET /api/v1/videos/duplicates
+func getVideoDuplicates(c *gin.Context) {
+	svc := ensureVideoService()
+	groups, totalDups, wastedBytes, err := svc.FindDuplicates()
+	if err != nil {
+		respondInternalError(c, "Failed to find duplicates", err)
+		return
+	}
+	respondSuccess(c, gin.H{
+		"groups":           groups,
+		"total_groups":     len(groups),
+		"total_duplicates": totalDups,
+		"wasted_bytes":     wastedBytes,
+	}, "")
 }

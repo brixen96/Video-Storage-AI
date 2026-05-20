@@ -40,7 +40,8 @@ func (s *DashboardService) GetStats() (*models.DashboardStats, error) {
 			(SELECT COUNT(*) FROM scraped_threads WHERE is_watched = 1),
 			(SELECT COUNT(*) FROM activity_logs WHERE status = 'running'),
 			(SELECT COUNT(*) FROM activity_logs WHERE status = 'pending'),
-			(SELECT COUNT(*) FROM dashboard_feed_items WHERE item_type = 'new_content' AND created_at >= datetime('now', '-1 day'))
+			(SELECT COUNT(*) FROM dashboard_feed_items WHERE item_type = 'new_content' AND created_at >= datetime('now', '-1 day')),
+			(SELECT COUNT(*) FROM videos WHERE COALESCE(is_missing,0) = 0 AND NOT EXISTS (SELECT 1 FROM video_performers WHERE video_id = videos.id))
 	`).Scan(
 		&stats.TotalVideos,
 		&stats.TotalScrapedVideos,
@@ -51,6 +52,7 @@ func (s *DashboardService) GetStats() (*models.DashboardStats, error) {
 		&stats.RunningTasks,
 		&stats.PendingTasks,
 		&stats.RecentNewItems,
+		&stats.VideosWithoutPerformer,
 	)
 	if err != nil {
 		return stats, err

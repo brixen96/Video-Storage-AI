@@ -364,275 +364,18 @@
 			@close="closeContextMenu"
 		/>
 
-		<!-- Details Panel (Side Drawer) -->
-		<div v-if="detailsPanel.visible" class="details-panel" @click.self="closeDetails">
-			<div class="panel-content">
-				<!-- Carousel -->
-				<div class="panel-carousel">
-					<div v-if="getPerformerPreviews(detailsPanel.performer).length > 0" class="carousel-container">
-						<button v-if="carouselIndex > 0" class="carousel-btn prev" @click="carouselIndex--">
-							<font-awesome-icon :icon="['fas', 'chevron-left']" />
-						</button>
-						<video
-							:src="getPerformerPreviews(detailsPanel.performer)[carouselIndex]"
-							class="carousel-video"
-							controls
-							autoplay
-							loop
-							muted
-							@contextmenu.prevent="openCarouselContextMenu($event, carouselIndex)"
-						></video>
-						<button v-if="carouselIndex < getPerformerPreviews(detailsPanel.performer).length - 1" class="carousel-btn next" @click="carouselIndex++">
-							<font-awesome-icon :icon="['fas', 'chevron-right']" />
-						</button>
-						<div class="carousel-indicator">{{ carouselIndex + 1 }} / {{ getPerformerPreviews(detailsPanel.performer).length }}</div>
-					</div>
-					<div v-else class="no-carousel">
-						<font-awesome-icon :icon="['fas', 'user']" size="5x" />
-						<p class="mt-3">No preview videos available</p>
-					</div>
-				</div>
+		<!-- Details Panel -->
+		<PerformerDetailsPanel
+			v-if="detailsPanel.visible"
+			:performer="detailsPanel.performer"
+			:all-tags="allTags"
+			@close="closeDetails"
+			@fetch-metadata="fetchMetadata"
+			@reset="resetPerformer"
+			@confirm-delete="confirmDelete"
+			@performer-updated="onPerformerUpdated"
+		/>
 
-				<!-- Metadata Tabs -->
-				<div class="panel-metadata">
-					<!-- Tab Navigation -->
-					<ul class="nav nav-tabs">
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'basic' }]" @click="activeTab = 'basic'">Basic</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'appearance' }]" @click="activeTab = 'appearance'">Appearance</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'social_media' }]" @click="activeTab = 'social_media'">Social Media</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'platform' }]" @click="activeTab = 'platform'">Platform</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'tags' }]" @click="activeTab = 'tags'">Tags</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'bios' }]" @click="activeTab = 'bios'">Bios</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'external_links' }]" @click="activeTab = 'external_links'">Links</a>
-						</li>
-						<li class="nav-item">
-							<a :class="['nav-link', { active: activeTab === 'videos' }]" @click="activeTab = 'videos'">Videos ({{ detailsPanel.performer.video_count || 0 }})</a>
-						</li>
-					</ul>
-
-					<!-- Tab Content -->
-					<div class="tab-content mt-3">
-						<!-- Basic Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'basic' }]">
-							<div class="metadata-grid">
-								<div class="metadata-item">
-									<span class="metadata-label">Name:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.name }}</span>
-								</div>
-								<div v-if="getAge(detailsPanel.performer)" class="metadata-item">
-									<span class="metadata-label">Age:</span>
-									<span class="metadata-value">{{ getAge(detailsPanel.performer) }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.metadata?.birthdate" class="metadata-item">
-									<span class="metadata-label">Birthdate:</span>
-									<span class="metadata-value">{{ formatDate(detailsPanel.performer.metadata.birthdate) }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.metadata?.birthplace" class="metadata-item">
-									<span class="metadata-label">Birthplace:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.metadata.birthplace }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.metadata?.career_start" class="metadata-item">
-									<span class="metadata-label">Career Start:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.metadata.career_start }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.metadata?.career_end" class="metadata-item">
-									<span class="metadata-label">Career End:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.metadata.career_end }}</span>
-								</div>
-								<div class="metadata-item">
-									<span class="metadata-label">Video Count:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.video_count || 0 }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.metadata?.aliases?.length" class="metadata-item full-width">
-									<span class="metadata-label">Aliases:</span>
-									<span class="metadata-value">{{ detailsPanel.performer.metadata.aliases.join(', ') }}</span>
-								</div>
-								<div v-if="detailsPanel.performer.category" class="metadata-item full-width">
-									<span class="metadata-label">Category:</span>
-									<span :class="['metadata-value', 'category-badge', 'category-' + detailsPanel.performer.category]">{{
-										getCategoryName(detailsPanel.performer.category)
-									}}</span>
-								</div>
-							</div>
-						</div>
-
-						<!-- Appearance Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'appearance' }]">
-							<div v-if="getAppearanceData(detailsPanel.performer)" class="metadata-grid">
-								<div v-for="(value, key) in getAppearanceData(detailsPanel.performer)" :key="key" class="metadata-item">
-									<span class="metadata-label">{{ formatLabel(key) }}:</span>
-									<span class="metadata-value">{{ value }}</span>
-								</div>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No appearance data available</p>
-							</div>
-						</div>
-
-						<!-- Social Media Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'social_media' }]">
-							<div v-if="getSocialMediaData(detailsPanel.performer)" class="metadata-grid">
-								<div v-for="(value, key) in getSocialMediaData(detailsPanel.performer)" :key="key" class="metadata-item">
-									<span class="metadata-label">{{ formatLabel(key) }}:</span>
-									<span class="metadata-value">
-										<a v-if="isURL(value)" :href="value" target="_blank" rel="noopener">{{ value }}</a>
-										<span v-else>{{ formatValue(value) }}</span>
-									</span>
-								</div>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No social media data available</p>
-							</div>
-						</div>
-
-						<!-- Platform Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'platform' }]">
-							<div v-if="getPlatformData(detailsPanel.performer)" class="metadata-grid">
-								<div v-for="(value, key) in getPlatformData(detailsPanel.performer)" :key="key" class="metadata-item">
-									<span class="metadata-label">{{ formatLabel(key) }}:</span>
-									<span class="metadata-value">{{ formatValue(value) }}</span>
-								</div>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No platform data available</p>
-							</div>
-						</div>
-
-						<!-- Tags Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'tags' }]">
-							<div class="tags-management">
-								<!-- Add Tag Section -->
-								<div class="add-tag-section mb-3">
-									<div class="input-group">
-										<select v-model.number="selectedTagId" class="form-select">
-											<option value="">Select a tag...</option>
-											<option v-for="tag in availableTagsForPerformer" :key="tag.id" :value="tag.id">
-												{{ tag.name }}
-											</option>
-										</select>
-										<button class="btn btn-primary" @click="addTagToPerformer" :disabled="!selectedTagId">
-											<font-awesome-icon :icon="['fas', 'plus']" class="me-1" />
-											Add Tag
-										</button>
-									</div>
-								</div>
-
-								<!-- Current Tags -->
-								<div v-if="performerMasterTags.length > 0" class="tags-container">
-									<div v-for="tag in performerMasterTags" :key="tag.id" class="tag-badge-removable">
-										<span>{{ tag.name }}</span>
-										<button class="btn-remove-tag-small" @click="removeTagFromPerformer(tag.id)" title="Remove tag">
-											<font-awesome-icon :icon="['fas', 'times']" />
-										</button>
-									</div>
-								</div>
-								<div v-else class="empty-tab">
-									<p>No master tags assigned</p>
-								</div>
-
-								<!-- Sync Button -->
-								<div v-if="performerMasterTags.length > 0" class="mt-3">
-									<button class="btn btn-outline-primary btn-sm w-100" @click="syncPerformerTags" :disabled="isSyncingTags">
-										<font-awesome-icon :icon="['fas', isSyncingTags ? 'spinner' : 'sync']" :spin="isSyncingTags" class="me-2" />
-										{{ isSyncingTags ? 'Syncing...' : `Sync Tags to ${detailsPanel.performer.video_count || 0} Videos` }}
-									</button>
-								</div>
-							</div>
-						</div>
-
-						<!-- Bios Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'bios' }]">
-							<div v-if="getBiosData(detailsPanel.performer)" class="bios-container">
-								<div v-for="(bio, source) in getBiosData(detailsPanel.performer)" :key="source" class="bio-item">
-									<h6 class="bio-source">{{ formatLabel(source) }}</h6>
-									<p class="bio-text">{{ bio }}</p>
-								</div>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No bios available</p>
-							</div>
-						</div>
-
-						<!-- External Links Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'external_links' }]">
-							<div v-if="getExternalLinksData(detailsPanel.performer)?.length" class="links-container">
-								<a
-									v-for="(link, index) in getExternalLinksData(detailsPanel.performer)"
-									:key="index"
-									:href="getLinkURL(link)"
-									target="_blank"
-									rel="noopener"
-									class="external-link"
-								>
-									<font-awesome-icon :icon="['fas', 'external-link-alt']" class="me-2" />
-									{{ getLinkTitle(link) }}
-								</a>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No external links available</p>
-							</div>
-						</div>
-
-						<!-- Videos Tab -->
-						<div :class="['tab-pane', 'fade', { 'show active': activeTab === 'videos' }]">
-							<div v-if="detailsPanel.performerVideos.length > 0" class="videos-grid">
-								<div v-for="video in detailsPanel.performerVideos" :key="video.id" class="video-item" @click="openVideo(video)">
-									<div class="video-thumbnail">
-										<img v-if="video.thumbnail_path" :src="`http://localhost:8080/assets/${video.thumbnail_path}`" :alt="video.title" loading="lazy" />
-										<div v-else class="no-thumbnail">
-											<font-awesome-icon :icon="['fas', 'film']" size="2x" />
-										</div>
-										<div class="video-duration">{{ formatDuration(video.duration) }}</div>
-									</div>
-									<div class="video-info">
-										<h6 class="video-title">{{ video.title }}</h6>
-										<p class="video-meta">{{ formatFileSize(video.file_size) }}</p>
-									</div>
-								</div>
-							</div>
-							<div v-else-if="detailsPanel.loadingVideos" class="empty-tab">
-								<font-awesome-icon :icon="['fas', 'spinner']" spin size="2x" />
-								<p class="mt-3">Loading videos...</p>
-							</div>
-							<div v-else class="empty-tab">
-								<p>No videos found for this performer</p>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Action Buttons -->
-				<div class="panel-actions">
-					<button class="btn btn-primary" @click="fetchMetadata(detailsPanel.performer)">
-						<font-awesome-icon :icon="['fas', 'download']" class="me-2" />
-						Fetch Metadata
-					</button>
-					<button class="btn btn-secondary" @click="resetPerformer(detailsPanel.performer)">
-						<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
-						Reset
-					</button>
-					<button class="btn btn-danger" @click="confirmDelete(detailsPanel.performer)">
-						<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-						Delete
-					</button>
-				</div>
-			</div>
-		</div>
-
-		<!-- Delete Confirmation Modal -->
 		<!-- Delete Confirmation Modal -->
 		<DeleteConfirmationModal
 			:visible="deleteModal.visible"
@@ -642,14 +385,6 @@
 			@confirm="deletePerformer"
 			@cancel="deleteModal.visible = false"
 		/>
-
-		<!-- Carousel Context Menu -->
-		<div v-if="carouselContextMenu.visible" class="context-menu" :style="{ top: carouselContextMenu.y + 'px', left: carouselContextMenu.x + 'px' }" @click.stop>
-			<button class="context-menu-item" @click="setAsPrimaryPreview">
-				<font-awesome-icon :icon="['fas', 'star']" class="me-2" />
-				Set as Primary
-			</button>
-		</div>
 	</div>
 </template>
 
@@ -659,76 +394,18 @@ import { tagsAPI } from '@/services/api'
 import settingsService from '@/services/settingsService'
 import { DeleteConfirmationModal, SearchBox } from '@/components/shared'
 import { PerformerContextMenu } from '@/components/performers'
-import { useFormatters } from '@/composables/useFormatters'
+import PerformerDetailsPanel from '@/components/PerformerDetailsPanel.vue'
 
 export default {
 	name: 'PerformersPage',
 	components: {
 		DeleteConfirmationModal,
 		PerformerContextMenu,
+		PerformerDetailsPanel,
 		SearchBox,
 	},
 	data() {
-		// Load preview cache from localStorage
-		let cachedPreviews = {}
-		try {
-			const stored = localStorage.getItem('performerPreviews')
-			if (stored) {
-				const parsed = JSON.parse(stored)
-				// Validate and clean cache - ensure all paths are relative and properly formatted
-				let needsUpdate = false
-				for (const [performerId, paths] of Object.entries(parsed)) {
-					if (Array.isArray(paths)) {
-						const cleanedPaths = paths
-							.map((path) => {
-								if (!path || typeof path !== 'string') return null
-
-								// If path is a full URL, extract just the pathname
-								if (path.startsWith('http://') || path.startsWith('https://')) {
-									try {
-										return new URL(path).pathname
-									} catch {
-										return null
-									}
-								}
-
-								// Fix paths with /../ at the start (old bug)
-								if (path.startsWith('/../')) {
-									needsUpdate = true
-									return null // Will be reloaded from API
-								}
-
-								return path
-							})
-							.filter((path) => path !== null)
-
-						// Only keep this performer's cache if we have valid paths
-						if (cleanedPaths.length > 0) {
-							cachedPreviews[performerId] = cleanedPaths
-						} else {
-							needsUpdate = true // Need to reload this performer's previews
-						}
-					}
-				}
-
-				// If we found invalid paths, save the cleaned cache
-				if (needsUpdate) {
-					try {
-						localStorage.setItem('performerPreviews', JSON.stringify(cachedPreviews))
-					} catch (e) {
-						console.error('Failed to save cleaned cache:', e)
-					}
-				}
-			}
-		} catch (e) {
-			console.error('Failed to load preview cache:', e)
-			// Clear corrupted cache
-			localStorage.removeItem('performerPreviews')
-		}
-
-		// Get settings
 		const settings = settingsService.getSettings()
-
 		return {
 			performers: [],
 			loading: false,
@@ -739,7 +416,7 @@ export default {
 			viewMode: settings.defaultViewMode || 'grid',
 			showFilters: false,
 			filters: {
-				categoryFilter: settings.defaultCategoryFilter || 'all', // 'all', 'regular', 'zoo', '3d'
+				categoryFilter: settings.defaultCategoryFilter || 'all',
 				ageMin: null,
 				ageMax: null,
 				breastMin: '',
@@ -756,58 +433,33 @@ export default {
 			detailsPanel: {
 				visible: false,
 				performer: null,
-				performerVideos: [],
-				loadingVideos: false,
 			},
-			carouselIndex: 0,
-			activeTab: 'basic', // Tab in details panel: basic, appearance, performances, social_media, platform, tags, bios, external_links
 			deleteModal: {
 				visible: false,
 				performer: null,
 			},
-			performerPreviews: cachedPreviews, // Cache for performer previews: { performerId: [urls] }
-			videoRefreshKey: 0, // Key to force video elements to recreate
-			carouselContextMenu: {
-				visible: false,
-				x: 0,
-				y: 0,
-				previewIndex: 0,
-			},
-			// Tag Management
 			allTags: [],
-			performerMasterTags: [],
-			selectedTagId: null,
-			isSyncingTags: false,
-			performerTags: {}, // Cache for performer tags: { performerId: [tags] }
-			// Two-tier loading
-			hoveredPerformer: {}, // Track which performers are being hovered: { performerId: boolean }
-		currentPage: 1,
-		pageSize: 48,
+			performerTags: {},
+			hoveredPerformer: {},
+			currentPage: 1,
+			pageSize: 48,
 		}
 	},
-
 	computed: {
 		filteredPerformers() {
-			// Ensure performers is always an array
-			if (!Array.isArray(this.performers)) {
-				console.warn('performers is not an array:', this.performers)
-				return []
-			}
+			if (!Array.isArray(this.performers)) return []
 
 			let result = this.performers
 
-			// Search filter
 			if (this.searchQuery) {
 				const query = this.searchQuery.toLowerCase()
 				result = result.filter((p) => p && p.name && p.name.toLowerCase().includes(query))
 			}
 
-			// Category filter
 			if (this.filters.categoryFilter !== 'all') {
 				result = result.filter((p) => p && p.category === this.filters.categoryFilter)
 			}
 
-			// Age filter
 			if (this.filters.ageMin) {
 				result = result.filter((p) => {
 					const age = this.getAge(p)
@@ -821,7 +473,6 @@ export default {
 				})
 			}
 
-			// Height filter (parse height from metadata string like "5'7" or "170 cm")
 			if (this.filters.heightMin) {
 				result = result.filter((p) => {
 					const height = this.parseHeight(p.metadata?.height)
@@ -835,25 +486,15 @@ export default {
 				})
 			}
 
-			// Breast size filter (basic implementation)
 			if (this.filters.breastMin) {
-				// Convert breast sizes to numeric for comparison (simplified)
-				result = result.filter((p) => {
-					if (!p || !p.breast_size) return false
-					return p.breast_size >= this.filters.breastMin
-				})
+				result = result.filter((p) => p && p.breast_size && p.breast_size >= this.filters.breastMin)
 			}
 			if (this.filters.breastMax) {
-				result = result.filter((p) => {
-					if (!p || !p.breast_size) return false
-					return p.breast_size <= this.filters.breastMax
-				})
+				result = result.filter((p) => p && p.breast_size && p.breast_size <= this.filters.breastMax)
 			}
 
-			// Sort
-			result = [...result].sort((a, b) => {
+			return [...result].sort((a, b) => {
 				if (!a || !b) return 0
-
 				switch (this.sortBy) {
 					case 'name':
 						return (a.name || '').localeCompare(b.name || '')
@@ -869,23 +510,6 @@ export default {
 						return 0
 				}
 			})
-
-			return result
-		},
-		availableTagsForPerformer() {
-			// Filter tags by performer's category and exclude already assigned tags
-			if (!this.detailsPanel.performer) {
-				return []
-			}
-
-			const performerCategory = this.detailsPanel.performer.category || 'regular'
-
-			if (!Array.isArray(this.performerMasterTags)) {
-				return (this.allTags || []).filter((tag) => tag.category === performerCategory)
-			}
-
-			const assignedTagIds = new Set(this.performerMasterTags.map((t) => t.id))
-			return (this.allTags || []).filter((tag) => tag.category === performerCategory && !assignedTagIds.has(tag.id))
 		},
 		pagedPerformers() {
 			const start = (this.currentPage - 1) * this.pageSize
@@ -910,72 +534,56 @@ export default {
 		},
 	},
 	methods: {
-		// Get category icon
 		getCategoryIcon(category) {
 			const icons = { regular: 'user', zoo: 'dog', '3d': 'cube' }
 			return icons[category] || 'user'
 		},
-		// Get category display name
 		getCategoryName(category) {
 			const names = { regular: 'Regular', zoo: 'Zoo', '3d': '3D' }
 			return names[category] || 'Regular'
 		},
-		// Calculate age from birthdate
 		getAge(performer) {
 			if (!performer.metadata?.birthdate) return null
 			const birthDate = new Date(performer.metadata.birthdate)
 			const today = new Date()
 			let age = today.getFullYear() - birthDate.getFullYear()
 			const monthDiff = today.getMonth() - birthDate.getMonth()
-			if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-				age--
-			}
+			if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) age--
 			return age
 		},
-		// Parse height from various formats to cm
 		parseHeight(heightStr) {
 			if (!heightStr) return null
-			// Try to extract numeric value (assumes cm if just a number)
 			const match = heightStr.match(/(\d+)/)
 			return match ? parseInt(match[1]) : null
 		},
-
-		// Two-tier loading: Get thumbnail URL
 		getThumbnailUrl(thumbnailPath) {
 			if (!thumbnailPath) return null
-			// If it's already a full URL, return it
-			if (thumbnailPath.startsWith('http://') || thumbnailPath.startsWith('https://')) {
-				return thumbnailPath
-			}
-			// If it starts with /assets/, prepend the base URL
-			if (thumbnailPath.startsWith('/assets/')) {
-				return `http://localhost:8080${thumbnailPath}`
-			}
-			// Otherwise, construct the assets URL
+			if (thumbnailPath.startsWith('http://') || thumbnailPath.startsWith('https://')) return thumbnailPath
+			if (thumbnailPath.startsWith('/assets/')) return `http://localhost:8080${thumbnailPath}`
 			return `http://localhost:8080/assets/${thumbnailPath}`
 		},
-
-		// Two-tier loading: Start video preview on hover
-		// Video element is created via v-if and has autoplay, so it plays automatically
+		getPreviewUrl(path) {
+			if (!path) return ''
+			if (path.startsWith('http://') || path.startsWith('https://')) return path
+			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
+			return `http://localhost:8080${pathParts.join('/')}`
+		},
 		startVideoPreview(performer) {
 			this.hoveredPerformer[performer.id] = true
 		},
-
-		// Two-tier loading: Stop video preview on mouse leave
-		// Video element is destroyed via v-if, no manual cleanup needed
 		stopVideoPreview(performer) {
 			this.hoveredPerformer[performer.id] = false
 		},
-
+		handleVideoError(event) {
+			const video = event.target
+			console.error('Video failed to load:', { src: video.src, error: video.error })
+		},
 		async loadPerformers() {
 			this.loading = true
 			this.error = null
 			try {
 				const response = await performersAPI.getAll()
-
-				// Ensure we always have an array
 				if (response.data) {
-					// Handle different response structures
 					if (Array.isArray(response.data)) {
 						this.performers = response.data
 					} else if (response.data.performers && Array.isArray(response.data.performers)) {
@@ -983,53 +591,20 @@ export default {
 					} else if (response.data.data && Array.isArray(response.data.data)) {
 						this.performers = response.data.data
 					} else {
-						console.warn('Unexpected response structure:', response.data)
 						this.performers = []
 					}
 				} else {
 					this.performers = []
 				}
-
-				// Note: Previews are now loaded on-demand when opening details panel
-				// This prevents API spam and improves initial page load performance
-
-				// Load tags for current page performers only
 				this.loadTagsForPage(this.pagedPerformers)
 			} catch (err) {
 				console.error('Failed to load performers:', err)
 				this.error = 'Failed to load performers. Please try again.'
-				this.performers = [] // Ensure it's always an array even on error
+				this.performers = []
 			} finally {
 				this.loading = false
 			}
 		},
-
-		async loadAllPerformerTags() {
-			// Load tags for all performers in batches to avoid API spam
-			const batchSize = 5
-			const performers = this.performers || []
-
-			for (let i = 0; i < performers.length; i += batchSize) {
-				const batch = performers.slice(i, i + batchSize)
-				await Promise.all(
-					batch.map(async (performer) => {
-						try {
-							const response = await performersAPI.getTags(performer.id)
-							// Access response.data to get the actual tags array
-							this.performerTags[performer.id] = response.data || []
-						} catch (error) {
-							console.error(`Failed to load tags for performer ${performer.id}:`, error)
-							this.performerTags[performer.id] = []
-						}
-					})
-				)
-				// Small delay between batches to avoid overwhelming the API
-				if (i + batchSize < performers.length) {
-					await new Promise((resolve) => setTimeout(resolve, 100))
-				}
-			}
-		},
-
 		async loadTagsForPage(performers) {
 			const toLoad = performers.filter((p) => !Object.prototype.hasOwnProperty.call(this.performerTags, p.id))
 			if (toLoad.length === 0) return
@@ -1044,112 +619,26 @@ export default {
 				})
 			)
 		},
-
 		goToPage(page) {
 			if (page < 1 || page > this.totalPages) return
 			this.currentPage = page
 			this.loadTagsForPage(this.pagedPerformers)
 			window.scrollTo({ top: 0, behavior: 'smooth' })
 		},
-
-		getPreviewUrl(path) {
-			if (!path) {
-				console.warn('getPreviewUrl called with empty path')
-				return ''
-			}
-			// If path already includes the full URL, return as-is
-			if (path.startsWith('http://') || path.startsWith('https://')) {
-				return path
-			}
-			// Split path into segments and encode each segment (to handle spaces and special chars)
-			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
-			const encodedPath = pathParts.join('/')
-			// Otherwise, add the base URL
-			const url = `http://localhost:8080${encodedPath}`
-			return url
-		},
-		getPerformerPreviews(performer) {
-			// Return cached preview URLs or fallback to primary preview
-			if (this.performerPreviews[performer.id]) {
-				// Convert relative paths to full URLs
-				return this.performerPreviews[performer.id].map((path) => this.getPreviewUrl(path))
-			}
-			// Fallback to primary preview while loading
-			if (performer.preview_path) {
-				return [this.getPreviewUrl(performer.preview_path)]
-			}
-			return []
-		},
-		async loadPerformerPreviews(performerId) {
-			// Skip if already in cache (check for existence, not just truthiness)
-			if (Object.prototype.hasOwnProperty.call(this.performerPreviews, performerId) && this.performerPreviews[performerId]) {
-				return
-			}
-
-			try {
-				const response = await performersAPI.getPreviews(performerId)
-				if (response.data && response.data.previews) {
-					// Store relative paths (not full URLs) to avoid caching issues
-					const previewPaths = response.data.previews.map((path) => {
-						// Ensure we store clean relative paths
-						if (path.startsWith('http://') || path.startsWith('https://')) {
-							// Extract path from full URL if accidentally passed
-							return new URL(path).pathname
-						}
-						return path
-					})
-					this.performerPreviews[performerId] = previewPaths
-
-					// Save to localStorage
-					this.savePreviewCache()
-				}
-			} catch (err) {
-				console.error('Failed to load performer previews:', err)
-			}
-		},
-		savePreviewCache() {
-			try {
-				localStorage.setItem('performerPreviews', JSON.stringify(this.performerPreviews))
-			} catch (e) {
-				console.error('Failed to save preview cache:', e)
-			}
-		},
-		playPreview(event) {
-			const video = event.target
-			video.play().catch(() => {
-				// Ignore autoplay errors
-			})
-		},
-		pausePreview(event) {
-			const video = event.target
-			video.pause()
-		},
-		handleVideoError(event) {
-			const video = event.target
-			console.error('Video failed to load:', {
-				src: video.src,
-				error: video.error,
-				networkState: video.networkState,
-				readyState: video.readyState,
-			})
-		},
-		async openDetails(performer) {
+		openDetails(performer) {
 			this.detailsPanel.visible = true
 			this.detailsPanel.performer = performer
-			this.detailsPanel.performerVideos = []
-			this.carouselIndex = 0
-			this.activeTab = 'basic' // Reset to basic tab
-			this.selectedTagId = null // Reset selected tag
-			// Load all previews for this performer
-			await this.loadPerformerPreviews(performer.id)
-			// Load performer master tags
-			await this.loadPerformerTags(performer.id)
-			// Load performer videos
-			await this.loadPerformerVideos(performer.id)
 		},
 		closeDetails() {
 			this.detailsPanel.visible = false
 			this.detailsPanel.performer = null
+		},
+		async onPerformerUpdated() {
+			await this.loadPerformers()
+			const updated = this.performers.find((p) => p.id === this.detailsPanel.performer?.id)
+			if (updated) {
+				this.detailsPanel.performer = updated
+			}
 		},
 		openContextMenu(event, performer) {
 			this.contextMenu.visible = true
@@ -1157,75 +646,27 @@ export default {
 			this.contextMenu.y = event.clientY
 			this.contextMenu.performer = performer
 		},
+		closeContextMenu() {
+			this.contextMenu.visible = false
+			this.contextMenu.performer = null
+		},
 		handleDocumentClick() {
 			if (this.contextMenu.visible) {
 				this.closeContextMenu()
 			}
-			if (this.carouselContextMenu.visible) {
-				this.closeCarouselContextMenu()
-			}
-		},
-		closeContextMenu() {
-			this.contextMenu.visible = false
-			this.contextMenu.performer = null
 		},
 		goToPerformerDetails(performer) {
 			this.closeContextMenu()
 			this.$router.push({ name: 'PerformerDetails', params: { id: performer.id } })
 		},
-		openCarouselContextMenu(event, previewIndex) {
-			this.carouselContextMenu.visible = true
-			this.carouselContextMenu.x = event.clientX
-			this.carouselContextMenu.y = event.clientY
-			this.carouselContextMenu.previewIndex = previewIndex
-		},
-		closeCarouselContextMenu() {
-			this.carouselContextMenu.visible = false
-		},
-		async setAsPrimaryPreview() {
-			if (!this.detailsPanel.performer) return
-
-			const performer = this.detailsPanel.performer
-			const previews = await performersAPI.getPreviews(performer.id)
-			const selectedPreviewPath = previews.data.previews[this.carouselContextMenu.previewIndex]
-
-			this.closeCarouselContextMenu()
-
-			try {
-				// Update performer with new primary preview path
-				await performersAPI.update(performer.id, {
-					preview_path: selectedPreviewPath,
-				})
-
-				// Reload performers
-				await this.loadPerformers()
-
-				// Update details panel
-				const updatedPerformer = this.performers.find((p) => p.id === performer.id)
-				if (updatedPerformer) {
-					this.detailsPanel.performer = updatedPerformer
-				}
-
-				this.$toast.success('Primary Set', 'Primary preview updated successfully')
-			} catch (err) {
-				console.error('Failed to set primary preview:', err)
-				this.$toast.error('Update Failed', 'Failed to set primary preview')
-			}
-		},
 		async fetchMetadata(performer) {
 			this.closeContextMenu()
 			try {
-				// Call API to fetch metadata from AdultDataLink
-				const response = await performersAPI.fetchMetadata(performer.id)
-				console.log('Metadata fetch response:', response)
-				// Reload performers to get updated data
+				await performersAPI.fetchMetadata(performer.id)
 				await this.loadPerformers()
-				// Reload the current performer in details panel
 				if (this.detailsPanel.visible && this.detailsPanel.performer?.id === performer.id) {
 					const updatedPerformer = this.performers.find((p) => p.id === performer.id)
-					if (updatedPerformer) {
-						this.detailsPanel.performer = updatedPerformer
-					}
+					if (updatedPerformer) this.detailsPanel.performer = updatedPerformer
 				}
 				this.$toast.success('Metadata Fetched', `Successfully fetched metadata for ${performer.name}`)
 			} catch (err) {
@@ -1237,17 +678,12 @@ export default {
 			this.closeContextMenu()
 			try {
 				const response = await performersAPI.update(performer.id, { category: newCategory })
-
-				// Update local state with response from server
 				if (response && response.category !== undefined) {
 					performer.category = response.category
 				} else {
 					performer.category = newCategory
 				}
-
-				// Force re-render
 				this.$forceUpdate()
-
 				this.$toast.success('Updated', `${performer.name} set to ${this.getCategoryName(newCategory)}`)
 			} catch (err) {
 				console.error('Failed to update category:', err)
@@ -1257,9 +693,7 @@ export default {
 		async resetPerformer(performer) {
 			this.closeContextMenu()
 			try {
-				// Call API to reset performer metadata
 				await performersAPI.resetMetadata(performer.id)
-				// Reload performers
 				await this.loadPerformers()
 				this.$toast.success('Metadata Reset', `Metadata for ${performer.name} has been reset`)
 			} catch (err) {
@@ -1278,7 +712,6 @@ export default {
 			this.deleteModal.visible = false
 			try {
 				await performersAPI.delete(performer.id)
-				// Remove from local list
 				this.performers = this.performers.filter((p) => p.id !== performer.id)
 				this.$toast.success('Deleted', `${performer.name} has been deleted`)
 			} catch (err) {
@@ -1287,21 +720,13 @@ export default {
 			}
 		},
 		async cleanupEmptyPerformers() {
-			if (!confirm('This will delete all performers without preview videos or metadata. Are you sure?')) {
-				return
-			}
-
+			if (!confirm('This will delete all performers without preview videos or metadata. Are you sure?')) return
 			this.isCleaningUp = true
 			try {
-				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', {
-					method: 'POST',
-				})
+				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', { method: 'POST' })
 				const data = await response.json()
-
 				if (data.success) {
-					const deletedCount = data.data.deleted_count
-					this.$toast.success(`Cleaned up ${deletedCount} empty performers`)
-					// Reload performers list
+					this.$toast.success(`Cleaned up ${data.data.deleted_count} empty performers`)
 					await this.loadPerformers()
 				} else {
 					this.$toast.error('Cleanup Failed', data.message || 'Failed to cleanup performers')
@@ -1315,7 +740,7 @@ export default {
 		},
 		clearFilters() {
 			this.filters = {
-				showZoo: true,
+				categoryFilter: 'all',
 				ageMin: null,
 				ageMax: null,
 				breastMin: '',
@@ -1324,226 +749,41 @@ export default {
 				heightMax: null,
 			}
 		},
-		formatDate(dateString) {
-			if (!dateString) return ''
-			const date = new Date(dateString)
-			return date.toLocaleDateString()
-		},
-		// Helper methods for tabbed metadata display
-		getAppearanceData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.appearance) {
-				return null
-			}
-			// Check if it's an empty object
-			if (Object.keys(adlData.appearance).length === 0) {
-				return null
-			}
-			// Convert to plain object to avoid reactivity issues with v-for
-			return { ...adlData.appearance }
-		},
-		getPerformancesData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.performances) return null
-			if (Object.keys(adlData.performances).length === 0) return null
-			return { ...adlData.performances }
-		},
-		getSocialMediaData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.social_media) return null
-			if (Object.keys(adlData.social_media).length === 0) return null
-			return { ...adlData.social_media }
-		},
-		getPlatformData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData) return null
-			// Combine platform_views, platform_video_counts, platform_profile_counts
-			const platformData = {}
-			if (adlData.platform_views) {
-				Object.entries(adlData.platform_views).forEach(([key, value]) => {
-					platformData[`${key}_views`] = value
-				})
-			}
-			if (adlData.platform_video_counts) {
-				Object.entries(adlData.platform_video_counts).forEach(([key, value]) => {
-					platformData[`${key}_videos`] = value
-				})
-			}
-			if (adlData.platform_profile_counts) {
-				Object.entries(adlData.platform_profile_counts).forEach(([key, value]) => {
-					platformData[`${key}_profiles`] = value
-				})
-			}
-			return Object.keys(platformData).length > 0 ? platformData : null
-		},
-		// Tag Management Methods
-		async loadPerformerTags(performerId) {
-			try {
-				const response = await performersAPI.getTags(performerId)
-				// Response interceptor unwraps to {success, message, data}
-				// We need to access .data to get the actual tags array
-				this.performerMasterTags = response.data || []
-			} catch (error) {
-				console.error('Failed to load performer tags:', error)
-				this.performerMasterTags = []
-			}
-		},
-		async loadPerformerVideos(performerId) {
-			this.detailsPanel.loadingVideos = true
-			try {
-				const response = await performersAPI.getVideos(performerId)
-				this.detailsPanel.performerVideos = response.data || []
-			} catch (error) {
-				console.error('Failed to load performer videos:', error)
-				this.detailsPanel.performerVideos = []
-				this.$toast.error('Error', 'Failed to load performer videos')
-			} finally {
-				this.detailsPanel.loadingVideos = false
-			}
-		},
-		openVideo(video) {
-			// Navigate to video player page
-			this.$router.push({ name: 'VideoPlayer', params: { id: video.id } })
-		},
-		// formatDuration and formatFileSize now provided by useFormatters composable
-		async addTagToPerformer() {
-			if (!this.selectedTagId || !this.detailsPanel.performer) return
-
-			const tagId = parseInt(this.selectedTagId)
-			const performerId = this.detailsPanel.performer.id
-
-			try {
-				await performersAPI.addTag(performerId, tagId)
-				this.$toast.success('Tag Added', 'Master tag added to performer')
-				await this.loadPerformerTags(performerId)
-				this.selectedTagId = null
-			} catch (error) {
-				console.error('Failed to add tag:', error)
-				if (error.response) {
-					console.error('Error response:', error.response.data)
-				}
-				this.$toast.error('Error', 'Failed to add master tag')
-			}
-		},
-		async removeTagFromPerformer(tagId) {
-			if (!this.detailsPanel.performer) return
-			if (!confirm('Remove this master tag from the performer?')) return
-
-			try {
-				await performersAPI.removeTag(this.detailsPanel.performer.id, tagId)
-				this.$toast.success('Tag Removed', 'Master tag removed from performer')
-				await this.loadPerformerTags(this.detailsPanel.performer.id)
-			} catch (error) {
-				console.error('Failed to remove tag:', error)
-				this.$toast.error('Error', 'Failed to remove master tag')
-			}
-		},
-		async syncPerformerTags() {
-			if (!this.detailsPanel.performer) return
-			const videoCount = this.detailsPanel.performer.video_count || 0
-			if (!confirm(`Apply master tags to all ${videoCount} videos featuring this performer?`)) return
-
-			this.isSyncingTags = true
-			try {
-				const response = await performersAPI.syncTags(this.detailsPanel.performer.id)
-				// Response interceptor unwraps to {success, message, data}
-				const videosUpdated = response.data?.videos_updated || 0
-				this.$toast.success('Sync Complete', `Applied master tags to ${videosUpdated} videos`)
-			} catch (error) {
-				console.error('Failed to sync tags:', error)
-				this.$toast.error('Error', 'Failed to sync master tags to videos')
-			} finally {
-				this.isSyncingTags = false
-			}
-		},
 		async loadAllTags() {
 			let storeTags = await this.$store.dispatch('fetchTags')
 			if (storeTags.length !== 0) {
 				this.allTags = storeTags
-				return
 			} else {
 				const response = await tagsAPI.getAll()
 				this.allTags = response || []
 			}
 		},
-		getBiosData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.bios) return null
-			if (Object.keys(adlData.bios).length === 0) return null
-			return { ...adlData.bios }
-		},
-		getExternalLinksData(performer) {
-			const adlData = performer.metadata?.adult_data_link_response
-			if (!adlData || !adlData.external_links) return []
-			// Return plain array
-			return [...adlData.external_links]
-		},
-		formatLabel(key) {
-			// Convert snake_case to Title Case
-			return key
-				.split('_')
-				.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-				.join(' ')
-		},
-		formatValue(value) {
-			if (value === null || value === undefined) return 'N/A'
-			if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-			if (typeof value === 'object') return JSON.stringify(value)
-			return String(value)
-		},
-		isURL(value) {
-			if (typeof value !== 'string') return false
-			return value.startsWith('http://') || value.startsWith('https://')
-		},
-		getLinkURL(link) {
-			if (typeof link === 'string') return link
-			return link.url || link.link || '#'
-		},
-		getLinkTitle(link) {
-			if (typeof link === 'string') return link
-			return link.title || link.name || link.platform || link.url || 'External Link'
-		},
-	},
-	created() {
-		// Initialize formatters composable
-		const formatters = useFormatters()
-		this.formatDuration = formatters.formatDuration
-		this.formatFileSize = formatters.formatFileSize
 	},
 	mounted() {
 		this.loadPerformers()
 		this.loadAllTags()
-
-		// Close context menus on click outside
 		document.addEventListener('click', this.handleDocumentClick)
 	},
 	activated() {
-		// Called when component is activated (navigated to) in keep-alive
-		// Wait for performers to be loaded, then reload videos
 		let unwatch = null
 		unwatch = this.$watch(
 			'performers',
 			(newVal) => {
 				if (newVal && newVal.length > 0) {
-					// Wait for DOM to update with the performer data
 					this.$nextTick(() => {
 						const videos = this.$el.querySelectorAll('video')
 						videos.forEach((video) => {
 							if (video.src) {
-								// Force browser to reload the video by resetting src
 								const currentSrc = video.src
 								video.src = ''
 								video.load()
 								video.src = currentSrc
 								video.load()
-
-								// Force opacity and position inline styles to fix transition issue
 								video.style.opacity = '1'
 								video.style.position = 'static'
 							}
 						})
 					})
-					// Stop watching after first trigger
 					if (unwatch) unwatch()
 				}
 			},

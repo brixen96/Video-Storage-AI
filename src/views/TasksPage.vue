@@ -105,6 +105,29 @@
 									{{ isTaskRunning('path_analysis') ? 'Analysing...' : 'Run Path Analysis' }}
 								</button>
 							</div>
+							<hr class="my-4" />
+
+							<!-- AI Health Check -->
+							<div class="task-item">
+								<div class="task-info">
+									<h6>AI Health Check</h6>
+									<p class="text-light mb-0">Auto-fix missing metadata, missing thumbnails, and unlinked performers across all videos. Also runs automatically every 6 hours.</p>
+								</div>
+								<button class="btn btn-purple mt-3" @click="runHealthCheck" :disabled="isTaskRunning('video_health_check')">
+									<font-awesome-icon
+										:icon="['fas', isTaskRunning('video_health_check') ? 'spinner' : 'heart-pulse']"
+										:spin="isTaskRunning('video_health_check')"
+										class="me-2"
+									/>
+									{{ isTaskRunning('video_health_check') ? 'Checking...' : 'Run Health Check' }}
+								</button>
+								<div v-if="getTaskProgress('video_health_check')" class="task-feedback mt-2">
+									<div class="progress" style="height: 6px">
+										<div class="progress-bar bg-purple" :style="{ width: getTaskProgress('video_health_check') + '%' }"></div>
+									</div>
+									<small class="text-purple">{{ getTaskProgress('video_health_check') }}%</small>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -349,12 +372,162 @@
 				</div>
 			</div>
 			</div>
+
+			<!-- Duplicate Detection -->
+			<div class="row g-3 mt-3">
+				<div class="col-12">
+					<div class="card task-card">
+						<div class="card-header d-flex align-items-center justify-content-between">
+							<h5 class="mb-0">
+								<font-awesome-icon :icon="['fas', 'clone']" class="me-2" />
+								Duplicate Detection
+							</h5>
+							<div v-if="duplicates.scanned" class="text-light small">
+								{{ duplicates.totalGroups }} group{{ duplicates.totalGroups !== 1 ? 's' : '' }} &mdash;
+								{{ duplicates.totalDuplicates }} videos &mdash;
+								<span class="text-warning">{{ formatBytes(duplicates.wastedBytes) }} wasted</span>
+							</div>
+						</div>
+						<div class="card-body">
+							<div class="task-item mb-3">
+								<div class="task-info">
+									<h6>Find Duplicate Videos</h6>
+									<p class="text-light mb-0">Detect videos with identical file size and duration — exact file copies stored in multiple locations.</p>
+								</div>
+								<button class="btn btn-warning mt-3" @click="scanDuplicates" :disabled="duplicates.loading">
+									<font-awesome-icon :icon="['fas', duplicates.loading ? 'spinner' : 'clone']" :spin="duplicates.loading" class="me-2" />
+									{{ duplicates.loading ? 'Scanning...' : 'Scan for Duplicates' }}
+								</button>
+							</div>
+
+							<!-- Results -->
+							<div v-if="duplicates.scanned && duplicates.groups.length === 0" class="alert alert-success mb-0">
+								<font-awesome-icon :icon="['fas', 'check-circle']" class="me-2" />
+								No duplicates found — your library is clean!
+							</div>
+
+							<div v-if="duplicates.groups.length > 0">
+								<div v-for="(group, gi) in duplicates.groups" :key="gi" class="duplicate-group mb-3">
+									<div class="duplicate-group-header d-flex align-items-center justify-content-between mb-2">
+										<span class="text-light small">
+											{{ formatBytes(group.file_size) }} &bull; {{ Math.round(group.duration) }}s
+										</span>
+										<div class="d-flex align-items-center gap-2">
+											<button
+												class="btn btn-sm btn-outline-info"
+												:disabled="group.qualityLoading"
+												@click="compareQuality(gi)"
+											>
+												<font-awesome-icon :icon="['fas', group.qualityLoading ? 'spinner' : 'chart-bar']" :spin="group.qualityLoading" class="me-1" />
+												{{ group.qualityLoading ? 'Scoring...' : 'Compare Quality' }}
+											</button>
+											<span class="badge bg-warning text-dark">{{ group.videos.length }} copies</span>
+										</div>
+									</div>
+									<div class="duplicate-videos">
+										<div v-for="video in group.videos" :key="video.id" class="duplicate-video-row d-flex align-items-center gap-3 p-2">
+											<!-- Thumbnail with fallback overlay -->
+											<div class="dup-thumb dup-thumb-placeholder flex-shrink-0 d-flex align-items-center justify-content-center" style="position:relative;overflow:hidden">
+												<font-awesome-icon :icon="['fas', 'film']" class="text-secondary" />
+												<img
+													v-if="video.thumbnail_path"
+													:src="getThumbnailUrl(video.thumbnail_path)"
+													style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"
+													@error="(e) => e.target.remove()"
+													alt=""
+												/>
+											</div>
+											<div class="flex-grow-1 min-w-0">
+												<div class="d-flex align-items-center gap-2">
+													<span class="text-truncate fw-semibold small" :title="video.title">{{ video.title }}</span>
+													<span
+														v-if="video.is_topaz_enhanced"
+														class="flex-shrink-0 badge text-white"
+														style="font-size:0.6rem;background:#7c3aed;white-space:nowrap"
+													>Topaz {{ video.topaz_type }}</span>
+												</div>
+												<div class="text-truncate text-secondary" style="font-size:0.75rem" :title="video.file_path">{{ video.file_path }}</div>
+											</div>
+											<button
+												class="btn btn-sm btn-outline-danger flex-shrink-0"
+												:disabled="duplicates.deletingId === video.id"
+												@click="deleteDuplicate(video.id, gi)"
+											>
+												<font-awesome-icon :icon="['fas', duplicates.deletingId === video.id ? 'spinner' : 'trash']" :spin="duplicates.deletingId === video.id" />
+											</button>
+										</div>
+									</div>
+
+									<!-- Quality comparison results -->
+									<div v-if="group.quality" class="quality-results mt-3 pt-3" style="border-top: 1px solid #444">
+										<div class="d-flex align-items-center gap-2 mb-2">
+											<font-awesome-icon :icon="['fas', 'trophy']" class="text-warning" />
+											<span class="small fw-semibold text-light">Quality Comparison</span>
+										</div>
+										<div class="quality-recommendation text-info small mb-3 fst-italic">{{ group.quality.recommendation }}</div>
+										<div v-for="score in group.quality.videos" :key="score.video_id" class="quality-score-row mb-3">
+											<div class="d-flex gap-2">
+												<!-- Thumbnail with fallback overlay -->
+												<div
+													style="width:72px;height:54px;flex-shrink:0;background:#2a2a2a;border-radius:4px;position:relative;overflow:hidden"
+													class="d-flex align-items-center justify-content-center"
+												>
+													<font-awesome-icon :icon="['fas', 'film']" class="text-secondary" />
+													<img
+														v-if="score.thumbnail_path"
+														:src="getThumbnailUrl(score.thumbnail_path)"
+														style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover"
+														@error="(e) => e.target.remove()"
+														alt=""
+													/>
+												</div>
+
+												<div class="flex-grow-1 min-w-0">
+													<!-- Rank + title + Topaz badge + score -->
+													<div class="d-flex align-items-center gap-2 mb-1">
+														<span
+															class="rank-badge flex-shrink-0 d-inline-flex align-items-center justify-content-center"
+															:class="score.is_recommended ? 'bg-warning text-dark' : 'bg-secondary text-white'"
+															style="width:20px;height:20px;border-radius:50%;font-size:0.7rem;font-weight:700"
+														>{{ score.rank }}</span>
+														<span class="small text-truncate flex-grow-1 fw-semibold" :title="score.file_path">{{ score.title }}</span>
+														<span
+															v-if="score.is_topaz_enhanced"
+															class="flex-shrink-0 badge text-white"
+															style="font-size:0.6rem;background:#7c3aed;white-space:nowrap"
+														>Topaz {{ score.topaz_type }}</span>
+														<span class="small fw-bold flex-shrink-0" :class="getScoreClass(score.overall_score)">{{ score.overall_score }}%</span>
+													</div>
+													<!-- Score bar -->
+													<div class="progress mb-1" style="height:3px">
+														<div class="progress-bar" :class="getScoreBarClass(score.overall_score)" :style="{ width: score.overall_score + '%' }"></div>
+													</div>
+													<!-- Metadata row -->
+													<div class="d-flex flex-wrap gap-2 align-items-center" style="font-size:0.68rem;color:#888">
+														<span v-if="score.resolution" class="text-light fw-semibold">{{ score.resolution }}</span>
+														<span v-if="score.codec" class="text-uppercase">{{ score.codec }}</span>
+														<span v-if="score.fps > 0">{{ score.fps }} fps</span>
+														<span v-if="score.bitrate > 0">{{ formatBitrate(score.bitrate) }}</span>
+														<span v-if="score.file_size > 0">{{ formatBytes(score.file_size) }}</span>
+														<span class="ms-auto">V <strong :class="getScoreClass(score.video_score)">{{ score.video_score }}%</strong></span>
+														<span>T <strong :class="getScoreClass(score.technical_score)">{{ score.technical_score }}%</strong></span>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
 
 <script>
-import { performersAPI, databaseAPI, videosAPI, systemAPI } from '@/services/api'
+import { performersAPI, databaseAPI, videosAPI, systemAPI, aiAPI, getAssetURL } from '@/services/api'
 import websocketService from '@/services/websocket'
 
 export default {
@@ -371,6 +544,15 @@ export default {
 			wsUnsubscribe: null,
 			isDbOperationRunning: false,
 			appControlRunning: false,
+			duplicates: {
+				groups: [],
+				totalGroups: 0,
+				totalDuplicates: 0,
+				wastedBytes: 0,
+				loading: false,
+				scanned: false,
+				deletingId: null,
+			},
 		}
 	},
 	mounted() {
@@ -517,6 +699,104 @@ export default {
 				console.error('Failed to start path analysis:', error)
 				this.$toast.error('Path Analysis Failed', error.response?.data?.error || 'Failed to start path analysis')
 			}
+		},
+
+		async runHealthCheck() {
+			try {
+				await aiAPI.runHealthCheck()
+				this.$toast.success('Health Check Started', 'Fixing missing metadata, thumbnails, and unlinked performers. Watch the Activity page for progress!')
+			} catch (error) {
+				console.error('Failed to start health check:', error)
+				this.$toast.error('Health Check Failed', error.response?.data?.error || 'Failed to start health check')
+			}
+		},
+
+		async scanDuplicates() {
+			this.duplicates.loading = true
+			this.duplicates.scanned = false
+			try {
+				const res = await videosAPI.getDuplicates()
+				const data = res.data
+				this.duplicates.groups = (data.groups || []).map((g) => ({ ...g, quality: null, qualityLoading: false }))
+				this.duplicates.totalGroups = data.total_groups || 0
+				this.duplicates.totalDuplicates = data.total_duplicates || 0
+				this.duplicates.wastedBytes = data.wasted_bytes || 0
+				this.duplicates.scanned = true
+			} catch (error) {
+				console.error('Failed to scan for duplicates:', error)
+				this.$toast.error('Scan Failed', 'Failed to scan for duplicates')
+			} finally {
+				this.duplicates.loading = false
+			}
+		},
+
+		async deleteDuplicate(videoId, groupIdx) {
+			if (!confirm('Delete this video file and its database record? This cannot be undone.')) return
+			this.duplicates.deletingId = videoId
+			try {
+				await videosAPI.delete(videoId)
+				const group = this.duplicates.groups[groupIdx]
+				group.videos = group.videos.filter((v) => v.id !== videoId)
+				this.duplicates.totalDuplicates--
+				this.duplicates.wastedBytes -= group.file_size
+				if (group.videos.length <= 1) {
+					this.duplicates.groups.splice(groupIdx, 1)
+					this.duplicates.totalGroups--
+				}
+				this.$toast.success('Deleted', 'Video deleted successfully')
+			} catch (error) {
+				console.error('Failed to delete video:', error)
+				this.$toast.error('Delete Failed', error.response?.data?.error || 'Failed to delete video')
+			} finally {
+				this.duplicates.deletingId = null
+			}
+		},
+
+		async compareQuality(gi) {
+			const group = this.duplicates.groups[gi]
+			group.qualityLoading = true
+			try {
+				const res = await videosAPI.qualityCompare(group.videos.map((v) => v.id))
+				group.quality = res.data
+			} catch (error) {
+				console.error('Quality compare failed:', error)
+				this.$toast.error('Quality Compare Failed', error?.response?.data?.message || 'Failed to score videos')
+			} finally {
+				group.qualityLoading = false
+			}
+		},
+
+		getScoreClass(score) {
+			if (score >= 80) return 'text-success'
+			if (score >= 60) return 'text-info'
+			if (score >= 40) return 'text-warning'
+			return 'text-danger'
+		},
+
+		getScoreBarClass(score) {
+			if (score >= 80) return 'bg-success'
+			if (score >= 60) return 'bg-info'
+			if (score >= 40) return 'bg-warning'
+			return 'bg-danger'
+		},
+
+		formatBytes(bytes) {
+			if (!bytes || bytes < 1024) return (bytes || 0) + ' B'
+			if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+			if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB'
+			return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB'
+		},
+
+		formatBitrate(bps) {
+			if (!bps) return ''
+			if (bps >= 1_000_000) return (bps / 1_000_000).toFixed(1) + ' Mbps'
+			return Math.round(bps / 1000) + ' Kbps'
+		},
+
+		getThumbnailUrl(path) {
+			if (!path) return ''
+			const encoded = path.split('/').map(s => encodeURIComponent(s)).join('/')
+			return getAssetURL(encoded)
 		},
 
 		async scanPerformers() {
@@ -712,6 +992,26 @@ export default {
 </script>
 
 <style scoped>
+.btn-purple {
+	background-color: #8b5cf6;
+	border-color: #8b5cf6;
+	color: #fff;
+}
+.btn-purple:hover:not(:disabled) {
+	background-color: #7c3aed;
+	border-color: #7c3aed;
+	color: #fff;
+}
+.btn-purple:disabled {
+	opacity: 0.65;
+}
+.bg-purple {
+	background-color: #8b5cf6 !important;
+}
+.text-purple {
+	color: #8b5cf6 !important;
+}
+
 .tasks-page {
 	min-height: 100vh;
 	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -870,5 +1170,39 @@ export default {
 	color: #00d9ff !important;
 	margin-top: 0.5rem;
 	font-weight: 600;
+}
+
+.duplicate-group {
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.duplicate-group-header {
+	padding: 0.5rem 0.75rem;
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.duplicate-video-row {
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.duplicate-video-row:last-child {
+	border-bottom: none;
+}
+
+.dup-thumb {
+	width: 80px;
+	height: 48px;
+	object-fit: cover;
+	border-radius: 4px;
+}
+
+.dup-thumb-placeholder {
+	width: 80px;
+	height: 48px;
+	background: rgba(255, 255, 255, 0.05);
+	border-radius: 4px;
 }
 </style>

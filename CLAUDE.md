@@ -57,7 +57,34 @@ Missing either step = silent render failure.
   - Configured via `THUMBNAIL_DIR=./assets/thumbnails` in `api/.env`
   - **Never pre-set `thumbnail_path` in DB before FFmpeg writes the file** — set empty on create, update only after `GenerateThumbnailHierarchical` succeeds
 
+## Asset URLs — Always Use getAssetURL
+Never build asset URLs as root-relative paths (e.g. `/assets/thumbnails/...`) — the dev proxy only covers `/api/**`, so root-relative asset paths hit the Vue dev server and 404.
+Import `getAssetURL` from `@/services/api`. Encode filenames with special chars per-segment first:
+```js
+import { getAssetURL } from '@/services/api'
+const url = getAssetURL(path.split('/').map(s => encodeURIComponent(s)).join('/'))
+```
+
 ## Response Shape
 Frontend `api.js` interceptor returns `response.data` (the HTTP body).
 After `await videosAPI.getAll()`, `res` is already `{data: [...], total: N, message: ""}`.
 Use `res.data` for the payload, not `res.data.data`.
+
+## Windows Service Context
+The backend runs as a Windows service (Session 0). Any process launched via `exec.Command` (e.g. `explorer.exe`) is invisible to the user's desktop.
+**Never rely on exec.Command to show UI to the user.** Always return data to the frontend and let the browser handle display/clipboard.
+Keep exec calls as best-effort (they work in dev/regular-process mode).
+
+## Async Context Menu Actions — Toast Pattern
+When an action hides the context menu immediately, show a loading toast before the `await`:
+```js
+const id = this.$toast.loading('Working...', subtitle)
+try {
+    const res = await someAPI.call()
+    this.$toast.removeToast(id)
+    this.$toast.success('Done', detail, 6000)
+} catch (err) {
+    this.$toast.removeToast(id)
+    this.$toast.error('Failed', '', 5000)
+}
+```

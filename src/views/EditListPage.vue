@@ -10,7 +10,7 @@
 								<font-awesome-icon :icon="['fas', 'folder-open']" class="me-2" />
 								My Lists
 							</h5>
-							<button class="btn btn-sm btn-primary" @click="showCreateListModal = true" title="Create New List">
+							<button class="btn btn-sm btn-primary" @click="openCreateListModal" title="Create New List">
 								<font-awesome-icon :icon="['fas', 'plus']" />
 							</button>
 						</div>
@@ -23,7 +23,7 @@
 						<div v-else-if="displayLists.length === 0" class="sidebar-empty">
 							<font-awesome-icon :icon="['fas', 'list']" size="2x" class="mb-2" />
 							<p>No lists yet</p>
-							<button class="btn btn-sm btn-outline-primary" @click="showCreateListModal = true">
+							<button class="btn btn-sm btn-outline-primary" @click="openCreateListModal">
 								Create Your First List
 							</button>
 						</div>
@@ -65,7 +65,7 @@
 						<font-awesome-icon :icon="['fas', 'hand-pointer']" size="4x" class="mb-3" />
 						<h3>Select a List</h3>
 						<p>Choose a list from the sidebar to view its contents, or create a new one.</p>
-						<button class="btn btn-primary" @click="showCreateListModal = true">
+						<button class="btn btn-primary" @click="openCreateListModal">
 							<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
 							Create New List
 						</button>
@@ -344,59 +344,12 @@
 		</div>
 
 		<!-- Create/Edit List Modal -->
-		<div v-if="showCreateListModal || showEditListModal" class="modal-overlay" @click.self="closeListModal">
-			<div class="list-modal">
-				<div class="modal-header">
-					<h4>{{ showEditListModal ? 'Edit List' : 'Create New List' }}</h4>
-					<button class="btn-close-modal" @click="closeListModal">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</div>
-				<div class="modal-body">
-					<div class="mb-3">
-						<label class="form-label">List Name *</label>
-						<input v-model="listForm.name" type="text" class="form-control" placeholder="Enter list name" />
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Description</label>
-						<textarea v-model="listForm.description" class="form-control" rows="2" placeholder="Optional description"></textarea>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Color</label>
-						<div class="color-picker">
-							<div
-								v-for="color in availableColors"
-								:key="color"
-								class="color-option"
-								:class="{ selected: listForm.color === color }"
-								:style="{ backgroundColor: color }"
-								@click="listForm.color = color"
-							></div>
-						</div>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Icon</label>
-						<div class="icon-picker">
-							<div
-								v-for="icon in availableIcons"
-								:key="icon"
-								class="icon-option"
-								:class="{ selected: listForm.icon === icon }"
-								@click="listForm.icon = icon"
-							>
-								<font-awesome-icon :icon="['fas', icon]" />
-							</div>
-						</div>
-					</div>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" @click="closeListModal">Cancel</button>
-					<button class="btn btn-primary" :disabled="!listForm.name" @click="saveList">
-						{{ showEditListModal ? 'Save Changes' : 'Create List' }}
-					</button>
-				</div>
-			</div>
-		</div>
+		<EditListFormModal
+			:visible="showListFormModal"
+			:list="editingList"
+			@close="showListFormModal = false"
+			@saved="onListSaved"
+		/>
 
 		<!-- Delete Confirmation Modal -->
 		<div v-if="showDeleteConfirm" class="modal-overlay" @click.self="showDeleteConfirm = false">
@@ -452,63 +405,21 @@
 		</div>
 
 		<!-- Notes Modal -->
-		<div v-if="notesModal.visible" class="modal-overlay" @click.self="closeNotesModal">
-			<div class="list-modal">
-				<div class="modal-header">
-					<h4>Edit Notes</h4>
-					<button class="btn-close-modal" @click="closeNotesModal">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</div>
-				<div class="modal-body">
-					<p class="text-muted mb-2">{{ notesModal.item?.title }}</p>
-					<textarea
-						v-model="notesModal.notes"
-						class="form-control"
-						rows="4"
-						placeholder="Add notes about this video..."
-					></textarea>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" @click="closeNotesModal">Cancel</button>
-					<button class="btn btn-primary" :disabled="notesModal.saving" @click="saveNotes">
-						<font-awesome-icon v-if="notesModal.saving" :icon="['fas', 'spinner']" spin class="me-2" />
-						Save Notes
-					</button>
-				</div>
-			</div>
-		</div>
+		<EditListNotesModal
+			:visible="notesModal.visible"
+			:item="notesModal.item"
+			:list-id="selectedListId"
+			@close="notesModal.visible = false; notesModal.item = null"
+			@saved="onNotesSaved"
+		/>
 
 		<!-- Export Modal -->
-		<div v-if="exportModal.visible" class="modal-overlay" @click.self="exportModal.visible = false">
-			<div class="list-modal">
-				<div class="modal-header">
-					<h4>Export List</h4>
-					<button class="btn-close-modal" @click="exportModal.visible = false">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</div>
-				<div class="modal-body">
-					<p>Export "{{ selectedList?.name }}" to a file.</p>
-					<div class="mb-3">
-						<label class="form-label">Format</label>
-						<select v-model="exportModal.format" class="form-select">
-							<option value="json">JSON (Full data)</option>
-							<option value="csv">CSV (Spreadsheet)</option>
-							<option value="txt">Text (Simple list)</option>
-						</select>
-					</div>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" @click="exportModal.visible = false">Cancel</button>
-					<button class="btn btn-primary" :disabled="exportModal.exporting" @click="exportList">
-						<font-awesome-icon v-if="exportModal.exporting" :icon="['fas', 'spinner']" spin class="me-2" />
-						<font-awesome-icon v-else :icon="['fas', 'download']" class="me-2" />
-						Export
-					</button>
-				</div>
-			</div>
-		</div>
+		<EditListExportModal
+			:visible="exportModal.visible"
+			:list="selectedList"
+			:items="listItems"
+			@close="exportModal.visible = false"
+		/>
 	</div>
 </template>
 
@@ -516,7 +427,8 @@
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import { useFormatters } from '@/composables/useFormatters'
 import { LoadingState, EmptyState, StatCard } from '@/components/shared'
-import { getAssetURL, videoListsAPI } from '@/services/api'
+import { EditListFormModal, EditListNotesModal, EditListExportModal } from '@/components/editlist'
+import { getAssetURL, videosAPI, videoListsAPI } from '@/services/api'
 
 const API_BASE = 'http://localhost:8080/api/v1'
 
@@ -527,6 +439,9 @@ export default {
 		LoadingState,
 		EmptyState,
 		StatCard,
+		EditListFormModal,
+		EditListNotesModal,
+		EditListExportModal,
 	},
 	data() {
 		return {
@@ -551,18 +466,9 @@ export default {
 			viewMode: 'grid',
 
 			// Modals
-			showCreateListModal: false,
-			showEditListModal: false,
+			showListFormModal: false,
+			editingList: null,
 			showDeleteConfirm: false,
-			editingListId: null,
-
-			// Form
-			listForm: {
-				name: '',
-				description: '',
-				color: '#007bff',
-				icon: 'list',
-			},
 
 			// Video Player
 			playerVisible: false,
@@ -588,27 +494,12 @@ export default {
 			notesModal: {
 				visible: false,
 				item: null,
-				notes: '',
-				saving: false,
 			},
 
 			// Export Modal
 			exportModal: {
 				visible: false,
-				format: 'json',
-				exporting: false,
 			},
-
-			// Options
-			availableColors: [
-				'#007bff', '#6c757d', '#28a745', '#dc3545', '#ffc107',
-				'#17a2b8', '#6f42c1', '#e83e8c', '#fd7e14', '#20c997',
-			],
-			availableIcons: [
-				'list', 'star', 'heart', 'bookmark', 'folder',
-				'film', 'video', 'play-circle', 'fire', 'clock',
-				'eye', 'thumbs-up', 'trophy', 'gem', 'crown',
-			],
 		}
 	},
 	computed: {
@@ -694,69 +585,21 @@ export default {
 		},
 
 		// Create/Edit List
+		openCreateListModal() {
+			this.editingList = null
+			this.showListFormModal = true
+		},
+
 		editList(list) {
-			this.editingListId = list.id
-			this.listForm = {
-				name: list.name,
-				description: list.description || '',
-				color: list.color || '#007bff',
-				icon: list.icon || 'list',
-			}
-			this.showEditListModal = true
+			this.editingList = list
+			this.showListFormModal = true
 		},
 
-		closeListModal() {
-			this.showCreateListModal = false
-			this.showEditListModal = false
-			this.editingListId = null
-			this.listForm = {
-				name: '',
-				description: '',
-				color: '#007bff',
-				icon: 'list',
-			}
-		},
-
-		async saveList() {
-			try {
-				if (this.showEditListModal && this.editingListId) {
-					// Update existing list
-					const response = await fetch(`${API_BASE}/lists/${this.editingListId}`, {
-						method: 'PUT',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(this.listForm),
-					})
-					const data = await response.json()
-					if (data.success) {
-						this.$toast.success('List updated')
-						await this.loadLists()
-					} else {
-						throw new Error(data.message)
-					}
-				} else {
-					// Create new list
-					const response = await fetch(`${API_BASE}/lists`, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify(this.listForm),
-					})
-					const data = await response.json()
-					if (data.success) {
-						this.$toast.success('List created')
-						await this.loadLists()
-						// Select the new list
-						if (data.data && data.data.id) {
-							this.selectList(data.data.id)
-						}
-					} else {
-						throw new Error(data.message)
-					}
-				}
-				this.closeListModal()
-			} catch (error) {
-				console.error('Failed to save list:', error)
-				this.$toast.error(error.message || 'Failed to save list')
-			}
+		async onListSaved(newListId) {
+			this.showListFormModal = false
+			this.editingList = null
+			await this.loadLists()
+			if (newListId) this.selectList(newListId)
 		},
 
 		// Delete List
@@ -968,24 +811,36 @@ export default {
 			return result
 		},
 
-		async openInExplorer(item) {
-			if (!item.video_id) {
-				this.$toast.error('Cannot open: video not in database')
+		openInExplorer(item) {
+			if (!item.file_path) {
+				this.$toast.error('Cannot open: no file path available')
 				return
 			}
-			try {
-				const response = await fetch(`${API_BASE}/videos/${item.video_id}/open-in-explorer`, {
-					method: 'POST',
-				})
-				const data = await response.json()
-				if (data.success) {
-					this.$toast.success('Opened in Explorer')
-				} else {
-					throw new Error(data.message)
-				}
-			} catch (error) {
-				console.error('Failed to open in explorer:', error)
-				this.$toast.error(error.message || 'Failed to open in Explorer')
+
+			const filePath = item.file_path
+			const lastSep = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+			const dir = lastSep > 0 ? filePath.substring(0, lastSep) : filePath
+
+			const execCommandCopy = () => {
+				const el = document.createElement('textarea')
+				el.value = dir
+				el.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0'
+				document.body.appendChild(el)
+				el.select()
+				try { document.execCommand('copy') } catch (e) { /* ignore */ }
+				document.body.removeChild(el)
+			}
+
+			if (navigator.clipboard?.writeText) {
+				navigator.clipboard.writeText(dir).catch(execCommandCopy)
+			} else {
+				execCommandCopy()
+			}
+
+			this.$toast.info('Folder path copied to clipboard', dir, 8000)
+
+			if (item.video_id) {
+				videosAPI.openInExplorer(item.video_id).catch(() => {})
 			}
 		},
 
@@ -1055,119 +910,16 @@ export default {
 		// Notes Modal
 		openNotesModal(item) {
 			this.notesModal.item = item
-			this.notesModal.notes = item.notes || ''
 			this.notesModal.visible = true
 		},
 
-		closeNotesModal() {
+		onNotesSaved(itemId, notes) {
+			const item = this.listItems.find(i => i.id === itemId)
+			if (item) item.notes = notes
+			const filteredItem = this.filteredItems.find(i => i.id === itemId)
+			if (filteredItem) filteredItem.notes = notes
 			this.notesModal.visible = false
 			this.notesModal.item = null
-			this.notesModal.notes = ''
-		},
-
-		async saveNotes() {
-			this.notesModal.saving = true
-			try {
-				// Update via API - we need to update the item's notes
-				const response = await fetch(`${API_BASE}/lists/${this.selectedListId}/items/${this.notesModal.item.id}/notes`, {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ notes: this.notesModal.notes }),
-				})
-				const data = await response.json()
-				if (data.success) {
-					// Update locally
-					const item = this.listItems.find(i => i.id === this.notesModal.item.id)
-					if (item) item.notes = this.notesModal.notes
-					const filteredItem = this.filteredItems.find(i => i.id === this.notesModal.item.id)
-					if (filteredItem) filteredItem.notes = this.notesModal.notes
-					this.$toast.success('Notes saved')
-					this.closeNotesModal()
-				} else {
-					throw new Error(data.message)
-				}
-			} catch (error) {
-				console.error('Failed to save notes:', error)
-				this.$toast.error(error.message || 'Failed to save notes')
-			} finally {
-				this.notesModal.saving = false
-			}
-		},
-
-		// Export
-		async exportList() {
-			this.exportModal.exporting = true
-			try {
-				const list = this.selectedList
-				const items = this.listItems
-				let content = ''
-				let filename = ''
-				let mimeType = ''
-
-				if (this.exportModal.format === 'json') {
-					const exportData = {
-						list: {
-							name: list.name,
-							description: list.description,
-							color: list.color,
-							icon: list.icon,
-						},
-						items: items.map(i => ({
-							title: i.title,
-							file_path: i.file_path,
-							duration: i.duration,
-							resolution: i.resolution,
-							is_scraped: i.is_scraped,
-							source: i.source,
-							notes: i.notes,
-							added_at: i.added_at,
-						})),
-						exported_at: new Date().toISOString(),
-					}
-					content = JSON.stringify(exportData, null, 2)
-					filename = `${list.name.replace(/[^a-z0-9]/gi, '_')}.json`
-					mimeType = 'application/json'
-				} else if (this.exportModal.format === 'csv') {
-					const headers = ['Title', 'File Path', 'Duration', 'Resolution', 'Source', 'Notes', 'Added At']
-					const rows = items.map(i => [
-						`"${(i.title || '').replace(/"/g, '""')}"`,
-						`"${(i.file_path || '').replace(/"/g, '""')}"`,
-						i.duration || '',
-						i.resolution || '',
-						i.is_scraped ? i.source : 'Local',
-						`"${(i.notes || '').replace(/"/g, '""')}"`,
-						i.added_at || '',
-					])
-					content = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-					filename = `${list.name.replace(/[^a-z0-9]/gi, '_')}.csv`
-					mimeType = 'text/csv'
-				} else {
-					// Plain text
-					content = `${list.name}\n${'='.repeat(list.name.length)}\n\n`
-					content += items.map((i, idx) => `${idx + 1}. ${i.title}${i.notes ? ` - ${i.notes}` : ''}`).join('\n')
-					filename = `${list.name.replace(/[^a-z0-9]/gi, '_')}.txt`
-					mimeType = 'text/plain'
-				}
-
-				// Download file
-				const blob = new Blob([content], { type: mimeType })
-				const url = URL.createObjectURL(blob)
-				const a = document.createElement('a')
-				a.href = url
-				a.download = filename
-				document.body.appendChild(a)
-				a.click()
-				document.body.removeChild(a)
-				URL.revokeObjectURL(url)
-
-				this.$toast.success(`List exported as ${filename}`)
-				this.exportModal.visible = false
-			} catch (error) {
-				console.error('Failed to export:', error)
-				this.$toast.error('Failed to export list')
-			} finally {
-				this.exportModal.exporting = false
-			}
 		},
 
 		// Keyboard Shortcuts
@@ -1185,7 +937,8 @@ export default {
 			if (event.key === 'Escape') {
 				this.selectedItems = []
 				this.closeContextMenu()
-				this.closeNotesModal()
+				this.notesModal.visible = false
+				this.notesModal.item = null
 				this.exportModal.visible = false
 			}
 
@@ -1505,63 +1258,6 @@ export default {
 	gap: 0.75rem;
 	padding: 1.25rem 1.5rem;
 	border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* Color Picker */
-.color-picker {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-}
-
-.color-option {
-	width: 32px;
-	height: 32px;
-	border-radius: 8px;
-	cursor: pointer;
-	border: 2px solid transparent;
-	transition: all 0.2s;
-}
-
-.color-option:hover {
-	transform: scale(1.1);
-}
-
-.color-option.selected {
-	border-color: white;
-	box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.3);
-}
-
-/* Icon Picker */
-.icon-picker {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-}
-
-.icon-option {
-	width: 40px;
-	height: 40px;
-	border-radius: 8px;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: rgba(255, 255, 255, 0.05);
-	color: rgba(255, 255, 255, 0.7);
-	cursor: pointer;
-	border: 2px solid transparent;
-	transition: all 0.2s;
-}
-
-.icon-option:hover {
-	background: rgba(255, 255, 255, 0.1);
-	color: white;
-}
-
-.icon-option.selected {
-	border-color: #00d9ff;
-	color: #00d9ff;
-	background: rgba(0, 217, 255, 0.1);
 }
 
 /* Video Path Display */

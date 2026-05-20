@@ -43,74 +43,14 @@
 			</div>
 
 			<!-- Stats Row -->
-			<div class="row g-3 mb-4">
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon download">
-							<font-awesome-icon :icon="['fas', 'arrow-down']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ formatSpeed(currentSpeed) }}</div>
-							<div class="stat-label">Download Speed</div>
-						</div>
-					</div>
-				</div>
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon queue">
-							<font-awesome-icon :icon="['fas', 'list']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ linkGrabberPackages.length }}</div>
-							<div class="stat-label">LinkGrabber</div>
-						</div>
-					</div>
-				</div>
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon active">
-							<font-awesome-icon :icon="['fas', 'download']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ activeDownloads }}</div>
-							<div class="stat-label">Active Downloads</div>
-						</div>
-					</div>
-				</div>
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon limit">
-							<font-awesome-icon :icon="['fas', 'tachometer-alt']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ speedLimit > 0 ? formatSpeed(speedLimit) : '∞' }}</div>
-							<div class="stat-label">Speed Limit</div>
-						</div>
-					</div>
-				</div>
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon" style="background: linear-gradient(135deg, #17a2b8, #117a8b)">
-							<font-awesome-icon :icon="['fas', 'database']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ formatSize(totalDownloadSize) }}</div>
-							<div class="stat-label">Total Size</div>
-						</div>
-					</div>
-				</div>
-				<div class="col-6 col-lg-2">
-					<div class="stat-card">
-						<div class="stat-icon" style="background: linear-gradient(135deg, #28a745, #1e7e34)">
-							<font-awesome-icon :icon="['fas', 'check-circle']" />
-						</div>
-						<div class="stat-content">
-							<div class="stat-value">{{ completedDownloads }}</div>
-							<div class="stat-label">Completed</div>
-						</div>
-					</div>
-				</div>
-			</div>
+			<JDStatsRow
+				:current-speed="currentSpeed"
+				:link-grabber-count="linkGrabberPackages.length"
+				:active-downloads="activeDownloads"
+				:speed-limit="speedLimit"
+				:total-download-size="totalDownloadSize"
+				:completed-downloads="completedDownloads"
+			/>
 
 			<!-- Overall Progress (when downloading) -->
 			<div v-if="activeDownloads > 0" class="overall-progress mb-4">
@@ -190,36 +130,7 @@
 			</div>
 
 			<!-- Provider Priority Config -->
-			<div class="provider-priority-section mb-3">
-				<button class="btn btn-outline-secondary btn-sm w-100 d-flex align-items-center justify-content-between" @click="showPriorityConfig = !showPriorityConfig">
-					<span>
-						<font-awesome-icon :icon="['fas', 'sort-amount-down']" class="me-2" />
-						Download Provider Priority
-					</span>
-					<font-awesome-icon :icon="['fas', showPriorityConfig ? 'chevron-up' : 'chevron-down']" />
-				</button>
-				<div v-if="showPriorityConfig" class="priority-config-card mt-2">
-					<p class="text-muted small mb-2">Set the priority order for download providers. Higher priority providers are listed first when sending links to JDownloader.</p>
-					<div class="priority-list-jd">
-						<div v-for="(provider, idx) in priorityList" :key="provider" class="priority-item-jd">
-							<span class="priority-rank-jd">{{ idx + 1 }}</span>
-							<span class="priority-name-jd">{{ provider }}</span>
-							<div class="priority-actions-jd">
-								<button @click="movePriorityUp(provider)" :disabled="idx === 0" class="btn btn-sm btn-outline-light priority-btn-jd" title="Move up">
-									<font-awesome-icon :icon="['fas', 'chevron-up']" />
-								</button>
-								<button @click="movePriorityDown(provider)" :disabled="idx === priorityList.length - 1" class="btn btn-sm btn-outline-light priority-btn-jd" title="Move down">
-									<font-awesome-icon :icon="['fas', 'chevron-down']" />
-								</button>
-							</div>
-						</div>
-					</div>
-					<button class="btn btn-outline-secondary btn-sm mt-2" @click="resetPriority">
-						<font-awesome-icon :icon="['fas', 'undo']" class="me-1" />
-						Reset to Defaults
-					</button>
-				</div>
-			</div>
+			<JDProviderPriorityConfig />
 
 			<!-- Main Content Tabs -->
 			<ul class="nav nav-tabs mb-3" role="tablist">
@@ -238,7 +149,7 @@
 					</button>
 				</li>
 				<li class="nav-item" role="presentation">
-					<button :class="['nav-link', { active: activeTab === 'history' }]" @click=";(activeTab = 'history'), loadHistory()" type="button">
+					<button :class="['nav-link', { active: activeTab === 'history' }]" @click="activeTab = 'history'" type="button">
 						<font-awesome-icon :icon="['fas', 'history']" class="me-2" />
 						History
 					</button>
@@ -684,192 +595,36 @@
 
 				<!-- History Tab -->
 				<div v-if="activeTab === 'history'" class="tab-pane active">
-					<div class="d-flex justify-content-between align-items-center mb-3">
-						<span class="text-muted">Links sent to JDownloader from this app</span>
-						<button class="btn btn-outline-danger btn-sm" @click="clearHistory" :disabled="history.length === 0">
-							<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />
-							Clear History
-						</button>
-					</div>
-
-					<div v-if="history.length === 0" class="empty-state">
-						<font-awesome-icon :icon="['fas', 'history']" class="empty-icon" />
-						<p>No history yet</p>
-						<p class="text-muted small">Links sent to JDownloader will appear here</p>
-					</div>
-
-					<div v-else class="history-list">
-						<div v-for="item in history" :key="item.id" class="history-item">
-							<div class="history-info">
-								<div class="history-title">{{ item.videoTitle || item.linkUrl }}</div>
-								<div class="history-meta">
-									<span class="package">{{ item.packageName || 'No package' }}</span>
-									<span class="time">{{ formatDate(item.sentAt) }}</span>
-								</div>
-							</div>
-							<span :class="['status-badge', getHistoryStatusClass(item.status)]">{{ item.status }}</span>
-						</div>
-					</div>
+					<JDHistoryTab />
 				</div>
 			</div>
 		</div>
 
 		<!-- Context Menu -->
-		<div v-if="contextMenu.show" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
-			<div class="context-menu-item" @click="contextMenuAction('rename')">
-				<font-awesome-icon :icon="['fas', 'edit']" class="me-2" />
-				Rename
-			</div>
-			<div class="context-menu-item" @click="contextMenuAction('copy-url')">
-				<font-awesome-icon :icon="['fas', 'copy']" class="me-2" />
-				Copy URL
-			</div>
-			<div class="context-menu-divider"></div>
-			<div class="context-menu-item" @click="contextMenuAction('priority-highest')">
-				<font-awesome-icon :icon="['fas', 'angle-double-up']" class="me-2 text-danger" />
-				Priority: Highest
-			</div>
-			<div class="context-menu-item" @click="contextMenuAction('priority-high')">
-				<font-awesome-icon :icon="['fas', 'angle-up']" class="me-2 text-warning" />
-				Priority: High
-			</div>
-			<div class="context-menu-item" @click="contextMenuAction('priority-default')">
-				<font-awesome-icon :icon="['fas', 'minus']" class="me-2" />
-				Priority: Default
-			</div>
-			<div class="context-menu-item" @click="contextMenuAction('priority-low')">
-				<font-awesome-icon :icon="['fas', 'angle-down']" class="me-2 text-secondary" />
-				Priority: Low
-			</div>
-			<div class="context-menu-divider"></div>
-			<div v-if="contextMenu.type.includes('lg')" class="context-menu-item" @click="contextMenuAction('move')">
-				<font-awesome-icon :icon="['fas', 'arrow-right']" class="me-2 text-primary" />
-				Move to Downloads
-			</div>
-			<div v-if="contextMenu.type === 'dl' || contextMenu.type === 'dl-link'" class="context-menu-item" @click="contextMenuAction('force')">
-				<font-awesome-icon :icon="['fas', 'bolt']" class="me-2 text-warning" />
-				Force Download
-			</div>
-			<div class="context-menu-item" @click="contextMenuAction('toggle-enabled')">
-				<font-awesome-icon :icon="['fas', 'eye']" class="me-2" />
-				{{ contextMenu.item?.enabled === false ? 'Enable' : 'Disable' }}
-			</div>
-			<div class="context-menu-divider"></div>
-			<div class="context-menu-item text-danger" @click="contextMenuAction('remove')">
-				<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
-				Remove
-			</div>
-		</div>
+		<JDContextMenu
+			v-if="contextMenu.show"
+			:x="contextMenu.x"
+			:y="contextMenu.y"
+			:type="contextMenu.type"
+			:item-enabled="contextMenu.item?.enabled"
+			@action="contextMenuAction"
+		/>
 
 		<!-- Add Links Modal -->
-		<div v-if="showAddLinksModal" class="modal-backdrop" @click.self="showAddLinksModal = false">
-			<div class="modal-content add-links-modal">
-				<div class="modal-header">
-					<h5 class="modal-title">
-						<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-						Add Links to JDownloader
-					</h5>
-					<button class="btn-close" @click="showAddLinksModal = false"></button>
-				</div>
-				<div class="modal-body">
-					<div class="mb-3">
-						<label class="form-label">Paste URLs (one per line)</label>
-						<textarea
-							v-model="newLinksText"
-							class="form-control"
-							rows="8"
-							placeholder="https://example.com/video1.mp4&#10;https://example.com/video2.mp4&#10;..."
-						></textarea>
-					</div>
-					<div class="mb-3" style="position: relative">
-						<label class="form-label">Download Path</label>
-						<div class="input-group">
-							<span class="input-group-text">/output/</span>
-							<input
-								v-model="newLinksPath"
-								type="text"
-								class="form-control"
-								placeholder="subfolder (leave empty for root)"
-								@focus="showPathDropdown = true"
-								@blur="hidePathDropdownDelayed"
-							/>
-							<button
-								v-if="newLinksPath"
-								class="btn btn-outline-secondary"
-								@click="newLinksPath = ''"
-								title="Clear"
-							>
-								<font-awesome-icon :icon="['fas', 'times']" />
-							</button>
-						</div>
-						<div v-if="showPathDropdown && downloadPathHistory.length > 0" class="path-history-dropdown">
-							<div class="path-history-header">
-								<span class="text-muted small">Recent paths</span>
-								<button class="btn btn-link btn-sm text-danger p-0" @mousedown.prevent="clearPathHistory">clear</button>
-							</div>
-							<div
-								v-for="path in filteredPathHistory"
-								:key="path"
-								class="path-history-item"
-								@mousedown.prevent="selectPath(path)"
-							>
-								<font-awesome-icon :icon="['fas', 'folder']" class="me-2 text-muted" />
-								/output/{{ path }}
-							</div>
-						</div>
-						<small class="text-muted">Downloads to /output/ by default. Add subfolder name to customize.</small>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Package Name (optional, leave empty for auto)</label>
-						<input v-model="newLinksPackageName" type="text" class="form-control" placeholder="Auto-detect from links" />
-					</div>
-					<div class="form-check">
-						<input v-model="newLinksAutoStart" type="checkbox" class="form-check-input" id="autoStart" />
-						<label class="form-check-label" for="autoStart">Auto-start downloads</label>
-					</div>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" @click="showAddLinksModal = false">Cancel</button>
-					<button class="btn btn-primary" @click="addLinks" :disabled="!newLinksText.trim() || addingLinks">
-						<font-awesome-icon v-if="addingLinks" :icon="['fas', 'spinner']" spin class="me-1" />
-						<font-awesome-icon v-else :icon="['fas', 'plus']" class="me-1" />
-						Add {{ linksCount }} Link{{ linksCount !== 1 ? 's' : '' }}
-					</button>
-				</div>
-			</div>
-		</div>
+		<JDAddLinksModal
+			v-if="showAddLinksModal"
+			@close="showAddLinksModal = false"
+			@links-added="onLinksAdded"
+			@error="showToast($event, 'error')"
+		/>
 
 		<!-- Export Modal -->
-		<div v-if="showExportModal" class="modal-backdrop" @click.self="showExportModal = false">
-			<div class="modal-content">
-				<div class="modal-header">
-					<h5 class="modal-title">
-						<font-awesome-icon :icon="['fas', 'file-export']" class="me-2" />
-						Export Links
-					</h5>
-					<button class="btn-close" @click="showExportModal = false"></button>
-				</div>
-				<div class="modal-body">
-					<div class="mb-3">
-						<label class="form-label">Exported URLs</label>
-						<textarea v-model="exportedLinksText" class="form-control" rows="10" readonly></textarea>
-					</div>
-					<div class="d-flex gap-2">
-						<button class="btn btn-primary" @click="copyExportedLinks">
-							<font-awesome-icon :icon="['fas', 'copy']" class="me-1" />
-							Copy to Clipboard
-						</button>
-						<button class="btn btn-outline-primary" @click="downloadExportedLinks">
-							<font-awesome-icon :icon="['fas', 'download']" class="me-1" />
-							Download as File
-						</button>
-					</div>
-				</div>
-				<div class="modal-footer">
-					<button class="btn btn-secondary" @click="showExportModal = false">Close</button>
-				</div>
-			</div>
-		</div>
+		<JDExportModal
+			v-if="showExportModal"
+			:text="exportedLinksText"
+			@close="showExportModal = false"
+			@toast="showToast"
+		/>
 
 		<!-- Toast Notifications -->
 		<div class="toast-container">
@@ -886,6 +641,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { jdownloaderAPI } from '@/services/api'
+import JDAddLinksModal from '@/components/JDAddLinksModal.vue'
+import JDExportModal from '@/components/JDExportModal.vue'
+import JDContextMenu from '@/components/JDContextMenu.vue'
+import JDProviderPriorityConfig from '@/components/JDProviderPriorityConfig.vue'
+import JDHistoryTab from '@/components/JDHistoryTab.vue'
+import JDStatsRow from '@/components/JDStatsRow.vue'
 
 // Refs
 const pageRef = ref(null)
@@ -918,9 +679,6 @@ const downloadLinks = ref([])
 const selectedDownloadPackages = ref(new Set())
 const selectedDownloadLinks = ref(new Set())
 
-// History state
-const history = ref([])
-
 // Locally-tracked package add timestamps (package_name → Unix ms)
 const packageTimestamps = ref({})
 
@@ -945,16 +703,6 @@ const contextMenu = reactive({
 
 // Add Links Modal state
 const showAddLinksModal = ref(false)
-const newLinksText = ref('')
-const newLinksPath = ref('')
-const newLinksPackageName = ref('')
-const newLinksAutoStart = ref(true)
-const addingLinks = ref(false)
-
-// Download path history (persisted in localStorage)
-const STORAGE_KEY = 'jd-download-path-history'
-const downloadPathHistory = ref(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
-const showPathDropdown = ref(false)
 
 // Export Modal state
 const showExportModal = ref(false)
@@ -1149,13 +897,6 @@ const overallETA = computed(() => {
 	return formatETA(seconds * 1000) // Convert to ms
 })
 
-const linksCount = computed(() => {
-	if (!newLinksText.value.trim()) return 0
-	return newLinksText.value
-		.trim()
-		.split('\n')
-		.filter((l) => l.trim()).length
-})
 
 // Methods
 const showToast = (message, type = 'info') => {
@@ -1278,16 +1019,6 @@ const loadDownloads = async () => {
 	}
 }
 
-const loadHistory = async () => {
-	try {
-		const result = await jdownloaderAPI.getHistory(100, 0)
-		history.value = result.items || result || []
-	} catch (error) {
-		console.error('Failed to load history:', error)
-		history.value = []
-	}
-}
-
 const updateRefreshInterval = () => {
 	if (refreshInterval) {
 		clearInterval(refreshInterval)
@@ -1302,78 +1033,11 @@ const updateRefreshInterval = () => {
 	}
 }
 
-// Add Links
-const addLinks = async () => {
-	if (!newLinksText.value.trim()) return
-
-	addingLinks.value = true
-	try {
-		const urls = newLinksText.value
-			.trim()
-			.split('\n')
-			.filter((l) => l.trim())
-		// Build the full download path
-		const downloadPath = newLinksPath.value.trim() ? `/output/${newLinksPath.value.trim().replace(/^\/+/, '')}` : '/output'
-
-		const links = urls.map((url) => ({
-			url: url.trim(),
-			packageName: newLinksPackageName.value || undefined,
-			downloadPath: downloadPath,
-			autoStart: newLinksAutoStart.value,
-		}))
-
-		await jdownloaderAPI.sendLinks(links)
-		showToast(`Added ${links.length} link(s) to JDownloader`, 'success')
-
-		// Save path to history before clearing
-		savePathToHistory(newLinksPath.value.trim())
-
-		newLinksText.value = ''
-		newLinksPath.value = ''
-		newLinksPackageName.value = ''
-		showAddLinksModal.value = false
-
-		await loadPackageTimestamps()
-		await loadLinkGrabber()
-	} catch (error) {
-		console.error('Failed to add links:', error)
-		showToast('Failed to add links: ' + error.message, 'error')
-	} finally {
-		addingLinks.value = false
-	}
-}
-
-// Download path history helpers
-const filteredPathHistory = computed(() => {
-	const query = (newLinksPath.value || '').toLowerCase()
-	if (!query) return downloadPathHistory.value
-	return downloadPathHistory.value.filter((p) => p.toLowerCase().includes(query))
-})
-
-const savePathToHistory = (path) => {
-	if (!path) return
-	const history = downloadPathHistory.value.filter((p) => p !== path)
-	history.unshift(path) // Most recent first
-	if (history.length > 20) history.length = 20
-	downloadPathHistory.value = history
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
-}
-
-const selectPath = (path) => {
-	newLinksPath.value = path
-	showPathDropdown.value = false
-}
-
-const clearPathHistory = () => {
-	downloadPathHistory.value = []
-	localStorage.removeItem(STORAGE_KEY)
-	showPathDropdown.value = false
-}
-
-const hidePathDropdownDelayed = () => {
-	setTimeout(() => {
-		showPathDropdown.value = false
-	}, 150)
+// Add Links callback (modal handles the API call, parent refreshes)
+const onLinksAdded = async (count) => {
+	showToast(`Added ${count} link(s) to JDownloader`, 'success')
+	await loadPackageTimestamps()
+	await loadLinkGrabber()
 }
 
 // Export Links
@@ -1382,26 +1046,6 @@ const exportLinks = () => {
 	const urls = links.map((l) => l.url).filter(Boolean)
 	exportedLinksText.value = urls.join('\n')
 	showExportModal.value = true
-}
-
-const copyExportedLinks = async () => {
-	try {
-		await navigator.clipboard.writeText(exportedLinksText.value)
-		showToast('Links copied to clipboard', 'success')
-	} catch (error) {
-		showToast('Failed to copy links', 'error')
-	}
-}
-
-const downloadExportedLinks = () => {
-	const blob = new Blob([exportedLinksText.value], { type: 'text/plain' })
-	const url = URL.createObjectURL(blob)
-	const a = document.createElement('a')
-	a.href = url
-	a.download = `jdownloader-links-${new Date().toISOString().slice(0, 10)}.txt`
-	a.click()
-	URL.revokeObjectURL(url)
-	showToast('Links downloaded', 'success')
 }
 
 // Download Controls
@@ -1815,18 +1459,6 @@ const removeSelectedFromDownloads = async () => {
 	}
 }
 
-// History
-const clearHistory = async () => {
-	if (!confirm('Are you sure you want to clear the history?')) return
-	try {
-		await jdownloaderAPI.clearHistory()
-		history.value = []
-		showToast('History cleared', 'info')
-	} catch (error) {
-		console.error('Failed to clear history:', error)
-	}
-}
-
 // Selection helpers
 const togglePackage = (type, packageId) => {
 	if (type === 'lg') {
@@ -1915,12 +1547,6 @@ const formatSize = (bytes) => {
 	return `${size.toFixed(1)} ${units[i]}`
 }
 
-const formatDate = (dateString) => {
-	if (!dateString) return ''
-	const date = new Date(dateString)
-	return date.toLocaleString()
-}
-
 const formatETA = (milliseconds) => {
 	if (!milliseconds || milliseconds <= 0) return ''
 	const seconds = Math.floor(milliseconds / 1000)
@@ -1975,89 +1601,6 @@ const getStatusClass = (link) => {
 	if (status.includes('error') || status.includes('failed')) return 'danger'
 	if (status.includes('waiting') || status.includes('queued')) return 'warning'
 	return 'secondary'
-}
-
-const getHistoryStatusClass = (status) => {
-	if (!status) return 'secondary'
-	const lower = status.toLowerCase()
-	if (lower === 'sent') return 'success'
-	if (lower === 'failed') return 'danger'
-	if (lower === 'queued') return 'warning'
-	return 'secondary'
-}
-
-// Provider Priority Config (used by ScraperThreadPage JD modal)
-const DEFAULT_PROVIDER_PRIORITY = { pixeldrain: 1, gofile: 2, cyberfile: 3, bunkr: 4, bunkrr: 4, cyberdrop: 5, mediafire: 6, mega: 7 }
-const showPriorityConfig = ref(false)
-
-const loadProviderPriority = () => {
-	try {
-		const saved = localStorage.getItem('providerPriority')
-		if (saved) {
-			const parsed = JSON.parse(saved)
-			for (const [provider, priority] of Object.entries(DEFAULT_PROVIDER_PRIORITY)) {
-				if (!(provider in parsed)) parsed[provider] = priority
-			}
-			const sorted = Object.entries(parsed).sort(([, a], [, b]) => a - b)
-			const values = sorted.map(([, v]) => v)
-			if (new Set(values).size !== values.length) {
-				const fixed = {}
-				sorted.forEach(([name], idx) => { fixed[name] = idx + 1 })
-				localStorage.setItem('providerPriority', JSON.stringify(fixed))
-				return fixed
-			}
-			return parsed
-		}
-	} catch (e) { /* ignore */ }
-	return { ...DEFAULT_PROVIDER_PRIORITY }
-}
-
-const providerPriority = ref(loadProviderPriority())
-
-// Filter out bunkrr alias - it stays synced with bunkr
-const priorityList = computed(() => {
-	return Object.entries(providerPriority.value)
-		.filter(([name]) => name !== 'bunkrr')
-		.sort(([, a], [, b]) => a - b)
-		.map(([name]) => name)
-})
-
-const savePriority = () => {
-	localStorage.setItem('providerPriority', JSON.stringify(providerPriority.value))
-}
-
-const movePriorityUp = (provider) => {
-	const sorted = priorityList.value
-	const idx = sorted.indexOf(provider)
-	if (idx <= 0) return
-	const above = sorted[idx - 1]
-	const temp = providerPriority.value[provider]
-	providerPriority.value[provider] = providerPriority.value[above]
-	providerPriority.value[above] = temp
-	// Keep bunkrr synced with bunkr
-	if (provider === 'bunkr' || above === 'bunkr') {
-		providerPriority.value['bunkrr'] = providerPriority.value['bunkr']
-	}
-	savePriority()
-}
-
-const movePriorityDown = (provider) => {
-	const sorted = priorityList.value
-	const idx = sorted.indexOf(provider)
-	if (idx >= sorted.length - 1) return
-	const below = sorted[idx + 1]
-	const temp = providerPriority.value[provider]
-	providerPriority.value[provider] = providerPriority.value[below]
-	providerPriority.value[below] = temp
-	if (provider === 'bunkr' || below === 'bunkr') {
-		providerPriority.value['bunkrr'] = providerPriority.value['bunkr']
-	}
-	savePriority()
-}
-
-const resetPriority = () => {
-	providerPriority.value = { ...DEFAULT_PROVIDER_PRIORITY }
-	savePriority()
 }
 
 // Lifecycle
@@ -2154,40 +1697,6 @@ watch(refreshIntervalSeconds, updateRefreshInterval)
 	color: rgba(255, 255, 255, 0.5);
 }
 
-/* Path history dropdown */
-.path-history-dropdown {
-	position: absolute;
-	top: 100%;
-	left: 0;
-	right: 0;
-	z-index: 1050;
-	background: #1e1e2e;
-	border: 1px solid rgba(255, 255, 255, 0.15);
-	border-top: none;
-	border-radius: 0 0 6px 6px;
-	max-height: 200px;
-	overflow-y: auto;
-}
-
-.path-history-header {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	padding: 0.4rem 0.75rem;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.path-history-item {
-	padding: 0.4rem 0.75rem;
-	cursor: pointer;
-	font-size: 0.85rem;
-	color: rgba(255, 255, 255, 0.8);
-	transition: background 0.15s;
-}
-
-.path-history-item:hover {
-	background: rgba(255, 255, 255, 0.1);
-}
 
 /* Pagination */
 .pagination-controls {
@@ -2211,39 +1720,6 @@ watch(refreshIntervalSeconds, updateRefreshInterval)
 	text-decoration: line-through;
 }
 
-/* Context Menu */
-.context-menu {
-	position: fixed;
-	z-index: 1060;
-	background: #1e1e2e;
-	border: 1px solid rgba(255, 255, 255, 0.15);
-	border-radius: 8px;
-	min-width: 200px;
-	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-	padding: 0.5rem 0;
-}
-
-.context-menu-item {
-	padding: 0.5rem 1rem;
-	cursor: pointer;
-	color: rgba(255, 255, 255, 0.9);
-	font-size: 0.875rem;
-	transition: background 0.15s;
-}
-
-.context-menu-item:hover {
-	background: rgba(255, 255, 255, 0.1);
-}
-
-.context-menu-item.text-danger {
-	color: #f44336;
-}
-
-.context-menu-divider {
-	height: 1px;
-	background: rgba(255, 255, 255, 0.1);
-	margin: 0.5rem 0;
-}
 
 /* Dropdown menu dark */
 .dropdown-menu-dark {
@@ -2260,97 +1736,6 @@ watch(refreshIntervalSeconds, updateRefreshInterval)
 	background: rgba(255, 255, 255, 0.1);
 }
 
-/* Modal Styles */
-.modal-backdrop {
-	position: fixed;
-	top: 0;
-	left: 0;
-	right: 0;
-	bottom: 0;
-	background: rgba(0, 0, 0, 0.7);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	z-index: 1050;
-}
-
-.modal-content {
-	background: #1a1a2e;
-	border-radius: 12px;
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	width: 90%;
-	max-width: 600px;
-	max-height: 90vh;
-	overflow: auto;
-}
-
-.modal-header {
-	padding: 1rem 1.25rem;
-	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-}
-
-.modal-title {
-	margin: 0;
-	color: #fff;
-}
-
-.btn-close {
-	background: transparent;
-	border: none;
-	color: rgba(255, 255, 255, 0.6);
-	font-size: 1.5rem;
-	cursor: pointer;
-	padding: 0;
-	line-height: 1;
-}
-
-.btn-close:hover {
-	color: #fff;
-}
-
-.btn-close::before {
-	content: '×';
-}
-
-.modal-body {
-	padding: 1.25rem;
-}
-
-.modal-footer {
-	padding: 1rem 1.25rem;
-	border-top: 1px solid rgba(255, 255, 255, 0.1);
-	display: flex;
-	justify-content: flex-end;
-	gap: 0.5rem;
-}
-
-.form-label {
-	color: rgba(255, 255, 255, 0.8);
-}
-
-.form-control {
-	background: rgba(255, 255, 255, 0.1);
-	border: 1px solid rgba(255, 255, 255, 0.2);
-	color: #fff;
-}
-
-.form-control:focus {
-	background: rgba(255, 255, 255, 0.15);
-	border-color: #2196f3;
-	color: #fff;
-	box-shadow: 0 0 0 0.25rem rgba(33, 150, 243, 0.25);
-}
-
-.form-control::placeholder {
-	color: rgba(255, 255, 255, 0.4);
-}
-
-.form-check-label {
-	color: rgba(255, 255, 255, 0.8);
-}
 
 /* Toast Notifications */
 .toast-container {
@@ -2427,62 +1812,4 @@ watch(refreshIntervalSeconds, updateRefreshInterval)
 	outline: none;
 }
 
-/* Provider Priority Config */
-.priority-config-card {
-	background: rgba(255, 255, 255, 0.03);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 8px;
-	padding: 1rem;
-}
-
-.priority-list-jd {
-	display: flex;
-	flex-direction: column;
-	gap: 0.25rem;
-}
-
-.priority-item-jd {
-	display: flex;
-	align-items: center;
-	padding: 0.5rem 0.75rem;
-	background: rgba(255, 255, 255, 0.03);
-	border: 1px solid rgba(255, 255, 255, 0.06);
-	border-radius: 6px;
-}
-
-.priority-rank-jd {
-	width: 1.5rem;
-	height: 1.5rem;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: rgba(139, 92, 246, 0.2);
-	color: #a78bfa;
-	border-radius: 50%;
-	font-size: 0.75rem;
-	font-weight: 600;
-	margin-right: 0.75rem;
-	flex-shrink: 0;
-}
-
-.priority-name-jd {
-	flex: 1;
-	color: rgba(255, 255, 255, 0.85);
-	font-size: 0.85rem;
-	text-transform: capitalize;
-}
-
-.priority-actions-jd {
-	display: flex;
-	gap: 0.25rem;
-}
-
-.priority-btn-jd {
-	padding: 0.15rem 0.4rem;
-	font-size: 0.7rem;
-}
-
-.priority-btn-jd:disabled {
-	opacity: 0.3;
-}
 </style>
