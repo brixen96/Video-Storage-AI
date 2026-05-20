@@ -150,6 +150,35 @@
 										@drop="handleItemDrop($event, getTabById(tabId))"
 										@dragover.prevent
 									>
+										<!-- List view column headers -->
+										<div class="list-view-header">
+											<div class="lh-thumb"></div>
+											<div class="lh-body">
+												<button class="lh-col lh-name" :class="{ 'lh-active': getTabById(tabId).sortBy === 'name' }" @click="setSortBy(getTabById(tabId), 'name')">
+													Name
+													<font-awesome-icon v-if="getTabById(tabId).sortBy === 'name'" :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" class="ms-1" />
+												</button>
+												<div class="lh-meta">
+													<button class="lh-col" :class="{ 'lh-active': getTabById(tabId).sortBy === 'duration' }" @click="setSortBy(getTabById(tabId), 'duration')">
+														Duration
+														<font-awesome-icon v-if="getTabById(tabId).sortBy === 'duration'" :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" class="ms-1" />
+													</button>
+													<button class="lh-col" :class="{ 'lh-active': getTabById(tabId).sortBy === 'resolution' }" @click="setSortBy(getTabById(tabId), 'resolution')">
+														Res
+														<font-awesome-icon v-if="getTabById(tabId).sortBy === 'resolution'" :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" class="ms-1" />
+													</button>
+													<button class="lh-col" :class="{ 'lh-active': getTabById(tabId).sortBy === 'fps' }" @click="setSortBy(getTabById(tabId), 'fps')">
+														FPS
+														<font-awesome-icon v-if="getTabById(tabId).sortBy === 'fps'" :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" class="ms-1" />
+													</button>
+													<button class="lh-col" :class="{ 'lh-active': getTabById(tabId).sortBy === 'size' }" @click="setSortBy(getTabById(tabId), 'size')">
+														Size
+														<font-awesome-icon v-if="getTabById(tabId).sortBy === 'size'" :icon="['fas', getTabById(tabId).sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" class="ms-1" />
+													</button>
+												</div>
+											</div>
+										</div>
+
 										<div
 											v-for="(item, index) in paginatedItems(getTabById(tabId))"
 											:key="item.path"
@@ -1209,6 +1238,14 @@ export default {
 			if (page < 1 || page > this.totalPages(tab)) return
 			tab.currentPage = page
 			window.scrollTo({ top: 0, behavior: 'smooth' })
+		},
+		setSortBy(tab, field) {
+			if (tab.sortBy === field) {
+				tab.sortOrder = tab.sortOrder === 'asc' ? 'desc' : 'asc'
+			} else {
+				tab.sortBy = field
+				tab.sortOrder = 'asc'
+			}
 		},
 		applyFilters(tab) {
 			if (tab && tab.id) {
