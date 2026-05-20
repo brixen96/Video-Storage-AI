@@ -723,6 +723,32 @@ func getVideoDuplicates(c *gin.Context) {
 }
 
 
+// setRatingHandler handles PATCH /api/v1/videos/:id/rating
+func setRatingHandler(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "invalid video id", err)
+		return
+	}
+	var body struct {
+		Rating int `json:"rating"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondBadRequest(c, "invalid request body", err)
+		return
+	}
+	if body.Rating < 0 || body.Rating > 5 {
+		respondBadRequest(c, "rating must be 0-5", nil)
+		return
+	}
+	db := database.GetDB()
+	if _, err := db.Exec(`UPDATE videos SET rating = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, body.Rating, id); err != nil {
+		respondInternalError(c, "Failed to update rating", err)
+		return
+	}
+	respondSuccess(c, gin.H{"id": id, "rating": body.Rating}, "")
+}
+
 // markWatchedHandler handles PATCH /api/v1/videos/:id/watched
 func markWatchedHandler(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)

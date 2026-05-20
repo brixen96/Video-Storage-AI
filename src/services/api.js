@@ -108,6 +108,7 @@ export const videosAPI = {
 		signal,
 	}),
 	markWatched: (id, watched) => api.patch(`/videos/${id}/watched`, { watched }),
+	setRating: (id, rating) => api.patch(`/videos/${id}/rating`, { rating }),
 }
 
 export const studiosAPI = {

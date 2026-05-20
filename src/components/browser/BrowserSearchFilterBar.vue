@@ -69,6 +69,7 @@
 						<option value="duration">Duration</option>
 						<option value="resolution">Resolution</option>
 						<option value="fps">FPS</option>
+						<option value="rating">Rating</option>
 					</select>
 					<button class="btn btn-sm btn-outline-secondary" @click="toggleSortOrder" :title="sortOrder">
 						<font-awesome-icon :icon="['fas', sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" />
@@ -123,7 +124,7 @@ const props = defineProps({
 	sortBy: {
 		type: String,
 		default: 'name',
-		validator: (value) => ['name', 'date', 'size', 'duration', 'resolution', 'fps'].includes(value),
+		validator: (value) => ['name', 'date', 'size', 'duration', 'resolution', 'fps', 'rating'].includes(value),
 	},
 	sortOrder: {
 		type: String,

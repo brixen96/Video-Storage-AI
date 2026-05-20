@@ -250,6 +250,11 @@
 														</span>
 													</div>
 												</div>
+												<VideoRating
+													v-if="item.type === 'video' && item.id"
+													:rating="item.rating || 0"
+													@rate="setVideoRating(getTabById(tabId), item, $event)"
+												/>
 											</div>
 										</div>
 									</div>
@@ -350,7 +355,7 @@
 import { librariesAPI, videosAPI, filesAPI, videoListsAPI, getAssetURL } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import AddToListModal from '@/components/AddToListModal.vue'
-import { BrowserPaginationControls, BrowserSearchFilterBar, BrowserBreadcrumbNav, BrowserContextMenu, BrowserAssignPerformerModal } from '@/components/browser'
+import { BrowserPaginationControls, BrowserSearchFilterBar, BrowserBreadcrumbNav, BrowserContextMenu, BrowserAssignPerformerModal, VideoRating } from '@/components/browser'
 import { useFormatters } from '@/composables/useFormatters'
 
 export default {
@@ -363,6 +368,7 @@ export default {
 		BrowserBreadcrumbNav,
 		BrowserContextMenu,
 		BrowserAssignPerformerModal,
+		VideoRating,
 	},
 	data() {
 		return {
@@ -1216,6 +1222,9 @@ export default {
 					case 'fps':
 						comparison = (a.frame_rate || 0) - (b.frame_rate || 0)
 						break
+					case 'rating':
+						comparison = (a.rating || 0) - (b.rating || 0)
+						break
 				}
 
 				return tab.sortOrder === 'asc' ? comparison : -comparison
@@ -1238,6 +1247,16 @@ export default {
 			if (page < 1 || page > this.totalPages(tab)) return
 			tab.currentPage = page
 			window.scrollTo({ top: 0, behavior: 'smooth' })
+		},
+		async setVideoRating(tab, item, rating) {
+			const prev = item.rating || 0
+			item.rating = rating
+			try {
+				await videosAPI.setRating(item.id, rating)
+			} catch {
+				item.rating = prev
+				this.$toast.error('Failed', 'Could not save rating', 3000)
+			}
 		},
 		setSortBy(tab, field) {
 			if (tab.sortBy === field) {
