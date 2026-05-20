@@ -911,6 +911,11 @@ func runMigrations() error {
 	DB.Exec(`UPDATE ai_config SET api_url = lm_studio_url WHERE lm_studio_url != 'http://localhost:1234' AND lm_studio_url != ''`)
 	DB.Exec(`UPDATE ai_config SET api_url = 'https://openrouter.ai/api', model_name = CASE WHEN model_name = '' THEN 'mistralai/mistral-nemo' ELSE model_name END WHERE id = 1 AND (api_url IS NULL OR api_url = '')`)
 
+	// Migration 55: Watched status tracking
+	DB.Exec(`ALTER TABLE videos ADD COLUMN watched BOOLEAN NOT NULL DEFAULT 0`)
+	DB.Exec(`ALTER TABLE videos ADD COLUMN last_watched_at DATETIME`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_videos_watched ON videos(watched)`)
+
 	return nil
 }
 

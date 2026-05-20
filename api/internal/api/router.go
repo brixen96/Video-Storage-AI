@@ -103,6 +103,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			videos.POST("/:id/convert", convertVideoToMP4)         // Convert video to MP4
 			videos.GET("/duplicates", getVideoDuplicates)           // Find duplicate videos by file size + duration
 			videos.POST("/quality-compare", qualityCompareVideos)   // Compare quality scores for a set of videos
+			videos.POST("/analyze", analyzeVideos)                  // Analyze quality: mix of library IDs + uploaded files
+			videos.PATCH("/:id/watched", markWatchedHandler)        // Mark/unmark video as watched
 			videos.GET("/:id/locate", locateVideoFile)              // Locate missing video by filename search
 			videos.PATCH("/:id/remap", remapVideoPath)              // Remap video to new file path
 			videos.POST("/missing/cleanup", deleteMissingVideos)    // Bulk-delete missing video records

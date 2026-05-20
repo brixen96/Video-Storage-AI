@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -36,4 +38,41 @@ func qualityCompareVideos(c *gin.Context) {
 	}
 
 	respondSuccess(c, result, "quality comparison complete")
+}
+
+// analyzeVideos handles POST /videos/analyze
+// Accepts multipart/form-data with:
+//   - video_ids: JSON-encoded int64 array (e.g. "[1,2,3]") — optional
+//   - file: one or more uploaded video files — optional
+//
+// At least 2 total entries (IDs + files) are required.
+func analyzeVideos(c *gin.Context) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		respondBadRequest(c, "invalid multipart form", err)
+		return
+	}
+
+	var videoIDs []int64
+	if vals := form.Value["video_ids"]; len(vals) > 0 && vals[0] != "" {
+		if err := json.Unmarshal([]byte(vals[0]), &videoIDs); err != nil {
+			respondBadRequest(c, "invalid video_ids format — expected JSON array", err)
+			return
+		}
+	}
+
+	files := form.File["file"]
+
+	if len(videoIDs)+len(files) < 2 {
+		respondBadRequest(c, "at least 2 videos are required for comparison", nil)
+		return
+	}
+
+	result, err := ensureQualitySvc().CompareFromMixed(videoIDs, files)
+	if err != nil {
+		respondInternalError(c, "failed to analyze videos", err)
+		return
+	}
+
+	respondSuccess(c, result, "analysis complete")
 }

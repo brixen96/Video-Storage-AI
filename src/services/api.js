@@ -102,6 +102,12 @@ export const videosAPI = {
 	cleanupMissing: (libraryId) => api.post('/videos/missing/cleanup', { library_id: libraryId || 0 }),
 	getDuplicates: () => api.get('/videos/duplicates'),
 	qualityCompare: (videoIds) => api.post('/videos/quality-compare', { video_ids: videoIds }),
+	analyze: (formData, signal) => api.post('/videos/analyze', formData, {
+		headers: { 'Content-Type': 'multipart/form-data' },
+		timeout: 300000, // 5 min — large file uploads can be slow
+		signal,
+	}),
+	markWatched: (id, watched) => api.patch(`/videos/${id}/watched`, { watched }),
 }
 
 export const studiosAPI = {

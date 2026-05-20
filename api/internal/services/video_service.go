@@ -46,7 +46,8 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		       (SELECT CASE WHEN vl.edited_video_id = v.id THEN vl.backup_video_id ELSE vl.edited_video_id END
 		        FROM video_links vl
 		        WHERE (vl.edited_video_id = v.id OR vl.backup_video_id = v.id) AND vl.status = 'confirmed'
-		        LIMIT 1) AS linked_video_id
+		        LIMIT 1) AS linked_video_id,
+		       COALESCE(v.watched, 0), v.last_watched_at
 		FROM videos v
 	`
 
@@ -154,6 +155,10 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	if query.NoPerformer {
 		conditions = append(conditions, "NOT EXISTS (SELECT 1 FROM video_performers vp_np WHERE vp_np.video_id = v.id)")
 	}
+	if query.Watched != nil {
+		conditions = append(conditions, "COALESCE(v.watched, 0) = ?")
+		args = append(args, *query.Watched)
+	}
 
 	whereClause := ""
 	if len(conditions) > 0 {
@@ -225,7 +230,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 	videos := make([]models.Video, 0)
 	for rows.Next() {
 		var video models.Video
-		var lastPlayedAt sql.NullTime
+		var lastPlayedAt, lastWatchedAt sql.NullTime
 		var date, description, previewPath, contentType sql.NullString
 		var linkedVideoID sql.NullInt64
 		err := rows.Scan(
@@ -233,7 +238,7 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 			&video.Codec, &video.Resolution, &video.Bitrate, &video.FPS, &video.ThumbnailPath, &previewPath,
 			&date, &video.Rating, &description, &video.IsFavorite, &video.IsPinned, &video.NotInterested, &video.InEditList,
 			&contentType, &video.CreatedAt, &video.UpdatedAt, &lastPlayedAt, &video.PlayCount,
-			&video.IsMissing, &linkedVideoID,
+			&video.IsMissing, &linkedVideoID, &video.Watched, &lastWatchedAt,
 		)
 		if err != nil {
 			log.Printf("Failed to scan video row: %v", err)
@@ -241,6 +246,9 @@ func (s *VideoService) GetAll(query *models.VideoSearchQuery) ([]models.Video, i
 		}
 		if lastPlayedAt.Valid {
 			video.LastPlayedAt = &lastPlayedAt.Time
+		}
+		if lastWatchedAt.Valid {
+			video.LastWatchedAt = &lastWatchedAt.Time
 		}
 		if date.Valid {
 			video.Date = date.String
@@ -572,6 +580,16 @@ func (s *VideoService) Delete(id int64) error {
 		s.db.Exec(`UPDATE performers SET video_count = (SELECT COUNT(*) FROM video_performers WHERE performer_id = ?) WHERE id = ?`, pid, pid)
 	}
 	return nil
+}
+
+// MarkWatched sets or clears the watched flag on a video, updating last_watched_at on mark.
+func (s *VideoService) MarkWatched(id int64, watched bool) error {
+	if watched {
+		_, err := s.db.Exec(`UPDATE videos SET watched = 1, last_watched_at = CURRENT_TIMESTAMP WHERE id = ?`, id)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE videos SET watched = 0, last_watched_at = NULL WHERE id = ?`, id)
+	return err
 }
 
 // GetByFilePath retrieves a video by its file_path, including relationships.

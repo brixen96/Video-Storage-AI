@@ -2,7 +2,10 @@ package services
 
 import (
 	"fmt"
+	"io"
 	"math"
+	"mime/multipart"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -91,7 +94,90 @@ func (s *VideoQualityService) CompareByIDs(videoIDs []int64) (*VideoQualityResul
 		return nil, fmt.Errorf("could not load enough videos for comparison")
 	}
 
-	// Detect Topaz-enhanced files before scoring
+	return s.finalizeScores(scores), nil
+}
+
+// CompareFromMixed scores library videos (by ID) and uploaded files together.
+// Uploaded files are processed via ffprobe from the provided multipart headers.
+// Requires at least 2 total entries.
+func (s *VideoQualityService) CompareFromMixed(videoIDs []int64, files []*multipart.FileHeader) (*VideoQualityResult, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database not available")
+	}
+
+	var scores []VideoQualityScore
+
+	// Load library videos from DB
+	for _, id := range videoIDs {
+		row := db.QueryRow(
+			`SELECT id, title, file_path, COALESCE(thumbnail_path,''), file_size, duration,
+			        COALESCE(codec,''), COALESCE(resolution,''), COALESCE(bitrate,0), COALESCE(fps,0)
+			 FROM videos WHERE id = ?`, id)
+		var v VideoQualityScore
+		if err := row.Scan(&v.VideoID, &v.Title, &v.FilePath, &v.ThumbnailPath,
+			&v.FileSize, &v.Duration, &v.Codec, &v.Resolution, &v.Bitrate, &v.FPS); err != nil {
+			continue
+		}
+		scores = append(scores, v)
+	}
+
+	// Process uploaded files via ffprobe
+	mediaSvc := NewMediaService()
+	for _, fh := range files {
+		ext := filepath.Ext(fh.Filename)
+		tmpFile, err := os.CreateTemp("", "vsai-upload-*"+ext)
+		if err != nil {
+			continue
+		}
+		tmpPath := tmpFile.Name()
+
+		src, err := fh.Open()
+		if err != nil {
+			tmpFile.Close()
+			os.Remove(tmpPath)
+			continue
+		}
+		_, copyErr := io.Copy(tmpFile, src)
+		src.Close()
+		tmpFile.Close()
+		if copyErr != nil {
+			os.Remove(tmpPath)
+			continue
+		}
+
+		meta, err := mediaSvc.ExtractMetadata(tmpPath)
+		os.Remove(tmpPath)
+		if err != nil {
+			continue
+		}
+
+		res := ""
+		if meta.Width > 0 && meta.Height > 0 {
+			res = fmt.Sprintf("%dx%d", meta.Width, meta.Height)
+		}
+		scores = append(scores, VideoQualityScore{
+			VideoID:    0, // not in DB
+			Title:      fh.Filename,
+			FilePath:   fh.Filename, // use original name for Topaz/ext detection
+			FileSize:   meta.Size,
+			Duration:   meta.Duration,
+			Resolution: res,
+			Codec:      meta.Codec,
+			Bitrate:    meta.Bitrate,
+			FPS:        meta.FrameRate,
+		})
+	}
+
+	if len(scores) < 2 {
+		return nil, fmt.Errorf("could not load enough videos for comparison (need at least 2)")
+	}
+
+	return s.finalizeScores(scores), nil
+}
+
+// finalizeScores detects Topaz, calculates scores, sorts/ranks, and builds the recommendation.
+func (s *VideoQualityService) finalizeScores(scores []VideoQualityScore) *VideoQualityResult {
 	for i := range scores {
 		t := detectTopazType(scores[i].FilePath)
 		scores[i].TopazType = t
@@ -122,7 +208,7 @@ func (s *VideoQualityService) CompareByIDs(videoIDs []int64) (*VideoQualityResul
 	return &VideoQualityResult{
 		Videos:         scores,
 		Recommendation: s.buildRecommendation(scores),
-	}, nil
+	}
 }
 
 // calculateScores populates VideoScore, TechnicalScore, and OverallScore on each entry.

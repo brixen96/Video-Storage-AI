@@ -432,6 +432,7 @@ export default {
 				missingMetadata: null,
 				showMissing: false,
 				noPerformer: false,
+				watched: null,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,
@@ -507,6 +508,7 @@ export default {
 			if (this.filters.missingMetadata) count++
 			if (this.filters.showMissing) count++
 			if (this.filters.noPerformer) count++
+			if (this.filters.watched !== null) count++
 			if (this.filters.dateFrom) count++
 			if (this.filters.dateTo) count++
 			if (this.filters.minSize) count++
@@ -632,6 +634,7 @@ export default {
 					missing_metadata: this.filters.missingMetadata || undefined,
 					show_missing: this.filters.showMissing || undefined,
 					no_performer: this.filters.noPerformer || undefined,
+					watched: this.filters.watched !== null ? this.filters.watched : undefined,
 					date_from: this.filters.dateFrom || undefined,
 					date_to: this.filters.dateTo || undefined,
 					min_size: this.filters.minSize ? this.filters.minSize * 1024 * 1024 : undefined,
@@ -830,6 +833,7 @@ export default {
 				missingMetadata: null,
 				showMissing: false,
 				noPerformer: false,
+				watched: null,
 				dateFrom: '',
 				dateTo: '',
 				minSize: null,

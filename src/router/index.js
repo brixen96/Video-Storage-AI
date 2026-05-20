@@ -102,6 +102,11 @@ const routes = [
 		component: () => import(/* webpackChunkName: "ai" */ '@/views/AIPage.vue'),
 	},
 	{
+		path: '/analyzer',
+		name: 'Analyzer',
+		component: () => import(/* webpackChunkName: "analyzer" */ '@/views/VideoAnalyzerPage.vue'),
+	},
+	{
 		path: '/redirect',
 		name: 'Redirect',
 		beforeEnter: (to) => {

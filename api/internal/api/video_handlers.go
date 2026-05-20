@@ -687,3 +687,25 @@ func getVideoDuplicates(c *gin.Context) {
 		"wasted_bytes":     wastedBytes,
 	}, "")
 }
+
+
+// markWatchedHandler handles PATCH /api/v1/videos/:id/watched
+func markWatchedHandler(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		respondBadRequest(c, "invalid video id", err)
+		return
+	}
+	var body struct {
+		Watched bool `json:"watched"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		respondBadRequest(c, "invalid request body", err)
+		return
+	}
+	if err := ensureVideoService().MarkWatched(id, body.Watched); err != nil {
+		respondInternalError(c, "Failed to update watched status", err)
+		return
+	}
+	respondSuccess(c, gin.H{"watched": body.Watched}, "")
+}

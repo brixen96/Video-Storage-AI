@@ -49,6 +49,9 @@
 
 			<!-- Status Badges (top right) -->
 			<div class="status-badges">
+				<div v-if="video.watched" class="badge-watched" title="Watched">
+					<font-awesome-icon :icon="['fas', 'eye']" />
+				</div>
 				<div v-if="video.is_favorite" class="badge-favorite" title="Favorite">
 					<font-awesome-icon :icon="['fas', 'heart']" />
 				</div>

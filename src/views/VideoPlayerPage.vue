@@ -155,6 +155,15 @@
 								<font-awesome-icon :icon="['far', 'heart']" />
 								Favorite
 							</button>
+							<button
+								class="btn"
+								:class="video.watched ? 'btn-success' : 'btn-outline-success'"
+								@click="toggleWatched"
+								title="Toggle watched status"
+							>
+								<font-awesome-icon :icon="['fas', 'eye']" />
+								{{ video.watched ? 'Watched' : 'Mark Watched' }}
+							</button>
 							<button class="btn btn-outline-primary" @click="editMetadata">
 								<font-awesome-icon :icon="['fas', 'edit']" />
 								Edit
@@ -682,6 +691,16 @@ export default {
 			} catch (error) {
 				console.error('Failed to toggle favorite:', error)
 				this.$toast.error('Error', 'Failed to update favorite status')
+			}
+		},
+		async toggleWatched() {
+			try {
+				await videosAPI.markWatched(this.video.id, !this.video.watched)
+				this.video.watched = !this.video.watched
+				this.$toast.success('Success', this.video.watched ? 'Marked as watched' : 'Marked as unwatched')
+			} catch (error) {
+				console.error('Failed to toggle watched:', error)
+				this.$toast.error('Error', 'Failed to update watched status')
 			}
 		},
 		async addToEditList() {

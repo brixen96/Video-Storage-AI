@@ -30,8 +30,10 @@ type Video struct {
 	PlayCount     int        `json:"play_count" db:"play_count"`
 	ConvertedFrom *int64     `json:"converted_from,omitempty" db:"converted_from"` // ID of original video if this is a conversion
 	ConvertedTo   *int64     `json:"converted_to,omitempty" db:"converted_to"`     // ID of converted video if this was converted
-	IsMissing     bool       `json:"is_missing" db:"is_missing"`                  // File no longer found on disk
-	LinkedVideoID *int64     `json:"linked_video_id,omitempty"`                   // Confirmed Edited↔Backup counterpart
+	IsMissing      bool       `json:"is_missing" db:"is_missing"`        // File no longer found on disk
+	LinkedVideoID  *int64     `json:"linked_video_id,omitempty"`         // Confirmed Edited↔Backup counterpart
+	Watched        bool       `json:"watched" db:"watched"`
+	LastWatchedAt  *time.Time `json:"last_watched_at,omitempty" db:"last_watched_at"`
 
 	// Relationships (loaded separately)
 	Performers []Performer `json:"performers,omitempty"`
@@ -97,6 +99,7 @@ type VideoSearchQuery struct {
 	InEditList    *bool   `json:"in_edit_list" form:"in_edit_list"`
 	ShowMissing   bool    `json:"show_missing" form:"show_missing"` // Include missing (file not found) videos
 	NoPerformer   bool    `json:"no_performer" form:"no_performer"`  // Only videos with no performer linked
+	Watched       *bool   `json:"watched" form:"watched"`            // nil=all, true=watched only, false=unwatched only
 	SortBy        string  `json:"sort_by" form:"sort_by"`       // created_at, duration, play_count, title
 	SortOrder     string  `json:"sort_order" form:"sort_order"` // asc, desc
 	Page          int     `json:"page" form:"page"`

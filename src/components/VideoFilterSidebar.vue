@@ -188,6 +188,18 @@
 					</label>
 					<small class="text-muted d-block" style="font-size:0.75em;">Videos with no performer assigned</small>
 				</div>
+
+				<div class="vp-filter-group">
+					<label class="vp-filter-label">
+						<font-awesome-icon :icon="['fas', 'eye']" />
+						Watched Status
+					</label>
+					<select v-model="filters.watched" class="form-select form-select-sm" @change="$emit('change')">
+						<option :value="null">All Videos</option>
+						<option :value="false">Unwatched</option>
+						<option :value="true">Watched</option>
+					</select>
+				</div>
 			</div>
 		</div>
 	</div>
