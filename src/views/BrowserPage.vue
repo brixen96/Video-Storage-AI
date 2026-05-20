@@ -91,6 +91,8 @@
 										v-if="getTabById(tabId).libraryId"
 										v-model:searchQuery="getTabById(tabId).searchQuery"
 										v-model:filterType="getTabById(tabId).filterType"
+										v-model:filterContentType="getTabById(tabId).filterContentType"
+					v-model:filterWatched="getTabById(tabId).filterWatched"
 										v-model:sortBy="getTabById(tabId).sortBy"
 										v-model:sortOrder="getTabById(tabId).sortOrder"
 										v-model:showNotInterested="getTabById(tabId).showNotInterested"
@@ -167,6 +169,7 @@
 											<div class="item-info">
 												<div class="item-name" :title="item.name">
 													{{ item.name }}
+													<span v-if="item.watched" class="badge-watched-browser ms-1">Watched</span>
 													<span v-if="item.not_interested" class="badge-not-interested ms-1">Not Interested</span>
 													<template v-if="item.lists && item.lists.length > 0">
 														<span
@@ -181,9 +184,15 @@
 													<span v-else-if="item.in_edit_list" class="badge-edit-list ms-1">Edit List</span>
 												</div>
 												<div class="item-meta">
-													<span v-if="item.type === 'folder'">
-														<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
-														Folder
+													<span v-if="item.type === 'folder'" class="folder-meta-info">
+														<span class="meta-badge meta-badge-folder">
+															<font-awesome-icon :icon="['fas', 'folder']" class="me-1" />
+															{{ item.child_count != null ? item.child_count + ' item' + (item.child_count !== 1 ? 's' : '') : 'Folder' }}
+														</span>
+														<span v-if="item.folder_size" class="meta-badge meta-badge-size ms-1">
+															<font-awesome-icon :icon="['fas', 'hdd']" class="me-1" />
+															{{ formatFileSize(item.folder_size) }}
+														</span>
 													</span>
 													<div v-else-if="item.type === 'video'" class="video-meta-info">
 														<span v-if="item.duration" class="meta-badge">
@@ -192,6 +201,10 @@
 														</span>
 														<span v-if="item.width && item.height" class="meta-badge"> {{ item.width }}x{{ item.height }} </span>
 														<span v-if="item.frame_rate" class="meta-badge"> {{ Math.round(item.frame_rate) }} fps </span>
+														<span v-if="item.size" class="meta-badge meta-badge-size">
+															<font-awesome-icon :icon="['fas', 'hdd']" class="me-1" />
+															{{ formatFileSize(item.size) }}
+														</span>
 													</div>
 												</div>
 											</div>
@@ -226,6 +239,7 @@
 			:item="contextMenu.item"
 			@play="playVideo(contextMenu.item); closeContextMenu()"
 			@open="navigateToFolder(contextMenu.tab, contextMenu.item.path); closeContextMenu()"
+			@toggle-watched="toggleWatched(contextMenu.tab, contextMenu.item); closeContextMenu()"
 			@toggle-not-interested="toggleNotInterested(contextMenu.tab, contextMenu.item); closeContextMenu()"
 			@add-to-list="openAddToListModal(contextMenu.item); closeContextMenu()"
 			@remove-from-list="removeFromList(contextMenu.item, $event); closeContextMenu()"
@@ -449,6 +463,8 @@ export default {
 				loading: false,
 				searchQuery: '',
 				filterType: 'all',
+				filterContentType: null,
+				filterWatched: null,
 				showNotInterested: false,
 				sortBy: 'name',
 				sortOrder: 'asc',
@@ -995,6 +1011,17 @@ export default {
 				await this.loadLibraryContent(activeTab)
 			}
 		},
+		async toggleWatched(tab, item) {
+			if (!item || item.type !== 'video') return
+			const newWatched = !item.watched
+			item.watched = newWatched
+			try {
+				await videosAPI.markWatched(item.video_id || item.id, newWatched)
+			} catch (error) {
+				console.error('Failed to update watched status:', error)
+				item.watched = !newWatched
+			}
+		},
 		async toggleNotInterested(tab, item) {
 			item.not_interested = !item.not_interested
 
@@ -1065,6 +1092,18 @@ export default {
 				}
 			}
 
+			if (tab.filterContentType) {
+				filtered = filtered.filter(
+					(item) => item.type === 'folder' || item.content_type === tab.filterContentType
+				)
+			}
+
+			if (tab.filterWatched !== null && tab.filterWatched !== undefined) {
+				filtered = filtered.filter(
+					(item) => item.type === 'folder' || item.watched === tab.filterWatched
+				)
+			}
+
 			filtered.sort((a, b) => {
 				let comparison = 0
 
@@ -1080,12 +1119,18 @@ export default {
 						const dateB = new Date(b.modified || 0).getTime()
 						comparison = dateA - dateB
 						break
-				}
+					}
 					case 'size':
-						comparison = (a.size || 0) - (b.size || 0)
+						comparison = (a.folder_size || a.size || 0) - (b.folder_size || b.size || 0)
 						break
 					case 'duration':
 						comparison = (a.duration || 0) - (b.duration || 0)
+						break
+					case 'resolution':
+						comparison = (a.width || 0) * (a.height || 0) - (b.width || 0) * (b.height || 0)
+						break
+					case 'fps':
+						comparison = (a.frame_rate || 0) - (b.frame_rate || 0)
 						break
 				}
 

@@ -23,10 +23,15 @@ type BrowseItem struct {
 	ID         int64   `json:"id,omitempty"`       // Video ID for convenience
 	InDatabase bool    `json:"in_database"`
 
+	// Folder-specific
+	ChildCount int   `json:"child_count,omitempty"` // Direct non-hidden children (folders only)
+	FolderSize int64 `json:"folder_size,omitempty"` // Recursive sum of all file sizes (folders only)
+
 	// Marking flags
 	NotInterested bool   `json:"not_interested"`
 	InEditList    bool   `json:"in_edit_list"`
 	ContentType   string `json:"content_type,omitempty"`
+	Watched       bool   `json:"watched"`
 
 	// List membership
 	Lists []BrowseItemList `json:"lists,omitempty"`

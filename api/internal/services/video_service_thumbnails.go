@@ -16,12 +16,13 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
-// VideoMarks holds mark flags for a single video (not_interested, in_edit_list, content_type, lists).
+// VideoMarks holds mark flags for a single video (not_interested, in_edit_list, content_type, lists, watched).
 type VideoMarks struct {
 	ID            int64
 	NotInterested bool
 	InEditList    bool
 	ContentType   string
+	Watched       bool
 	Lists         []VideoListInfo
 }
 
@@ -494,7 +495,7 @@ func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*Video
 	placeholderStr := strings.Join(placeholders, ",")
 
 	query := fmt.Sprintf(`
-		SELECT id, file_path, not_interested, in_edit_list, content_type
+		SELECT id, file_path, not_interested, in_edit_list, content_type, COALESCE(watched, 0)
 		FROM videos
 		WHERE file_path IN (%s)
 	`, placeholderStr)
@@ -513,7 +514,7 @@ func (s *VideoService) GetVideoMarksBatch(filePaths []string) (map[string]*Video
 		var filePath string
 		var marks VideoMarks
 		var contentType sql.NullString
-		if err := rows.Scan(&marks.ID, &filePath, &marks.NotInterested, &marks.InEditList, &contentType); err != nil {
+		if err := rows.Scan(&marks.ID, &filePath, &marks.NotInterested, &marks.InEditList, &contentType, &marks.Watched); err != nil {
 			log.Printf("Warning: Failed to scan video marks: %v", err)
 			continue
 		}

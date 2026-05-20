@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -116,6 +117,15 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 		// Determine type
 		if entry.IsDir() {
 			item.Type = "folder"
+			// Count direct non-hidden children and sum recursive file sizes
+			if children, err := os.ReadDir(itemFullPath); err == nil {
+				for _, c := range children {
+					if !strings.HasPrefix(c.Name(), ".") {
+						item.ChildCount++
+					}
+				}
+			}
+			item.FolderSize = calcFolderSize(itemFullPath)
 		} else {
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
 			if isVideoFile(ext) {
@@ -128,6 +138,7 @@ func (s *BrowseService) BrowseLibrary(libraryID int64, relativePath string, extr
 					item.NotInterested = videoMarks.NotInterested
 					item.InEditList = videoMarks.InEditList
 					item.ContentType = videoMarks.ContentType
+					item.Watched = videoMarks.Watched
 					if videoMarks.ContentType != "" {
 						log.Printf("Browse: %s has content_type=%s", entry.Name(), videoMarks.ContentType)
 					}
@@ -308,4 +319,25 @@ func countByType(items []models.BrowseItem, itemType string) int {
 		}
 	}
 	return count
+}
+
+// calcFolderSize returns the total size of all files under path recursively.
+// Inaccessible subdirectories are skipped (SMB-safe).
+func calcFolderSize(path string) int64 {
+	var total int64
+	filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.IsDir() {
+			if info, err := d.Info(); err == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total
 }

@@ -18,6 +18,10 @@
 				Open Folder
 			</button>
 			<div class="context-menu-divider"></div>
+			<button v-if="item.type === 'video'" class="context-menu-item" @click="$emit('toggle-watched')">
+				<font-awesome-icon :icon="['fas', 'eye']" class="me-2" />
+				{{ item.watched ? 'Mark as Unwatched' : 'Mark as Watched' }}
+			</button>
 			<button v-if="item.type === 'video'" class="context-menu-item" @click="$emit('toggle-not-interested')">
 				<font-awesome-icon :icon="['fas', item.not_interested ? 'check' : 'times-circle']" class="me-2" />
 				{{ item.not_interested ? 'Remove from' : 'Mark as' }} Not Interested
@@ -119,7 +123,7 @@ defineProps({
 	},
 })
 
-defineEmits(['play', 'open', 'toggle-not-interested', 'add-to-list', 'remove-from-list', 'copy-path', 'close', 'set-content-type', 'assign-performer'])
+defineEmits(['play', 'open', 'toggle-watched', 'toggle-not-interested', 'add-to-list', 'remove-from-list', 'copy-path', 'close', 'set-content-type', 'assign-performer'])
 </script>
 
 <style>

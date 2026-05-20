@@ -46,12 +46,29 @@
 						</button>
 					</div>
 
+					<!-- Watched Filter -->
+					<select :value="filterWatched" class="form-select form-select-sm bg-dark text-white border-secondary" @change="$emit('update:filterWatched', $event.target.value === '' ? null : $event.target.value === 'true')" title="Filter by watched status">
+						<option value="">All Videos</option>
+						<option value="false">Unwatched</option>
+						<option value="true">Watched</option>
+					</select>
+
+					<!-- Content Type Filter -->
+					<select :value="filterContentType" class="form-select form-select-sm bg-dark text-white border-secondary" @change="$emit('update:filterContentType', $event.target.value || null)" title="Filter by content type">
+						<option value="">All Types</option>
+						<option value="regular">Regular</option>
+						<option value="zoo">Zoo</option>
+						<option value="3d">3D</option>
+					</select>
+
 					<!-- Sort -->
 					<select :value="sortBy" class="form-select form-select-sm bg-dark text-white border-secondary" @change="$emit('update:sortBy', $event.target.value)">
 						<option value="name">Name</option>
 						<option value="date">Date</option>
 						<option value="size">Size</option>
 						<option value="duration">Duration</option>
+						<option value="resolution">Resolution</option>
+						<option value="fps">FPS</option>
 					</select>
 					<button class="btn btn-sm btn-outline-secondary" @click="toggleSortOrder" :title="sortOrder">
 						<font-awesome-icon :icon="['fas', sortOrder === 'asc' ? 'arrow-up' : 'arrow-down']" />
@@ -85,10 +102,18 @@ const props = defineProps({
 		default: 'all',
 		validator: (value) => ['all', 'videos', 'folders'].includes(value),
 	},
+	filterContentType: {
+		type: String,
+		default: null,
+	},
+	filterWatched: {
+		type: Boolean,
+		default: null,
+	},
 	sortBy: {
 		type: String,
 		default: 'name',
-		validator: (value) => ['name', 'date', 'size', 'duration'].includes(value),
+		validator: (value) => ['name', 'date', 'size', 'duration', 'resolution', 'fps'].includes(value),
 	},
 	sortOrder: {
 		type: String,
@@ -105,7 +130,7 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'refresh'])
+const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:filterContentType', 'update:filterWatched', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'refresh'])
 
 // Toggle methods
 const toggleSortOrder = () => {
