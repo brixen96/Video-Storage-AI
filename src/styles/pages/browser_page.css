@@ -837,3 +837,87 @@
 .content-grid.list-view .lh-col.lh-active {
 	color: var(--bs-primary, #0d6efd);
 }
+
+/* Bookmarks dropdown */
+.bookmarks-dropdown {
+	position: absolute;
+	top: calc(100% + 4px);
+	left: 0;
+	min-width: 240px;
+	max-width: 320px;
+	background: #1a1a2e;
+	border: 1px solid rgba(102, 126, 234, 0.3);
+	border-radius: 8px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	z-index: 1000;
+	overflow: hidden;
+}
+
+.bookmarks-empty {
+	padding: 0.75rem 1rem;
+	font-size: 0.8rem;
+	color: rgba(255, 255, 255, 0.4);
+	text-align: center;
+}
+
+.bookmark-item {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	padding: 0.5rem 0.75rem;
+	background: none;
+	border: none;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+	color: rgba(255, 255, 255, 0.85);
+	font-size: 0.85rem;
+	cursor: pointer;
+	text-align: left;
+	transition: background 0.12s;
+	gap: 0.5rem;
+}
+
+.bookmark-item:last-child {
+	border-bottom: none;
+}
+
+.bookmark-item:hover {
+	background: rgba(102, 126, 234, 0.12);
+}
+
+.bookmark-label {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.bookmark-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.bookmark-lib {
+	font-size: 0.7rem;
+	color: rgba(255, 255, 255, 0.35);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.bookmark-remove {
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.25);
+	font-size: 0.7rem;
+	padding: 2px 4px;
+	cursor: pointer;
+	border-radius: 3px;
+	flex-shrink: 0;
+	transition: color 0.12s, background 0.12s;
+}
+
+.bookmark-remove:hover {
+	color: #dc3545;
+	background: rgba(220, 53, 69, 0.12);
+}

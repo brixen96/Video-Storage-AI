@@ -67,7 +67,7 @@
 							<template v-if="getTabById(tabId)">
 								<div :ref="'tab-' + tabId">
 									<!-- Library Selector -->
-									<div class="library-selector mb-3">
+									<div class="library-selector mb-3 d-flex gap-2 align-items-center">
 										<select v-model="getTabById(tabId).libraryId" @change="loadLibraryContent(getTabById(tabId))" class="form-select">
 											<option :value="null">Select a library...</option>
 											<option v-for="library in libraries" :key="library.id" :value="library.id">
@@ -75,6 +75,46 @@
 												<span v-if="library.primary">(Primary)</span>
 											</option>
 										</select>
+										<!-- Bookmark current folder -->
+										<button
+											v-if="getTabById(tabId).libraryId && getTabById(tabId).currentPath"
+											class="btn btn-sm flex-shrink-0"
+											:class="isBookmarked(getTabById(tabId)) ? 'btn-warning' : 'btn-outline-secondary'"
+											@click.stop="toggleBookmark(getTabById(tabId))"
+											:title="isBookmarked(getTabById(tabId)) ? 'Remove bookmark' : 'Bookmark this folder'"
+										>
+											<font-awesome-icon :icon="['fas', 'star']" />
+										</button>
+										<!-- Bookmarks dropdown -->
+										<div class="position-relative flex-shrink-0" v-if="getTabById(tabId).libraryId">
+											<button
+												class="btn btn-sm btn-outline-secondary"
+												:class="{ active: bookmarksDropdownTabId === tabId }"
+												@click.stop="toggleBookmarksDropdown(tabId)"
+												title="Bookmarks"
+											>
+												<font-awesome-icon :icon="['fas', 'bookmark']" />
+												<font-awesome-icon :icon="['fas', bookmarksDropdownTabId === tabId ? 'chevron-up' : 'chevron-down']" class="ms-1" style="font-size:0.65rem" />
+											</button>
+											<div v-if="bookmarksDropdownTabId === tabId" class="bookmarks-dropdown" @click.stop>
+												<div v-if="bookmarks.length === 0" class="bookmarks-empty">No bookmarks yet — navigate to a folder and click ★</div>
+												<button
+													v-for="bm in bookmarks"
+													:key="bm.libraryId + bm.path"
+													class="bookmark-item"
+													@click="navigateToBookmark(getTabById(tabId), bm)"
+												>
+													<font-awesome-icon :icon="['fas', 'folder']" class="me-2 text-warning" />
+													<span class="bookmark-label">
+														<span class="bookmark-name">{{ bm.name }}</span>
+														<span class="bookmark-lib">{{ bm.libraryName }}</span>
+													</span>
+													<button class="bookmark-remove ms-auto" @click.stop="removeBookmark(bm)" title="Remove">
+														<font-awesome-icon :icon="['fas', 'times']" />
+													</button>
+												</button>
+											</div>
+										</div>
 									</div>
 
 									<!-- Breadcrumb Navigation -->
@@ -409,6 +449,9 @@ export default {
 			draggedItem: null,
 			draggedFromTab: null,
 			dropTargetTab: null,
+			// Bookmarks
+			bookmarks: [],
+			bookmarksDropdownTabId: null,
 			// Zoom state
 			zoomLevel: 1, // 0.5 to 2.0
 			// Panel resize state
@@ -461,14 +504,15 @@ export default {
 		this.formatDuration = formatters.formatDuration
 	},
 	async mounted() {
+		this.bookmarks = this.loadBookmarks()
 		const savedPrefs = this.loadBrowserPrefs()
 		if (savedPrefs.zoomLevel) this.zoomLevel = savedPrefs.zoomLevel
 
 		await this.loadLibraries()
 		await this.initializeTabs()
 
-		// Close context menu when clicking outside
-		document.addEventListener('click', this.closeContextMenu)
+		// Close context menu and bookmarks dropdown when clicking outside
+		document.addEventListener('click', this.handleGlobalClick)
 		document.addEventListener('contextmenu', this.closeContextMenu)
 
 		// Add keyboard shortcuts
@@ -479,6 +523,7 @@ export default {
 		document.addEventListener('mouseup', this.stopPanelResize)
 	},
 	beforeUnmount() {
+		document.removeEventListener('click', this.handleGlobalClick)
 		document.removeEventListener('click', this.closeContextMenu)
 		document.removeEventListener('contextmenu', this.closeContextMenu)
 		document.removeEventListener('keydown', this.handleKeyPress)
@@ -513,6 +558,57 @@ export default {
 		saveBrowserPrefs(partial) {
 			const existing = this.loadBrowserPrefs()
 			localStorage.setItem('vsai_browser_prefs', JSON.stringify({ ...existing, ...partial }))
+		},
+
+		// ==========================
+		// Bookmarks
+		// ==========================
+		loadBookmarks() {
+			try {
+				return JSON.parse(localStorage.getItem('vsai_browser_bookmarks') || '[]')
+			} catch {
+				return []
+			}
+		},
+		saveBookmarks() {
+			localStorage.setItem('vsai_browser_bookmarks', JSON.stringify(this.bookmarks))
+		},
+		isBookmarked(tab) {
+			if (!tab.libraryId || !tab.currentPath) return false
+			return this.bookmarks.some((b) => b.libraryId === tab.libraryId && b.path === tab.currentPath)
+		},
+		toggleBookmark(tab) {
+			if (this.isBookmarked(tab)) {
+				this.bookmarks = this.bookmarks.filter((b) => !(b.libraryId === tab.libraryId && b.path === tab.currentPath))
+				this.$toast.info('Bookmark removed', '', 2000)
+			} else {
+				const name = tab.pathSegments[tab.pathSegments.length - 1] || 'Root'
+				this.bookmarks.push({ name, libraryId: tab.libraryId, path: tab.currentPath, libraryName: tab.title })
+				this.$toast.success('Bookmarked', name, 2000)
+			}
+			this.saveBookmarks()
+		},
+		removeBookmark(bm) {
+			this.bookmarks = this.bookmarks.filter((b) => !(b.libraryId === bm.libraryId && b.path === bm.path))
+			this.saveBookmarks()
+		},
+		toggleBookmarksDropdown(tabId) {
+			this.bookmarksDropdownTabId = this.bookmarksDropdownTabId === tabId ? null : tabId
+		},
+		navigateToBookmark(tab, bm) {
+			this.bookmarksDropdownTabId = null
+			const tabIndex = this.tabs.findIndex((t) => t.id === tab.id)
+			if (tabIndex === -1) return
+			if (this.tabs[tabIndex].libraryId !== bm.libraryId) {
+				this.tabs[tabIndex].libraryId = bm.libraryId
+				this.tabs[tabIndex].title = bm.libraryName || bm.name
+			}
+			this.tabs[tabIndex].currentPath = bm.path
+			this.loadLibraryContent(this.tabs[tabIndex])
+		},
+		handleGlobalClick() {
+			this.closeContextMenu()
+			this.bookmarksDropdownTabId = null
 		},
 
 		// ==========================
