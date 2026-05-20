@@ -96,6 +96,7 @@
 										v-model:sortBy="getTabById(tabId).sortBy"
 										v-model:sortOrder="getTabById(tabId).sortOrder"
 										v-model:showNotInterested="getTabById(tabId).showNotInterested"
+										v-model:viewMode="getTabById(tabId).viewMode"
 										:isLoading="getTabById(tabId).loading"
 										@update:searchQuery="applyFilters(getTabById(tabId))"
 										@update:showNotInterested="toggleShowNotInterested(getTabById(tabId))"
@@ -144,6 +145,7 @@
 									<div
 										v-else-if="getTabById(tabId).libraryId && filteredItems(getTabById(tabId)).length > 0"
 										class="content-grid"
+										:class="{ 'list-view': getTabById(tabId).viewMode === 'list' }"
 										:style="{ '--grid-scale': zoomLevel }"
 										@drop="handleItemDrop($event, getTabById(tabId))"
 										@dragover.prevent
@@ -478,6 +480,7 @@ export default {
 				filterContentType: null,
 				filterWatched: null,
 				showNotInterested: false,
+				viewMode: 'grid',
 				sortBy: 'name',
 				sortOrder: 'asc',
 				currentPage: 1,
@@ -1516,6 +1519,16 @@ export default {
 			if (event.key === 'F5' || (event.ctrlKey && event.key === 'r')) {
 				event.preventDefault()
 				this.loadLibraryContent(activeTab)
+			}
+
+			if (event.ctrlKey && event.key === 'a') {
+				event.preventDefault()
+				const items = this.paginatedItems(activeTab)
+				this.selectedItems[activeTab.id] = items.map((item) => item.path)
+			}
+
+			if (event.key === 'Escape') {
+				this.clearSelection(activeTab.id)
 			}
 		},
 	},

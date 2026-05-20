@@ -79,6 +79,16 @@
 						<font-awesome-icon :icon="['fas', 'times-circle']" />
 					</button>
 
+					<!-- View Mode Toggle -->
+					<div class="btn-group" role="group">
+						<button type="button" class="btn btn-sm" :class="viewMode === 'grid' ? 'btn-primary' : 'btn-outline-secondary'" @click="$emit('update:viewMode', 'grid')" title="Grid view">
+							<font-awesome-icon :icon="['fas', 'th']" />
+						</button>
+						<button type="button" class="btn btn-sm" :class="viewMode === 'list' ? 'btn-primary' : 'btn-outline-secondary'" @click="$emit('update:viewMode', 'list')" title="List view">
+							<font-awesome-icon :icon="['fas', 'list']" />
+						</button>
+					</div>
+
 					<div class="vr d-none d-md-block"></div>
 					<button class="btn btn-sm btn-outline-primary" @click="$emit('refresh')" title="Refresh folder">
 						<font-awesome-icon :icon="['fas', 'sync']" :class="{ 'fa-spin': isLoading }" />
@@ -128,9 +138,14 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	viewMode: {
+		type: String,
+		default: 'grid',
+		validator: (value) => ['grid', 'list'].includes(value),
+	},
 })
 
-const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:filterContentType', 'update:filterWatched', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'refresh'])
+const emit = defineEmits(['update:searchQuery', 'update:filterType', 'update:filterContentType', 'update:filterWatched', 'update:sortBy', 'update:sortOrder', 'update:showNotInterested', 'update:viewMode', 'refresh'])
 
 // Toggle methods
 const toggleSortOrder = () => {

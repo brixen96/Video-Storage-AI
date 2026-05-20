@@ -704,3 +704,69 @@
 	display: flex;
 	gap: 0.5rem;
 }
+
+/* ================================
+   List View Mode
+   ================================ */
+.content-grid.list-view {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
+.content-grid.list-view .content-item {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	border-radius: 6px;
+	transform: none !important;
+}
+
+.content-grid.list-view .content-item:hover {
+	transform: none !important;
+}
+
+.content-grid.list-view .item-thumbnail {
+	aspect-ratio: unset;
+	width: 80px;
+	min-width: 80px;
+	height: 50px;
+	flex-shrink: 0;
+	border-radius: 6px 0 0 6px;
+}
+
+.content-grid.list-view .folder-icon {
+	font-size: 1.4rem;
+}
+
+.content-grid.list-view .video-placeholder {
+	font-size: 1.2rem;
+}
+
+.content-grid.list-view .item-info {
+	flex: 1;
+	padding: 0.35rem 0.75rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	min-width: 0;
+}
+
+.content-grid.list-view .item-name {
+	flex: 1;
+	margin-bottom: 0;
+	min-width: 0;
+	font-size: 0.875rem;
+}
+
+.content-grid.list-view .item-meta {
+	flex-shrink: 0;
+}
+
+.content-grid.list-view .video-meta-info {
+	flex-wrap: nowrap;
+}
+
+.content-grid.list-view .folder-meta-info {
+	white-space: nowrap;
+}
