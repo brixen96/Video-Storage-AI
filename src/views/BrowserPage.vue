@@ -397,6 +397,27 @@ export default {
 			if (this.previewFrames.length === 0) return null
 			return this.previewFrames[this.previewFrameIndex]
 		},
+		activePanelTabPrefs() {
+			const tab = this.getTabById(this.activeTabId)
+			if (!tab) return null
+			return {
+				sortBy: tab.sortBy,
+				sortOrder: tab.sortOrder,
+				viewMode: tab.viewMode,
+				itemsPerPage: tab.itemsPerPage,
+			}
+		},
+	},
+	watch: {
+		zoomLevel(v) {
+			this.saveBrowserPrefs({ zoomLevel: v })
+		},
+		activePanelTabPrefs: {
+			deep: true,
+			handler(v) {
+				if (v) this.saveBrowserPrefs(v)
+			},
+		},
 	},
 	created() {
 		// Initialize formatters composable
@@ -405,6 +426,9 @@ export default {
 		this.formatDuration = formatters.formatDuration
 	},
 	async mounted() {
+		const savedPrefs = this.loadBrowserPrefs()
+		if (savedPrefs.zoomLevel) this.zoomLevel = savedPrefs.zoomLevel
+
 		await this.loadLibraries()
 		await this.initializeTabs()
 
@@ -442,6 +466,21 @@ export default {
 	},
 	methods: {
 		// ==========================
+		// Preferences Persistence
+		// ==========================
+		loadBrowserPrefs() {
+			try {
+				return JSON.parse(localStorage.getItem('vsai_browser_prefs') || '{}')
+			} catch {
+				return {}
+			}
+		},
+		saveBrowserPrefs(partial) {
+			const existing = this.loadBrowserPrefs()
+			localStorage.setItem('vsai_browser_prefs', JSON.stringify({ ...existing, ...partial }))
+		},
+
+		// ==========================
 		// Library and Tab Management
 		// ==========================
 		async loadLibraries() {
@@ -467,6 +506,7 @@ export default {
 			await this.addTabToPanel(this.splitPanels[0])
 		},
 		async addTabToPanel(panel, libraryId = null, libraryName = null) {
+			const prefs = this.loadBrowserPrefs()
 			const tab = {
 				id: this.nextTabId++,
 				title: libraryName || 'New Tab',
@@ -480,11 +520,11 @@ export default {
 				filterContentType: null,
 				filterWatched: null,
 				showNotInterested: false,
-				viewMode: 'grid',
-				sortBy: 'name',
-				sortOrder: 'asc',
+				viewMode: prefs.viewMode || 'grid',
+				sortBy: prefs.sortBy || 'name',
+				sortOrder: prefs.sortOrder || 'asc',
 				currentPage: 1,
-				itemsPerPage: 100,
+				itemsPerPage: prefs.itemsPerPage || 100,
 				totalItems: 0,
 			}
 
