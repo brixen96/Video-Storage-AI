@@ -5,6 +5,7 @@
 			<router-link to="/" class="navbar-brand d-flex align-items-center">
 				<font-awesome-icon :icon="['fas', 'video']" class="me-2 brand-icon" />
 				<span class="brand-text">Video Storage AI</span>
+				<span v-if="appVersion" class="badge bg-secondary ms-2" style="font-size:0.6rem;vertical-align:middle;">v{{ appVersion }}</span>
 				<!-- WebSocket Status Indicator -->
 				<span class="ws-status-indicator ms-3" :class="{ connected: wsConnected, disconnected: !wsConnected }" :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'">
 					<font-awesome-icon :icon="['fas', 'circle']" class="status-dot" />
@@ -159,6 +160,7 @@ export default {
 		return {
 			wsConnected: false,
 			unsubscribeConnection: null,
+			appVersion: '',
 		}
 	},
 	mounted() {
@@ -174,6 +176,12 @@ export default {
 		if (!websocketService.isConnected()) {
 			websocketService.connect()
 		}
+
+		// Fetch app version from API health endpoint
+		const apiBase = window.VSAI_API_URL || 'http://localhost:8080'
+		fetch(`${apiBase}/health`).then(r => r.json()).then(data => {
+			if (data.version) this.appVersion = data.version
+		}).catch(() => {})
 	},
 	beforeUnmount() {
 		if (this.unsubscribeConnection) {
