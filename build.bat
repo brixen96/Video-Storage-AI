@@ -11,10 +11,22 @@ set "ROOT=%~dp0"
 set "API_DIR=%ROOT%api"
 set "RELEASE_DIR=%ROOT%release"
 
-:: Read version from VERSION file
+:: Read version from VERSION file and auto-increment patch
 set /p VERSION=<"%ROOT%VERSION"
-if "%VERSION%"=="" set VERSION=dev
-echo Version: %VERSION%
+if "%VERSION%"=="" set VERSION=0.1.0
+
+:: Parse major.minor.patch and increment patch
+for /f "tokens=1-3 delims=." %%a in ("%VERSION%") do (
+    set "MAJOR=%%a"
+    set "MINOR=%%b"
+    set /a "PATCH=%%c+1"
+)
+set "VERSION=%MAJOR%.%MINOR%.%PATCH%"
+
+:: Write incremented version back to VERSION file
+echo %VERSION%> "%ROOT%VERSION"
+
+echo Version: %VERSION% (auto-incremented patch)
 echo.
 
 :: ── 0. Stop services (silent -- ok if not installed or no admin) ──
