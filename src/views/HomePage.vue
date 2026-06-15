@@ -141,6 +141,7 @@
 			:hasMore="feedHasMore"
 			:scraperTypes="feedScraperTypes"
 			:activeFilter="feedScraperFilter"
+			:allScraperTypes="enabledScrapers"
 			@load-more="loadMoreFeed"
 			@filter-change="onFeedFilterChange"
 			@clear-feed="clearFeed"

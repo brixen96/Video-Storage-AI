@@ -111,7 +111,7 @@
 							{{ comparing ? 'Analyzing…' : 'Analyze & Compare Quality' }}
 							<span v-if="selectedVideos.length >= 2" class="badge bg-dark ms-2">{{ selectedVideos.length }}</span>
 						</button>
-						<div v-if="selectedVideos.length < 2" class="text-muted text-center mt-1" style="font-size:0.75rem">
+						<div v-if="selectedVideos.length < 2" class="text-muted mt-1" style="font-size:0.75rem">
 							Add at least 2 videos to compare
 						</div>
 					</div>
@@ -168,6 +168,23 @@
 										<span v-if="score.is_topaz_enhanced" class="badge" style="background:#7c3aed">
 											Topaz {{ score.topaz_type }}
 										</span>
+										<!-- Upscale risk badge -->
+										<span
+											v-if="score.upscale_risk"
+											class="badge upscale-risk-badge"
+											:class="`upscale-risk--${score.upscale_risk}`"
+											:title="`BPP is unusually low for ${score.resolution} ${score.codec?.toUpperCase()} — content may be upscaled from a lower-resolution source`"
+										>
+											⚠ Upscale risk: {{ score.upscale_risk }}
+										</span>
+										<!-- Best for Topaz badge -->
+										<span
+											v-if="score.best_for_topaz"
+											class="badge best-for-topaz-badge"
+											title="Highest perceptual sharpness-per-pixel among source files — use this version as your Topaz Video AI input"
+										>
+											<font-awesome-icon :icon="['fas', 'star']" class="me-1" />Best for Topaz
+										</span>
 										<!-- Title -->
 										<span class="fw-semibold text-truncate" :title="score.title" style="max-width:300px">{{ score.title }}</span>
 									</div>
@@ -205,6 +222,17 @@
 												<span class="text-secondary" style="font-size:0.7rem;width:30px;text-align:right">{{ score.technical_score.toFixed(0) }}%</span>
 											</div>
 										</div>
+									</div>
+									<!-- Sharpness bar (deep analysis only) -->
+									<div v-if="score.perceptual_efficiency > 0" class="d-flex align-items-center gap-2 mb-2">
+										<span class="text-muted" style="font-size:0.7rem;width:56px;flex-shrink:0" title="Laplacian variance normalised by resolution — measures genuine per-pixel sharpness across frames">Sharpness</span>
+										<div class="progress flex-fill" style="height:5px;background:#2a2a2a">
+											<div
+												class="progress-bar sharpness-bar"
+												:style="{ width: sharpnessPct(score) + '%' }"
+											></div>
+										</div>
+										<span class="sharpness-value" style="font-size:0.7rem;width:30px;text-align:right">{{ sharpnessPct(score).toFixed(0) }}%</span>
 									</div>
 
 									<!-- Metadata chips -->
@@ -385,6 +413,7 @@ export default {
 	async mounted() {
 		const res = await librariesAPI.getAll()
 		this.libraries = res.data || res || []
+		await this.preloadFromQuery()
 	},
 
 	watch: {
@@ -397,6 +426,34 @@ export default {
 	},
 
 	methods: {
+		// ── Query param pre-load (from AI Companion "Compare Quality" button) ─
+		async preloadFromQuery() {
+			const idsParam = this.$route?.query?.ids
+			if (!idsParam) return
+			const ids = String(idsParam).split(',').map(s => parseInt(s)).filter(n => !isNaN(n) && n > 0)
+			if (ids.length < 2) return
+			const results = await Promise.all(ids.map(id => videosAPI.getById(id).catch(() => null)))
+			for (const res of results) {
+				const v = res?.data?.data ?? res?.data
+				if (!v?.id || this.selectedVideos.some(s => s.source === 'library' && s.id === v.id)) continue
+				this.selectedVideos.push({
+					key: 'lib_' + v.id,
+					source: 'library',
+					id: v.id,
+					title: v.title || '',
+					thumbnail_path: v.thumbnail_path || '',
+					file_path: v.file_path || '',
+					resolution: v.resolution || '',
+					codec: v.codec || '',
+					fps: v.fps || 0,
+					bitrate: v.bitrate || 0,
+					file_size: v.file_size || 0,
+					duration: v.duration || 0,
+				})
+			}
+			if (this.selectedVideos.length >= 2) await this.compareAll()
+		},
+
 		// ── Picker ────────────────────────────────────────────────────────────
 
 		debouncedSearch() {
@@ -545,6 +602,14 @@ export default {
 			return getAssetURL(encoded)
 		},
 
+		// Returns this video's perceptual efficiency as a % of the group max (0–100).
+		sharpnessPct(score) {
+			if (!this.result?.videos) return 0
+			const max = Math.max(...this.result.videos.map(v => v.perceptual_efficiency || 0))
+			if (!max) return 0
+			return Math.min(100, ((score.perceptual_efficiency || 0) / max) * 100)
+		},
+
 		getScoreClass(score) {
 			if (score >= 80) return 'text-success'
 			if (score >= 60) return 'text-info'
@@ -622,4 +687,11 @@ export default {
 	font-size: 0.72rem;
 	padding: 2px 10px;
 }
+.upscale-risk-badge { font-size: 0.7rem; cursor: help; }
+.upscale-risk--low    { background: #856404; color: #fff3cd; }
+.upscale-risk--medium { background: #7c3a00; color: #ffe0b2; }
+.upscale-risk--high   { background: #842029; color: #f8d7da; }
+.best-for-topaz-badge { font-size: 0.7rem; background: #155724; color: #d1e7dd; cursor: help; }
+.sharpness-bar  { background: linear-gradient(90deg, #198754, #20c997); }
+.sharpness-value { color: #20c997; }
 </style>

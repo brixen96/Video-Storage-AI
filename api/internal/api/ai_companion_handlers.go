@@ -78,6 +78,10 @@ func aiCompanionChatStream(c *gin.Context) {
 		return true
 	}, func(cards []map[string]interface{}) {
 		videoCards = cards
+	}, func(toolName string) {
+		evt, _ := json.Marshal(map[string]string{"tool": toolName})
+		fmt.Fprintf(c.Writer, "event: tool_call\ndata: %s\n\n", string(evt))
+		flusher.Flush()
 	})
 
 	if err != nil {

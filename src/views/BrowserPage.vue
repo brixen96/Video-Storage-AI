@@ -485,6 +485,33 @@ export default {
 				itemsPerPage: tab.itemsPerPage,
 			}
 		},
+		sessionSnapshot() {
+			return {
+				tabs: this.tabs.map((t) => ({
+					id: t.id,
+					title: t.title,
+					libraryId: t.libraryId,
+					currentPath: t.currentPath,
+					sortBy: t.sortBy,
+					sortOrder: t.sortOrder,
+					viewMode: t.viewMode,
+					filterType: t.filterType,
+					filterContentType: t.filterContentType,
+					filterWatched: t.filterWatched,
+					showNotInterested: t.showNotInterested,
+					itemsPerPage: t.itemsPerPage,
+				})),
+				splitPanels: this.splitPanels.map((p) => ({
+					id: p.id,
+					tabIds: [...p.tabIds],
+					width: p.width,
+					activeTabId: p.activeTabId,
+				})),
+				activeTabId: this.activeTabId,
+				nextTabId: this.nextTabId,
+				nextPanelId: this.nextPanelId,
+			}
+		},
 	},
 	watch: {
 		zoomLevel(v) {
@@ -494,6 +521,13 @@ export default {
 			deep: true,
 			handler(v) {
 				if (v) this.saveBrowserPrefs(v)
+			},
+		},
+		sessionSnapshot: {
+			deep: true,
+			handler() {
+				if (this._sessionSaveTimer) clearTimeout(this._sessionSaveTimer)
+				this._sessionSaveTimer = setTimeout(() => this.saveSession(), 800)
 			},
 		},
 	},
@@ -561,6 +595,46 @@ export default {
 		},
 
 		// ==========================
+		// Session Persistence
+		// ==========================
+		loadSession() {
+			try {
+				const raw = localStorage.getItem('vsai_browser_session')
+				if (!raw) return null
+				const session = JSON.parse(raw)
+				if (!session.tabs || !Array.isArray(session.tabs) || session.tabs.length === 0) return null
+				if (!session.splitPanels || !Array.isArray(session.splitPanels)) return null
+				// Filter out tabs whose library no longer exists
+				const validIds = new Set(this.libraries.map((l) => l.id))
+				const validTabs = session.tabs.filter((t) => !t.libraryId || validIds.has(t.libraryId))
+				if (validTabs.length === 0) return null
+				// Remove invalid tab refs from panels
+				const validTabIdSet = new Set(validTabs.map((t) => t.id))
+				const panels = session.splitPanels
+					.map((p) => ({
+						...p,
+						tabIds: p.tabIds.filter((id) => validTabIdSet.has(id)),
+						activeTabId: validTabIdSet.has(p.activeTabId) ? p.activeTabId : null,
+					}))
+					.filter((p) => p.tabIds.length > 0)
+				if (panels.length === 0) return null
+				panels.forEach((p) => {
+					if (!p.activeTabId) p.activeTabId = p.tabIds[0]
+				})
+				return { ...session, tabs: validTabs, splitPanels: panels }
+			} catch {
+				return null
+			}
+		},
+		saveSession() {
+			try {
+				localStorage.setItem('vsai_browser_session', JSON.stringify(this.sessionSnapshot))
+			} catch {
+				// localStorage quota exceeded — silently ignore
+			}
+		},
+
+		// ==========================
 		// Bookmarks
 		// ==========================
 		loadBookmarks() {
@@ -623,6 +697,30 @@ export default {
 			}
 		},
 		async initializeTabs() {
+			const session = this.loadSession()
+			if (session) {
+				this.nextTabId = session.nextTabId || Math.max(...session.tabs.map((t) => t.id), 0) + 1
+				this.nextPanelId = session.nextPanelId || Math.max(...session.splitPanels.map((p) => p.id), 0) + 1
+				const prefs = this.loadBrowserPrefs()
+				this.tabs = session.tabs.map((t) => ({
+					...t,
+					items: [],
+					loading: false,
+					searchQuery: '',
+					currentPage: 1,
+					totalItems: 0,
+					viewMode: t.viewMode || prefs.viewMode || 'grid',
+					sortBy: t.sortBy || prefs.sortBy || 'name',
+					sortOrder: t.sortOrder || prefs.sortOrder || 'asc',
+					itemsPerPage: t.itemsPerPage || prefs.itemsPerPage || 100,
+				}))
+				this.splitPanels = session.splitPanels
+				this.activeTabId = session.activeTabId || this.splitPanels[0].activeTabId
+				await Promise.all(this.tabs.filter((t) => t.libraryId).map((t) => this.loadLibraryContent(t)))
+				return
+			}
+
+			// No saved session — use the primary library
 			try {
 				const response = await librariesAPI.getPrimary()
 				const primaryLibrary = response.data

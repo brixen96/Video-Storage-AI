@@ -711,8 +711,10 @@ func extractVideoCards(toolName string, result interface{}) []map[string]interfa
 // ChatLLMStream processes user messages using LM Studio with tool calling and streams the final
 // text response chunk-by-chunk via onChunk. onCards is called once (if non-nil) when the
 // response involves video results — the frontend uses these to render inline video cards.
+// onToolCall is called (if non-nil) just before each tool is executed so the caller can emit
+// progress events to the client.
 // Returns false from onChunk to abort (client gone).
-func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{})) error {
+func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{}), onToolCall func(name string)) error {
 	config := s.GetAIConfig()
 	if !config.Enabled {
 		return fmt.Errorf("LLM disabled in config")
@@ -904,6 +906,9 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 				toolArgs = map[string]interface{}{}
 			}
 			log.Printf("[AI] Stream tool call: %s(%v)", tc.name, toolArgs)
+			if onToolCall != nil {
+				onToolCall(tc.name)
+			}
 			toolResult, err := s.ExecuteTool(tc.name, toolArgs)
 			if err != nil {
 				toolResult = map[string]interface{}{"error": err.Error()}

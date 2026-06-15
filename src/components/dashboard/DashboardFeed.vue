@@ -20,7 +20,7 @@
 			<div class="feed-filters" v-if="scraperTypes.length > 0">
 				<button class="filter-chip" :class="{ active: !activeFilter }" @click="$emit('filter-change', '')">All</button>
 				<button
-					v-for="st in scraperTypes"
+					v-for="st in mergedScraperTypes"
 					:key="st.type || st"
 					class="filter-chip"
 					:class="{ active: activeFilter === (st.type || st) }"
@@ -113,83 +113,59 @@
 			</div>
 		</div>
 
-		<!-- Feed items -->
-		<div class="feed-items" v-if="items.length > 0">
-			<TransitionGroup name="feed">
-				<div v-for="item in items" :key="item.id">
-					<!-- Video/thread content item -->
-					<div v-if="item.item_type === 'new_content' && getVideos(item).length > 0" class="feed-item-videos" :class="item.color">
-						<div class="feed-item-header">
-							<div class="feed-icon">
-								<font-awesome-icon :icon="['fas', item.icon || 'bell']" />
-							</div>
-							<div class="feed-header-content">
-								<div class="feed-title">{{ item.title }}</div>
-								<div class="feed-subtitle">{{ item.message }} &bull; {{ formatTimeAgo(item.created_at) }}</div>
-							</div>
-						</div>
-						<div class="video-cards-grid">
-							<div
-								v-for="(video, idx) in getVisibleVideos(item)"
-								:key="idx"
-								class="video-mini-card"
-								:class="{ 'thread-card': video.type === 'thread' }"
-								@click="openVideo(video)"
-							>
-								<div class="video-thumbnail" v-if="video.type !== 'thread'">
-									<img v-if="video.thumbnail_url" :src="video.thumbnail_url" :alt="video.title" @error="handleThumbnailError" />
-									<div v-else class="thumbnail-placeholder">
-										<font-awesome-icon :icon="['fas', 'video']" />
-									</div>
-									<span class="video-duration" v-if="video.duration">{{ formatDuration(video.duration) }}</span>
-								</div>
-								<div class="thread-icon" v-else>
-									<font-awesome-icon :icon="['fas', 'comments']" />
-								</div>
-								<div class="video-info">
-									<div class="video-title">{{ video.title }}</div>
-									<div class="video-meta">
-										<span v-if="video.views">{{ formatViews(video.views) }} views</span>
-										<span v-if="video.type === 'thread'" class="thread-badge">Thread</span>
-									</div>
-								</div>
-							</div>
-						</div>
-						<div
-							v-if="getVideos(item).length > 6"
-							class="more-videos more-videos-btn"
-							@click="toggleExpand(item.id)"
-						>
-							<span v-if="!expandedItems[item.id]">
-								<font-awesome-icon :icon="['fas', 'chevron-down']" class="me-1" />
-								+{{ getVideos(item).length - 6 }} more
-							</span>
-							<span v-else>
-								<font-awesome-icon :icon="['fas', 'chevron-up']" class="me-1" />
-								Show less
-							</span>
-						</div>
+		<!-- YouTube-style video grid -->
+		<div v-if="filteredFlatVideos.length > 0" class="yt-feed-grid">
+			<div
+				v-for="(video, idx) in filteredFlatVideos"
+				:key="idx"
+				class="yt-video-card"
+				@click="openVideo(video)"
+			>
+				<div class="yt-thumb-wrap">
+					<img
+						v-if="video.thumbnail_url && !failedThumbs[video.thumbnail_url]"
+						:src="video.thumbnail_url"
+						:alt="video.title"
+						loading="lazy"
+						@error="handleThumbError(video)"
+					/>
+					<div class="yt-no-thumb" v-else>
+						<font-awesome-icon :icon="['fas', 'video']" />
 					</div>
+					<span class="yt-dur" v-if="video.duration">{{ formatDuration(video.duration) }}</span>
+				</div>
+				<div class="yt-card-body">
+					<div class="yt-card-title" :title="video.title">{{ video.title }}</div>
+					<div class="yt-card-source">{{ video.scraper_name }}</div>
+					<div class="yt-card-meta">
+						<span v-if="video.views">{{ formatViews(video.views) }} views &bull; </span>{{ formatTimeAgo(video.found_at) }}
+					</div>
+				</div>
+			</div>
+		</div>
 
-					<!-- Regular feed item -->
-					<div v-else class="feed-item" :class="item.color">
-						<div class="feed-icon">
-							<font-awesome-icon :icon="['fas', item.icon || 'bell']" />
-						</div>
-						<div class="feed-content">
-							<div class="feed-title">{{ item.title }}</div>
-							<div class="feed-message">{{ item.message }}</div>
-							<div class="feed-time">{{ formatTimeAgo(item.created_at) }}</div>
-						</div>
+		<!-- Non-video activity items (errors, system messages, etc.) -->
+		<div class="activity-log-items" v-if="nonVideoItems.length > 0">
+			<div class="activity-log-label" v-if="filteredFlatVideos.length > 0">Activity Log</div>
+			<TransitionGroup name="feed">
+				<div v-for="item in nonVideoItems" :key="item.id" class="feed-item" :class="item.color">
+					<div class="feed-icon">
+						<font-awesome-icon :icon="['fas', item.icon || 'bell']" />
+					</div>
+					<div class="feed-content">
+						<div class="feed-title">{{ item.title }}</div>
+						<div class="feed-message">{{ item.message }}</div>
+						<div class="feed-time">{{ formatTimeAgo(item.created_at) }}</div>
 					</div>
 				</div>
 			</TransitionGroup>
 		</div>
-		<div class="empty-state" v-else>
+
+		<div class="empty-state" v-if="filteredFlatVideos.length === 0 && nonVideoItems.length === 0">
 			<font-awesome-icon :icon="['fas', 'inbox']" class="empty-icon" />
 			<p>No recent activity</p>
 		</div>
-		<div class="feed-footer" v-if="items.length > 0 && hasMore">
+		<div class="feed-footer" v-if="hasMore">
 			<button class="btn btn-link" @click="$emit('load-more')">Load more</button>
 		</div>
 	</div>
@@ -205,6 +181,7 @@ export default {
 		hasMore: { type: Boolean, default: false },
 		scraperTypes: { type: Array, default: () => [] },
 		activeFilter: { type: String, default: '' },
+		allScraperTypes: { type: Array, default: () => [] },
 	},
 	emits: ['load-more', 'filter-change', 'clear-feed'],
 	data() {
@@ -214,7 +191,52 @@ export default {
 			threadPosts: [],
 			loadingPosts: false,
 			expandedItems: {},
+			failedThumbs: {},
 		}
+	},
+	computed: {
+		mergedScraperTypes() {
+			const seen = new Set()
+			const result = []
+			for (const st of this.scraperTypes) {
+				const key = st.type || st
+				if (!seen.has(key)) { seen.add(key); result.push(st) }
+			}
+			for (const s of this.allScraperTypes) {
+				const key = s.scraper_type
+				if (!seen.has(key)) {
+					seen.add(key)
+					result.push({ type: s.scraper_type, display_name: s.display_name || s.scraper_type })
+				}
+			}
+			return result
+		},
+		flatVideos() {
+			const videos = []
+			for (const item of this.items) {
+				if (item.item_type !== 'new_content') continue
+				let metadata
+				try {
+					metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : (item.metadata || {})
+				} catch { continue }
+				for (const v of (metadata.videos || [])) {
+					if (v.type === 'thread') continue
+					videos.push({ ...v, scraper_type: item.scraper_type, scraper_name: item.title, found_at: item.created_at, feed_color: item.color })
+				}
+			}
+			return videos
+		},
+		filteredFlatVideos() {
+			if (!this.activeFilter) return this.flatVideos
+			return this.flatVideos.filter((v) => v.scraper_type === this.activeFilter)
+		},
+		nonVideoItems() {
+			return this.items.filter((item) => {
+				if (item.item_type === 'new_content' && this.getVideos(item).length > 0) return false
+				if (this.activeFilter && item.scraper_type && item.scraper_type !== this.activeFilter) return false
+				return true
+			})
+		},
 	},
 	async mounted() {
 		await this.loadWatchedThreads()
@@ -302,6 +324,11 @@ export default {
 		handleThumbnailError(e) {
 			e.target.style.display = 'none'
 			e.target.parentElement.querySelector('.thumbnail-placeholder')?.classList.add('show')
+		},
+		handleThumbError(video) {
+			if (video.thumbnail_url) {
+				this.failedThumbs = { ...this.failedThumbs, [video.thumbnail_url]: true }
+			}
 		},
 		formatTimeAgo(dateString) {
 			if (!dateString) return ''
@@ -637,7 +664,88 @@ export default {
 
 .me-2 { margin-right: 0.5rem; }
 
+/* ─── YouTube-style video grid ──────────────────────────── */
+.yt-feed-grid {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 1rem;
+	padding: 1rem 1.25rem 1.25rem;
+}
+
+.yt-video-card {
+	cursor: pointer;
+	border-radius: 8px;
+	overflow: hidden;
+	transition: transform 0.2s;
+}
+.yt-video-card:hover { transform: translateY(-3px); }
+
+.yt-thumb-wrap {
+	position: relative;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	background: rgba(0, 0, 0, 0.4);
+	border-radius: 6px;
+	overflow: hidden;
+}
+.yt-thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.yt-no-thumb {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: rgba(255, 255, 255, 0.18);
+	font-size: 1.75rem;
+	background: rgba(255, 255, 255, 0.03);
+}
+
+.yt-dur {
+	position: absolute;
+	bottom: 5px;
+	right: 5px;
+	background: rgba(0, 0, 0, 0.85);
+	color: #fff;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	padding: 2px 5px;
+	border-radius: 3px;
+	pointer-events: none;
+}
+
+.yt-card-body { padding: 0.5rem 0.125rem; }
+.yt-card-title {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.9);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	line-height: 1.35;
+	margin-bottom: 0.25rem;
+}
+.yt-card-source { font-size: 0.75rem; color: rgba(255, 255, 255, 0.45); margin-bottom: 0.125rem; }
+.yt-card-meta { font-size: 0.6875rem; color: rgba(255, 255, 255, 0.3); }
+
+/* Activity log (non-video items below the grid) */
+.activity-log-items { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.activity-log-label {
+	padding: 0.625rem 1.25rem 0.25rem;
+	font-size: 0.6875rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: rgba(255, 255, 255, 0.28);
+}
+
+@media (max-width: 1200px) { .yt-feed-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 800px) { .yt-feed-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) {
 	.video-cards-grid { grid-template-columns: repeat(2, 1fr); }
+	.yt-feed-grid { grid-template-columns: repeat(2, 1fr); }
 }
+@media (max-width: 480px) { .yt-feed-grid { grid-template-columns: 1fr; } }
 </style>
