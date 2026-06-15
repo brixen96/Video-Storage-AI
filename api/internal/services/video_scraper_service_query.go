@@ -222,9 +222,11 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 		"discovered_at": true,
 		"title":         true,
 		"view_count":    true,
+		"like_count":    true,
 		"rating":        true,
 		"duration":      true,
 		"created_at":    true,
+		"file_size":     true,
 	}
 	if !validSortFields[q.SortBy] {
 		q.SortBy = "discovered_at"
@@ -319,6 +321,47 @@ func (s *VideoScraperService) GetScrapedVideosPaginated(q ScrapedVideosQuery) (*
 	if q.MinViews > 0 {
 		conditions = append(conditions, "COALESCE(view_count,0) >= ?")
 		args = append(args, q.MinViews)
+	}
+	if q.MinLikes > 0 {
+		conditions = append(conditions, "COALESCE(like_count,0) >= ?")
+		args = append(args, q.MinLikes)
+	}
+	if q.DateFrom != "" {
+		conditions = append(conditions, "discovered_at >= ?")
+		args = append(args, q.DateFrom)
+	}
+	if q.DateTo != "" {
+		conditions = append(conditions, "discovered_at <= ?")
+		args = append(args, q.DateTo+" 23:59:59")
+	}
+	if q.MinDuration > 0 {
+		conditions = append(conditions, "duration >= ?")
+		args = append(args, q.MinDuration)
+	}
+	if q.MaxDuration > 0 {
+		conditions = append(conditions, "duration <= ?")
+		args = append(args, q.MaxDuration)
+	}
+	if q.MinFileSize > 0 {
+		conditions = append(conditions, "COALESCE(file_size,0) >= ?")
+		args = append(args, q.MinFileSize)
+	}
+	if q.MaxFileSize > 0 {
+		conditions = append(conditions, "COALESCE(file_size,0) <= ?")
+		args = append(args, q.MaxFileSize)
+	}
+	if q.HasThumbnail != nil {
+		if *q.HasThumbnail {
+			conditions = append(conditions, "COALESCE(thumbnail_url, thumbnail_path, '') != ''")
+		} else {
+			conditions = append(conditions, "(thumbnail_url IS NULL OR thumbnail_url = '') AND (thumbnail_path IS NULL OR thumbnail_path = '')")
+		}
+	}
+	if q.OnlyWithAuthor {
+		conditions = append(conditions, "author IS NOT NULL AND author != ''")
+	}
+	if q.OnlyWithRating {
+		conditions = append(conditions, "COALESCE(rating,0) > 0")
 	}
 
 	whereClause := ""

@@ -201,6 +201,8 @@ func getLeakVidsVideosHandler(c *gin.Context) {
 	onlyDownloaded := c.DefaultQuery("downloaded_only", "false") == "true"
 	minRating, _ := strconv.Atoi(c.DefaultQuery("min_rating", "0"))
 	minViews, _ := strconv.Atoi(c.DefaultQuery("min_views", "0"))
+	minDuration, _ := strconv.ParseFloat(c.DefaultQuery("min_duration", "0"), 64)
+	maxDuration, _ := strconv.ParseFloat(c.DefaultQuery("max_duration", "0"), 64)
 	var includeTags, excludeTags []string
 	if v := c.Query("include_tags"); v != "" {
 		includeTags = strings.Split(v, ",")
@@ -222,6 +224,8 @@ func getLeakVidsVideosHandler(c *gin.Context) {
 		OnlyDownloaded:  onlyDownloaded,
 		MinRating:       minRating,
 		MinViews:        minViews,
+		MinDuration:     minDuration,
+		MaxDuration:     maxDuration,
 		IncludeKeywords: includeTags,
 		ExcludeKeywords: excludeTags,
 	})

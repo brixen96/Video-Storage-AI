@@ -539,6 +539,8 @@ type HQPornerVideoQuery struct {
 	ExcludeKeywords []string // AND NOT (tags LIKE each)
 	MinRating       int      // Minimum rating (0–100); 0 means no filter
 	MinViews        int      // Minimum view count; 0 means no filter
+	MinDuration     float64  // Minimum duration in seconds; 0 means no filter
+	MaxDuration     float64  // Maximum duration in seconds; 0 means no filter
 }
 
 // HQPornerVideoResult holds a page of HQPorner videos and the total count
@@ -608,6 +610,14 @@ func (s *HQPornerScraperService) GetVideosPaginated(query HQPornerVideoQuery) (*
 	if query.MinViews > 0 {
 		where += ` AND COALESCE(view_count,0) >= ?`
 		args = append(args, query.MinViews)
+	}
+	if query.MinDuration > 0 {
+		where += ` AND duration >= ?`
+		args = append(args, query.MinDuration)
+	}
+	if query.MaxDuration > 0 {
+		where += ` AND duration <= ?`
+		args = append(args, query.MaxDuration)
 	}
 
 	// Total count

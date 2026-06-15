@@ -183,7 +183,7 @@ type ScrapedVideosQuery struct {
 	Search          string   // Search in title
 	Page            int      // Page number (1-indexed)
 	Limit           int      // Items per page
-	SortBy          string   // Sort field (discovered_at, title, view_count, rating, duration)
+	SortBy          string   // Sort field (discovered_at, title, view_count, like_count, rating, duration, file_size)
 	SortOrder       string   // Sort order (asc, desc)
 	PerformerID     int64    // Filter to videos containing this performer (matched via metadata JSON)
 	TagID           int64    // Filter to videos containing this tag (matched via metadata JSON)
@@ -191,6 +191,16 @@ type ScrapedVideosQuery struct {
 	OnlyDownloaded  bool     // Only return videos that have been downloaded
 	MinRating       int      // Minimum rating (0–100); 0 means no filter
 	MinViews        int      // Minimum view count; 0 means no filter
+	MinLikes        int      // Minimum like count; 0 means no filter
+	DateFrom        string   // Minimum discovered_at date (YYYY-MM-DD)
+	DateTo          string   // Maximum discovered_at date (YYYY-MM-DD)
+	MinDuration     float64  // Minimum duration in seconds; 0 means no filter
+	MaxDuration     float64  // Maximum duration in seconds; 0 means no filter
+	MinFileSize     int64    // Minimum file size in bytes; 0 means no filter
+	MaxFileSize     int64    // Maximum file size in bytes; 0 means no filter
+	HasThumbnail    *bool    // Filter by thumbnail existence (true = has thumbnail, false = no thumbnail)
+	OnlyWithAuthor  bool     // Only return videos that have an author
+	OnlyWithRating  bool     // Only return videos that have a rating > 0
 	IncludeTabInfo  bool     // Populate SourceTabName from scraper_tabs
 }
 

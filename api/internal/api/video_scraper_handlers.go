@@ -142,6 +142,8 @@ func getScrapedVideosHandler(c *gin.Context) {
 		IncludeTabInfo: c.Query("includeTabInfo") == "true",
 		OnlyDownloaded: c.Query("downloaded_only") == "true",
 		AuthorSearch:   c.Query("author"),
+		DateFrom:       c.Query("date_from"),
+		DateTo:         c.Query("date_to"),
 	}
 	if v, err := strconv.Atoi(c.Query("min_rating")); err == nil && v > 0 {
 		q.MinRating = v
@@ -149,6 +151,27 @@ func getScrapedVideosHandler(c *gin.Context) {
 	if v, err := strconv.Atoi(c.Query("min_views")); err == nil && v > 0 {
 		q.MinViews = v
 	}
+	if v, err := strconv.Atoi(c.Query("min_likes")); err == nil && v > 0 {
+		q.MinLikes = v
+	}
+	if v, err := strconv.ParseFloat(c.Query("min_duration"), 64); err == nil && v > 0 {
+		q.MinDuration = v
+	}
+	if v, err := strconv.ParseFloat(c.Query("max_duration"), 64); err == nil && v > 0 {
+		q.MaxDuration = v
+	}
+	if v, err := strconv.ParseInt(c.Query("min_file_size"), 10, 64); err == nil && v > 0 {
+		q.MinFileSize = v
+	}
+	if v, err := strconv.ParseInt(c.Query("max_file_size"), 10, 64); err == nil && v > 0 {
+		q.MaxFileSize = v
+	}
+	if c.Query("has_thumbnail") != "" {
+		v := c.Query("has_thumbnail") == "true"
+		q.HasThumbnail = &v
+	}
+	q.OnlyWithAuthor = c.Query("only_with_author") == "true"
+	q.OnlyWithRating = c.Query("only_with_rating") == "true"
 	if s := c.Query("include_tags"); s != "" {
 		q.IncludeKeywords = strings.Split(s, ",")
 	}

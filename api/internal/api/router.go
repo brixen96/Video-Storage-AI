@@ -55,7 +55,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{
 			"status":   "healthy",
 			"database": "connected",
-			"version":  "0.1.0",
+			"version":  config.Version,
 		})
 	})
 

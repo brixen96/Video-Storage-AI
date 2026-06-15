@@ -214,6 +214,8 @@ func getMotherlessVideosHandler(c *gin.Context) {
 	}
 	minRating, _ := strconv.Atoi(c.DefaultQuery("min_rating", "0"))
 	minViews, _ := strconv.Atoi(c.DefaultQuery("min_views", "0"))
+	minDuration, _ := strconv.ParseFloat(c.DefaultQuery("min_duration", "0"), 64)
+	maxDuration, _ := strconv.ParseFloat(c.DefaultQuery("max_duration", "0"), 64)
 
 	videoScraperSvc := ensureVideoScraperService()
 
@@ -231,6 +233,8 @@ func getMotherlessVideosHandler(c *gin.Context) {
 		ExcludeKeywords: excludeTags,
 		MinRating:       minRating,
 		MinViews:        minViews,
+		MinDuration:     minDuration,
+		MaxDuration:     maxDuration,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
