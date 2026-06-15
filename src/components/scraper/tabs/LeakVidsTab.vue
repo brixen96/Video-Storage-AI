@@ -30,7 +30,8 @@
 			<ScraperFilterPanel
 				v-model:modelCollapsed="filterCollapsed"
 				v-model:sort="videoSort"
-				v-model:duration="durationFilter"
+				v-model:minDuration="minDuration"
+				v-model:maxDuration="maxDuration"
 				v-model:onlyDownloaded="onlyDownloaded"
 				v-model:minRating="minRating"
 				v-model:minViews="minViews"
@@ -229,7 +230,9 @@ const videoSort         = ref('newest')
 const videoPage         = ref(1)
 const totalCount        = ref(0)
 const totalPages        = ref(0)
-const durationFilter    = ref('all')
+
+const minDuration      = ref(0)
+const maxDuration      = ref(0)
 const onlyDownloaded    = ref(false)
 const minRating         = ref(0)
 const minViews          = ref(0)
@@ -245,7 +248,8 @@ const selectAllVideos = () => selectAll(videos.value)
 const activeFilterCount = computed(() => {
 	let n = 0
 	if (videoSort.value !== 'newest')       n++
-	if (durationFilter.value !== 'all')     n++
+	if (minDuration.value > 0)             n++
+	if (maxDuration.value > 0)             n++
 	if (onlyDownloaded.value)               n++
 	if (parseInt(minRating.value) > 0)      n++
 	if (parseInt(minViews.value) > 0)       n++
@@ -260,17 +264,21 @@ const SORT_MAP = {
 	oldest:          { sort: 'discovered_at', order: 'asc'  },
 	'views-desc':    { sort: 'view_count',    order: 'desc' },
 	'views-asc':     { sort: 'view_count',    order: 'asc'  },
+	'likes-desc':    { sort: 'like_count',    order: 'desc' },
+	'likes-asc':     { sort: 'like_count',    order: 'asc'  },
 	'rating-desc':   { sort: 'rating',        order: 'desc' },
 	'rating-asc':    { sort: 'rating',        order: 'asc'  },
 	'duration-desc': { sort: 'duration',      order: 'desc' },
 	'duration-asc':  { sort: 'duration',      order: 'asc'  },
 	'title-asc':     { sort: 'title',         order: 'asc'  },
+	'title-desc':    { sort: 'title',         order: 'desc' },
 }
 
 // ── Watchers ──────────────────────────────────────────────────────────────────
 watch(debouncedSearch,   () => { videoPage.value = 1; loadVideos() })
 watch(videoSort,         () => { videoPage.value = 1; loadVideos() })
-watch(durationFilter,    () => { videoPage.value = 1; loadVideos() })
+watch(minDuration,      () => { videoPage.value = 1; loadVideos() })
+watch(maxDuration,      () => { videoPage.value = 1; loadVideos() })
 watch(onlyDownloaded,    () => { videoPage.value = 1; loadVideos() })
 watch(minRating,         () => { videoPage.value = 1; loadVideos() })
 watch(minViews,          () => { videoPage.value = 1; loadVideos() })
@@ -289,7 +297,8 @@ const loadVideos = async () => {
 			sort:  sortField,
 			order: sortOrder,
 		}
-		if (durationFilter.value !== 'all')     params.duration_filter = durationFilter.value
+		if (parseInt(minDuration.value) > 0) params.min_duration = minDuration.value * 60
+		if (parseInt(maxDuration.value) > 0) params.max_duration = maxDuration.value * 60
 		if (onlyDownloaded.value)               params.downloaded_only = true
 		if (parseInt(minRating.value) > 0)      params.min_rating      = minRating.value
 		if (parseInt(minViews.value) > 0)       params.min_views       = minViews.value
@@ -316,6 +325,8 @@ const loadStats = async () => {
 const onClearFilters = () => {
 	minRating.value         = 0
 	minViews.value          = 0
+	minDuration.value       = 0
+	maxDuration.value       = 0
 	includeTagFilters.value = []
 	excludeTagFilters.value = []
 	videoPage.value         = 1

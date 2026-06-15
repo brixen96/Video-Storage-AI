@@ -30,7 +30,8 @@
 			<ScraperFilterPanel
 				v-model:modelCollapsed="filterCollapsed"
 				v-model:sort="hqPornerSort"
-				v-model:duration="hqPornerDurationFilter"
+				v-model:minDuration="minDuration"
+				v-model:maxDuration="maxDuration"
 				v-model:onlyDownloaded="hqPornerOnlyDownloaded"
 				v-model:minRating="minRating"
 				v-model:minViews="minViews"
@@ -248,7 +249,8 @@ const hqPornerMaxPages        = ref(0)
 const hqPornerSearch          = ref('')
 const hqPornerSort            = ref('newest')
 const hqPornerVideoPage       = ref(1)
-const hqPornerDurationFilter  = ref('all')
+const minDuration            = ref(0)
+const maxDuration            = ref(0)
 const hqPornerOnlyDownloaded  = ref(false)
 const hqPornerPerformerFilter = ref(0)
 const hqPornerTagFilter       = ref(0)
@@ -271,7 +273,8 @@ const selectAllVideos = () => selectAll(hqPornerVideos.value)
 const activeFilterCount = computed(() => {
 	let n = 0
 	if (hqPornerSort.value !== 'newest')        n++
-	if (hqPornerDurationFilter.value !== 'all') n++
+	if (minDuration.value > 0)              n++
+	if (maxDuration.value > 0)              n++
 	if (hqPornerOnlyDownloaded.value)           n++
 	if (hqPornerPerformerFilter.value !== 0)    n++
 	if (hqPornerTagFilter.value !== 0)          n++
@@ -286,7 +289,8 @@ const activeFilterCount = computed(() => {
 // ── Watchers ──────────────────────────────────────────────────────────────────
 watch(debouncedSearch,           () => { hqPornerVideoPage.value = 1; loadVideos() })
 watch(hqPornerSort,              () => { hqPornerVideoPage.value = 1; loadVideos() })
-watch(hqPornerDurationFilter,    () => { hqPornerVideoPage.value = 1; loadVideos() })
+watch(minDuration,               () => { hqPornerVideoPage.value = 1; loadVideos() })
+watch(maxDuration,               () => { hqPornerVideoPage.value = 1; loadVideos() })
 watch(hqPornerOnlyDownloaded,    () => { hqPornerVideoPage.value = 1; loadVideos() })
 watch(hqPornerPerformerFilter,   () => { hqPornerVideoPage.value = 1; loadVideos() })
 watch(hqPornerTagFilter,         () => { hqPornerVideoPage.value = 1; loadVideos() })
@@ -302,11 +306,14 @@ const SORT_MAP = {
 	oldest:          { sort: 'discovered_at', order: 'asc'  },
 	'views-desc':    { sort: 'view_count',    order: 'desc' },
 	'views-asc':     { sort: 'view_count',    order: 'asc'  },
+	'likes-desc':    { sort: 'like_count',    order: 'desc' },
+	'likes-asc':     { sort: 'like_count',    order: 'asc'  },
 	'rating-desc':   { sort: 'rating',        order: 'desc' },
 	'rating-asc':    { sort: 'rating',        order: 'asc'  },
 	'duration-desc': { sort: 'duration',      order: 'desc' },
 	'duration-asc':  { sort: 'duration',      order: 'asc'  },
 	'title-asc':     { sort: 'title',         order: 'asc'  },
+	'title-desc':    { sort: 'title',         order: 'desc' },
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -323,7 +330,8 @@ const loadVideos = async () => {
 		}
 		if (hqPornerPerformerFilter.value > 0)      params.performer_id    = hqPornerPerformerFilter.value
 		if (hqPornerTagFilter.value > 0)            params.tag_id          = hqPornerTagFilter.value
-		if (hqPornerDurationFilter.value !== 'all') params.duration_filter = hqPornerDurationFilter.value
+		if (parseInt(minDuration.value) > 0) params.min_duration = minDuration.value * 60
+		if (parseInt(maxDuration.value) > 0) params.max_duration = maxDuration.value * 60
 		if (hqPornerOnlyDownloaded.value)           params.downloaded_only = true
 		if (hqPornerAuthorFilter.value)             params.author          = hqPornerAuthorFilter.value
 		if (includeTagFilters.value.length > 0)     params.include_tags    = includeTagFilters.value.join(',')
@@ -368,6 +376,8 @@ const onClearFilters = () => {
 	excludeTagFilters.value    = []
 	minRating.value            = 0
 	minViews.value             = 0
+	minDuration.value          = 0
+	maxDuration.value          = 0
 	hqPornerVideoPage.value    = 1
 	loadVideos()
 }

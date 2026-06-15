@@ -30,10 +30,11 @@
 			<ScraperFilterPanel
 				v-model:modelCollapsed="filterCollapsed"
 				v-model:sort="videoSort"
-				v-model:duration="durationFilter"
 				v-model:onlyDownloaded="onlyDownloaded"
 				v-model:minRating="minRating"
 				v-model:minViews="minViews"
+				v-model:minDuration="minDuration"
+				v-model:maxDuration="maxDuration"
 				:showMinRating="true"
 				:showMinViews="true"
 				@clear="onClearFilters"
@@ -260,7 +261,8 @@ const quickKeywords    = ref([])
 const videoSearch      = ref('')
 const videoSort        = ref('newest')
 const videoPage        = ref(1)
-const durationFilter   = ref('all')
+const minDuration      = ref(0)
+const maxDuration      = ref(0)
 const onlyDownloaded   = ref(false)
 const keywordFilter    = ref('')
 const totalCount       = ref(0)
@@ -285,7 +287,8 @@ const availableKeywords = computed(() =>
 const activeFilterCount = computed(() => {
 	let n = 0
 	if (videoSort.value !== 'newest')     n++
-	if (durationFilter.value !== 'all')   n++
+	if (minDuration.value > 0)            n++
+	if (maxDuration.value > 0)            n++
 	if (onlyDownloaded.value)             n++
 	if (keywordFilter.value !== '')       n++
 	if (includeTagFilters.value.length > 0) n++
@@ -301,17 +304,21 @@ const SORT_MAP = {
 	oldest:          { sort: 'discovered_at', order: 'asc'  },
 	'views-desc':    { sort: 'view_count',    order: 'desc' },
 	'views-asc':     { sort: 'view_count',    order: 'asc'  },
+	'likes-desc':    { sort: 'like_count',    order: 'desc' },
+	'likes-asc':     { sort: 'like_count',    order: 'asc'  },
 	'rating-desc':   { sort: 'rating',        order: 'desc' },
 	'rating-asc':    { sort: 'rating',        order: 'asc'  },
 	'duration-desc': { sort: 'duration',      order: 'desc' },
 	'duration-asc':  { sort: 'duration',      order: 'asc'  },
 	'title-asc':     { sort: 'title',         order: 'asc'  },
+	'title-desc':    { sort: 'title',         order: 'desc' },
 }
 
 // ── Watchers ──────────────────────────────────────────────────────────────────
 watch(debouncedSearch,  () => { videoPage.value = 1; loadVideos() })
 watch(videoSort,        () => { videoPage.value = 1; loadVideos() })
-watch(durationFilter,   () => { videoPage.value = 1; loadVideos() })
+watch(minDuration,      () => { videoPage.value = 1; loadVideos() })
+watch(maxDuration,      () => { videoPage.value = 1; loadVideos() })
 watch(onlyDownloaded,   () => { videoPage.value = 1; loadVideos() })
 watch(keywordFilter,    () => { videoPage.value = 1; loadVideos() })
 watch(includeTagFilters, () => { videoPage.value = 1; loadVideos() }, { deep: true })
@@ -332,12 +339,13 @@ const loadVideos = async () => {
 			order: sortOrder,
 		}
 		if (keywordFilter.value)                params.keyword      = keywordFilter.value
-		if (durationFilter.value !== 'all')     params.duration_filter = durationFilter.value
 		if (onlyDownloaded.value)               params.downloaded_only = true
 		if (includeTagFilters.value.length > 0) params.include_tags = includeTagFilters.value.join(',')
 		if (excludeTagFilters.value.length > 0) params.exclude_tags = excludeTagFilters.value.join(',')
 		if (parseInt(minRating.value) > 0)      params.min_rating   = minRating.value
 		if (parseInt(minViews.value) > 0)       params.min_views    = minViews.value
+		if (parseInt(minDuration.value) > 0)    params.min_duration = minDuration.value * 60 // Convert minutes to seconds
+		if (parseInt(maxDuration.value) > 0)    params.max_duration = maxDuration.value * 60 // Convert minutes to seconds
 
 		const data = await scrapersAPI.pornhub.getVideos(params)
 		if (data.success && data.data) {
@@ -364,6 +372,8 @@ const loadKeywords = async () => {
 }
 
 const onClearFilters = () => {
+	minDuration.value       = 0
+	maxDuration.value       = 0
 	keywordFilter.value     = ''
 	includeTagFilters.value = []
 	excludeTagFilters.value = []

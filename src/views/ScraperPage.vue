@@ -114,81 +114,66 @@
 			<!-- Dynamic Custom Tab Content -->
 			<div v-for="tab in scraperTabs" :key="`content-${tab.id}`">
 				<div v-if="activeTab === `tab-${tab.id}`" class="tab-content">
+					<!-- Top Bar -->
+					<div class="scraper-tab-topbar">
+						<button class="scraper-filter-toggle-btn" :class="{ 'is-active': !collapsedSections[`filter-${tab.id}`] }" @click="collapsedSections[`filter-${tab.id}`] = !collapsedSections[`filter-${tab.id}`]" title="Toggle filters">
+							<font-awesome-icon :icon="['fas', 'sliders-h']" />
+							Filters
+							<span v-if="activeTabFilterCount(tab.id) > 0" class="scraper-filter-toggle-badge">{{ activeTabFilterCount(tab.id) }}</span>
+						</button>
+						<input v-model="videoSearch[tab.id]" class="scraper-tab-search" type="text" :placeholder="`Search ${tab.name} videos...`" @input="onTabSearchInput(tab.id)" />
+						<div class="scraper-tab-topbar-actions">
+							<span v-if="(tabVideoTotal[tab.id] || 0) > 0" class="scraper-video-count">{{ (tabVideoTotal[tab.id] || 0).toLocaleString() }} videos</span>
+							<button class="btn btn-sm" :class="customTabSelectionMode[tab.id] ? 'btn-primary' : 'btn-outline-secondary'" @click="toggleTabSelectionMode(tab.id)" title="Select mode">
+								<font-awesome-icon :icon="['fas', customTabSelectionMode[tab.id] ? 'times' : 'check-square']" />
+							</button>
+							<button class="btn btn-sm btn-outline-info" @click="loadVideosForTab(tab.id)" :disabled="customTabLoading[tab.id]" title="Refresh">
+								<font-awesome-icon :icon="['fas', customTabLoading[tab.id] ? 'spinner' : 'sync-alt']" :spin="customTabLoading[tab.id]" />
+							</button>
+						</div>
+					</div>
+
 					<div class="scraper-layout" :class="{ 'sidebar-collapsed': collapsedSections[`tab-${tab.id}`] }">
-						<!-- Main Content (Left) -->
+						<!-- Left: Filter Panel -->
+						<ScraperFilterPanel v-model:modelCollapsed="collapsedSections[`filter-${tab.id}`]" v-model:sort="videoSort[tab.id]" v-model:onlyDownloaded="videoOnlyDownloaded[tab.id]" v-model:minRating="videoMinRating[tab.id]" v-model:minViews="videoMinViews[tab.id]" v-model:minLikes="videoMinLikes[tab.id]" v-model:fileSizeRange="videoFileSizeRange[tab.id]" v-model:dateFrom="videoDateFrom[tab.id]" v-model:dateTo="videoDateTo[tab.id]" v-model:minDuration="videoMinDuration[tab.id]" v-model:maxDuration="videoMaxDuration[tab.id]" v-model:onlyWithRating="videoOnlyWithRating[tab.id]" v-model:onlyWithAuthor="videoOnlyWithAuthor[tab.id]" :showMinRating="true" :showMinViews="true" :showMinLikes="true" :showDateRange="true" :showOnlyWithRating="true" :showOnlyWithAuthor="true" @clear="resetVideoFilters(tab.id)" @update:sort="onTabFilterChange(tab.id)" @update:onlyDownloaded="onTabFilterChange(tab.id)" @update:minRating="onTabFilterChange(tab.id)" @update:minViews="onTabFilterChange(tab.id)" @update:minLikes="onTabFilterChange(tab.id)" @update:fileSizeRange="onTabFilterChange(tab.id)" @update:dateFrom="onTabFilterChange(tab.id)" @update:dateTo="onTabFilterChange(tab.id)" @update:minDuration="onTabFilterChange(tab.id)" @update:maxDuration="onTabFilterChange(tab.id)" @update:onlyWithRating="onTabFilterChange(tab.id)" @update:onlyWithAuthor="onTabFilterChange(tab.id)">
+							<!-- Author / Uploader -->
+							<div class="sfp-section">
+								<div class="sfp-section-label">
+									<font-awesome-icon :icon="['fas', 'user']" />
+									Author / Uploader
+								</div>
+								<input v-model="videoAuthorFilter[tab.id]" type="text" class="form-control form-control-sm sfp-input" placeholder="Filter by author..." @input="onTabSearchInput(tab.id)" />
+							</div>
+
+							<!-- Include Tags -->
+							<div class="sfp-section">
+								<div class="sfp-section-label">
+									<font-awesome-icon :icon="['fas', 'plus-circle']" />
+									Include Tags
+								</div>
+								<input v-model="newIncludeTag" type="text" class="form-control form-control-sm sfp-input" placeholder="Add tag, press Enter..." @keydown.enter.prevent="addIncludeTag(tab.id)" />
+								<div v-if="(videoIncludeTags[tab.id] || []).length > 0" class="sfp-chips mt-1">
+									<span v-for="tag in videoIncludeTags[tab.id]" :key="tag" class="sfp-chip active" @click="removeIncludeTag(tab.id, tag)"> {{ tag }} <font-awesome-icon :icon="['fas', 'times']" class="ms-1" /> </span>
+								</div>
+							</div>
+
+							<!-- Exclude Tags -->
+							<div class="sfp-section">
+								<div class="sfp-section-label">
+									<font-awesome-icon :icon="['fas', 'minus-circle']" />
+									Exclude Tags
+								</div>
+								<input v-model="newExcludeTag" type="text" class="form-control form-control-sm sfp-input" placeholder="Exclude tag, press Enter..." @keydown.enter.prevent="addExcludeTag(tab.id)" />
+								<div v-if="(videoExcludeTags[tab.id] || []).length > 0" class="sfp-chips mt-1">
+									<span v-for="tag in videoExcludeTags[tab.id]" :key="tag" class="sfp-chip exclude-chip" @click="removeExcludeTag(tab.id, tag)"> {{ tag }} <font-awesome-icon :icon="['fas', 'times']" class="ms-1" /> </span>
+								</div>
+							</div>
+						</ScraperFilterPanel>
+
+						<!-- Center: Main Content -->
 						<div class="scraper-main">
-							<!-- Search and Filters -->
-							<div class="filter-bar mb-3">
-								<div class="row g-2 align-items-end">
-									<div class="col-md-4">
-										<input v-model="videoSearch[tab.id]" type="text" class="form-control form-control-sm" placeholder="Search videos..." @input="onTabSearchInput(tab.id)" />
-									</div>
-									<div class="col-md-3">
-										<select v-model="videoSort[tab.id]" class="form-select form-select-sm" @change="onTabFilterChange(tab.id)">
-											<option value="newest">Newest First</option>
-											<option value="oldest">Oldest First</option>
-											<option value="views-desc">Most Views</option>
-											<option value="duration-desc">Longest</option>
-											<option value="duration-asc">Shortest</option>
-											<option value="title-asc">Title (A-Z)</option>
-											<option value="title-desc">Title (Z-A)</option>
-											<option value="likes-desc">Most Likes</option>
-										</select>
-									</div>
-									<div class="col-md-2">
-										<select v-model="videoDurationFilter[tab.id]" class="form-select form-select-sm" @change="onTabFilterChange(tab.id)">
-											<option value="">Any Duration</option>
-											<option value="short">Short (&lt;5 min)</option>
-											<option value="medium">Medium (5–20 min)</option>
-											<option value="long">Long (&gt;20 min)</option>
-										</select>
-									</div>
-									<div class="col-md-3 d-flex gap-1">
-										<button class="btn btn-sm btn-outline-secondary flex-grow-1" @click="toggleVideoFilters(tab.id)">
-											<font-awesome-icon :icon="['fas', 'filter']" class="me-1" />
-											More
-											<span v-if="activeTabFilterCount(tab.id) > 0" class="badge bg-primary ms-1">{{ activeTabFilterCount(tab.id) }}</span>
-										</button>
-										<button class="btn btn-sm btn-outline-warning" @click="resetVideoFilters(tab.id)" title="Reset all filters">
-											<font-awesome-icon :icon="['fas', 'redo']" />
-										</button>
-									</div>
-								</div>
-								<!-- Advanced Filters (Collapsible) -->
-								<div v-if="showVideoFilters[tab.id]" class="mt-2 pt-2 border-top border-secondary">
-									<div class="row g-2 align-items-center">
-										<div class="col-md-4">
-											<input v-model="videoAuthorFilter[tab.id]" type="text" class="form-control form-control-sm" placeholder="Author / uploader..." @input="onTabSearchInput(tab.id)" />
-										</div>
-										<div class="col-md-3">
-											<input v-model.number="videoMinViews[tab.id]" type="number" min="0" class="form-control form-control-sm" placeholder="Min views (0 = any)" @change="onTabFilterChange(tab.id)" />
-										</div>
-										<div class="col-md-3 d-flex align-items-center">
-											<div class="form-check mb-0">
-												<input :id="`only-dl-${tab.id}`" v-model="videoOnlyDownloaded[tab.id]" class="form-check-input" type="checkbox" @change="onTabFilterChange(tab.id)" />
-												<label :for="`only-dl-${tab.id}`" class="form-check-label small">Downloaded only</label>
-											</div>
-										</div>
-									</div>
-								</div>
-							</div>
-
-							<!-- Active Job Progress -->
-							<div v-if="customTabJobs[tab.id]" class="card bg-dark mb-3">
-								<div class="card-body py-2">
-									<div class="d-flex justify-content-between align-items-center">
-										<span class="small">
-											<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-2 text-primary" />
-											{{ customTabJobs[tab.id].status }}
-										</span>
-										<span class="small">
-											<strong>{{ customTabJobs[tab.id].pagesCompleted }}</strong> pages | <strong>{{ customTabJobs[tab.id].videosFound }}</strong> found | <strong>{{ customTabJobs[tab.id].videosSaved }}</strong> saved
-										</span>
-									</div>
-								</div>
-							</div>
-
-							<!-- Loading State -->
+							<ScraperBulkActions :selectionMode="customTabSelectionMode[tab.id] || false" :selectedCount="customTabSelectedVideos[tab.id]?.size || 0" :sendingToJD="customTabJDSending[tab.id] || false" @select-all="selectAllTabVideos(tab.id)" @send-to-jd="sendTabSelectedToJD(tab)" @delete-selected="deleteTabSelectedVideos(tab)" />
+							<ScraperJobProgress :job="customTabJobs[tab.id]" :label="tab.name" />
 							<LoadingState v-if="customTabLoading[tab.id]" show-text :loading-text="`Loading ${tab.name} videos...`" />
 
 							<!-- Scraped Videos Grid -->
@@ -198,47 +183,15 @@
 										<font-awesome-icon :icon="['fas', 'video']" class="me-2" />
 										{{ tab.name }} Videos ({{ (tabVideoTotal[tab.id] || 0).toLocaleString() }})
 									</h6>
-									<div class="d-flex gap-1">
-										<button
-											class="btn btn-sm"
-											:class="customTabSelectionMode[tab.id] ? 'btn-primary' : 'btn-outline-secondary'"
-											@click="toggleTabSelectionMode(tab.id)"
-											title="Toggle selection mode"
-										>
-											<font-awesome-icon :icon="['fas', 'check-square']" class="me-1" />
-											{{ customTabSelectionMode[tab.id] ? `${(customTabSelectedVideos[tab.id]?.size || 0)} selected` : 'Select' }}
-										</button>
-										<button class="btn btn-sm btn-outline-secondary" @click="loadVideosForTab(tab.id)" title="Reload videos">
-											<font-awesome-icon :icon="['fas', 'sync']" />
-										</button>
-										<button class="btn btn-sm btn-outline-danger" @click="clearCustomTabVideos(tab)" title="Delete all videos for this scraper">
-											<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />
-											Delete All
-										</button>
-									</div>
+									<button class="btn btn-sm btn-outline-danger" @click="clearCustomTabVideos(tab)" title="Delete all">
+										<font-awesome-icon :icon="['fas', 'trash-alt']" />
+									</button>
 								</div>
 
-								<!-- Bulk Actions Bar -->
-								<ScraperBulkActions
-									:selectionMode="customTabSelectionMode[tab.id] || false"
-									:selectedCount="customTabSelectedVideos[tab.id]?.size || 0"
-									:sendingToJD="customTabJDSending[tab.id] || false"
-									@select-all="selectAllTabVideos(tab.id)"
-									@send-to-jd="sendTabSelectedToJD(tab)"
-									@delete-selected="deleteTabSelectedVideos(tab)"
-								/>
-
 								<div class="video-grid">
-									<ScrapedVideoCard
-										v-for="video in customTabVideos[tab.id]"
-										:key="video.id"
-										:video="video"
-										:selectionMode="customTabSelectionMode[tab.id] || false"
-										:isSelected="customTabSelectedVideos[tab.id]?.has(video.id) || false"
-										@toggle-selection="toggleTabVideoSelection(tab.id, $event)"
-									>
+									<ScrapedVideoCard v-for="video in customTabVideos[tab.id]" :key="video.id" :video="video" :selectionMode="customTabSelectionMode[tab.id] || false" :isSelected="customTabSelectedVideos[tab.id]?.has(video.id) || false" @toggle-selection="toggleTabVideoSelection(tab.id, $event)">
 										<template #actions="{ video: v }">
-											<button @click="playScrapedVideo(v, tab)" class="btn btn-sm btn-primary">
+											<button @click.stop="playScrapedVideo(v, tab)" class="btn btn-sm btn-primary">
 												<font-awesome-icon :icon="['fas', 'play']" class="me-1" />
 												Play
 											</button>
@@ -252,46 +205,17 @@
 									</ScrapedVideoCard>
 								</div>
 
-								<!-- Pagination -->
-								<div class="d-flex align-items-center justify-content-between mt-3">
-									<!-- Left: count + per-page selector -->
-									<div class="d-flex align-items-center gap-2">
-										<span class="text-muted small">
-											Showing {{ ((videoPage[tab.id] || 1) - 1) * videosPerPage.value + 1 }}–{{ Math.min((videoPage[tab.id] || 1) * videosPerPage.value, tabVideoTotal[tab.id] || 0) }} of {{ (tabVideoTotal[tab.id] || 0).toLocaleString() }}
-										</span>
-										<select class="form-select form-select-sm" style="width: auto" @change="changeVideosPerPage($event.target.value, tab.id)">
-											<option :value="12" :selected="videosPerPage.value === 12">12/page</option>
-											<option :value="24" :selected="videosPerPage.value === 24">24/page</option>
-											<option :value="48" :selected="videosPerPage.value === 48">48/page</option>
-											<option :value="96" :selected="videosPerPage.value === 96">96/page</option>
-										</select>
-									</div>
-									<!-- Center: nav buttons -->
-									<div v-if="(tabVideoTotalPages[tab.id] || 1) > 1" class="btn-group">
-										<button class="btn btn-sm btn-outline-secondary" :disabled="(videoPage[tab.id] || 1) === 1" @click="changeVideoPage(tab.id, -1)">
-											<font-awesome-icon :icon="['fas', 'chevron-left']" />
-										</button>
-										<button class="btn btn-sm btn-outline-secondary disabled">Page {{ videoPage[tab.id] || 1 }} / {{ tabVideoTotalPages[tab.id] || 1 }}</button>
-										<button class="btn btn-sm btn-outline-secondary" :disabled="(videoPage[tab.id] || 1) >= (tabVideoTotalPages[tab.id] || 1)" @click="changeVideoPage(tab.id, 1)">
-											<font-awesome-icon :icon="['fas', 'chevron-right']" />
-										</button>
-									</div>
-									<div v-else></div>
-									<!-- Right spacer -->
-									<div style="min-width: 120px"></div>
-								</div>
+								<ScraperPaginationControls :currentPage="videoPage[tab.id] || 1" :totalPages="tabVideoTotalPages[tab.id] || 1" :totalItems="tabVideoTotal[tab.id] || 0" :pageSize="videosPerPage" @update:currentPage=";(videoPage[tab.id] = $event), loadVideosForTab(tab.id)" />
 							</div>
 
 							<!-- Empty State -->
 							<EmptyState v-else :icon="['fas', 'video']" icon-size="4x" :title="`No ${tab.name} Videos Yet`" message="Use the sidebar to configure and start scraping" />
 						</div>
-						<!-- End Main Content -->
 
-						<!-- Sidebar (Right) -->
+						<!-- Right: Sidebar -->
 						<div class="scraper-sidebar" :class="{ collapsed: collapsedSections[`tab-${tab.id}`] }">
-							<!-- Collapse Toggle -->
-							<button class="btn btn-sm btn-outline-secondary w-100 mb-3" @click="toggleCollapse(`tab-${tab.id}`)">
-								<font-awesome-icon :icon="['fas', 'chevron-right']" class="me-2" />
+							<button class="collapse-toggle-btn mb-3 w-100" @click="collapsedSections[`tab-${tab.id}`] = true">
+								<font-awesome-icon :icon="['fas', 'times']" class="me-2" />
 								Hide Panel
 							</button>
 
@@ -350,13 +274,15 @@
 								</div>
 							</div>
 						</div>
-						<!-- End Sidebar -->
 					</div>
 					<!-- End scraper-layout -->
 
 					<!-- Sidebar Toggle Button (shown when collapsed) -->
-					<button v-if="collapsedSections[`tab-${tab.id}`]" class="sidebar-toggle" @click="toggleCollapse(`tab-${tab.id}`)" title="Show Controls Panel">
+					<button v-if="collapsedSections[`tab-${tab.id}`]" class="sidebar-toggle" @click="collapsedSections[`tab-${tab.id}`] = false" title="Show Controls Panel">
 						<font-awesome-icon :icon="['fas', 'cog']" />
+					</button>
+					<button class="filter-panel-toggle" :class="{ show: collapsedSections[`filter-${tab.id}`] }" @click="collapsedSections[`filter-${tab.id}`] = false" title="Show Filters">
+						<font-awesome-icon :icon="['fas', 'sliders-h']" />
 					</button>
 				</div>
 			</div>
@@ -451,12 +377,15 @@
 
 <script setup>
 /* eslint-disable no-unused-vars */
-import { ref, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { LoadingState, EmptyState, StatCard } from '@/components/shared'
 import AutoUpdatePanel from '@/components/scraper/AutoUpdatePanel.vue'
 import ScrapedVideoCard from '@/components/scraper/ScrapedVideoCard.vue'
 import ScrapedVideoModal from '@/components/scraper/ScrapedVideoModal.vue'
 import ScraperBulkActions from '@/components/scraper/ScraperBulkActions.vue'
+import ScraperJobProgress from '@/components/scraper/ScraperJobProgress.vue'
+import ScraperFilterPanel from '@/components/scraper/ScraperFilterPanel.vue'
+import ScraperPaginationControls from '@/components/scraper/ScraperPaginationControls.vue'
 import SimpcityTab from '@/components/scraper/tabs/SimpcityTab.vue'
 import LuxureTVTab from '@/components/scraper/tabs/LuxureTVTab.vue'
 import PornHubTab from '@/components/scraper/tabs/PornHubTab.vue'
@@ -586,7 +515,21 @@ const videoMinViews = ref({}) // { tabId: number }
 const tabVideoTotal = ref({}) // { tabId: number } — server-side total count
 const tabVideoTotalPages = ref({}) // { tabId: number } — server-side total pages
 const showVideoFilters = ref({}) // { tabId: boolean }
+const videoMinRating = ref({}) // { tabId: number }
+const videoIncludeTags = ref({}) // { tabId: string[] }
+const videoExcludeTags = ref({}) // { tabId: string[] }
+const videoMinLikes = ref({}) // { tabId: number }
+const videoFileSizeRange = ref({}) // { tabId: string }
+const videoDateFrom = ref({}) // { tabId: string }
+const videoDateTo = ref({}) // { tabId: string }
+const videoMinDuration = ref({}) // { tabId: number }
+const videoMaxDuration = ref({}) // { tabId: number }
+const videoOnlyWithRating = ref({}) // { tabId: boolean }
+const videoOnlyWithAuthor = ref({}) // { tabId: boolean }
+const newIncludeTag = ref('') // temp input for include tags
+const newExcludeTag = ref('') // temp input for exclude tags
 const tabSearchTimeouts = {} // debounce per tab
+const tabFilterTimeouts = {} // debounce per tab for filter changes
 // Per-tab selection state (bulk actions)
 const customTabSelectionMode = ref({}) // { tabId: boolean }
 const customTabSelectedVideos = ref({}) // { tabId: Set<number> }
@@ -655,6 +598,10 @@ const toggleVideoFilters = (tabId) => {
 }
 
 const resetVideoFilters = (tabId) => {
+	// Cancel any pending debounced filter reload from @update:* handlers
+	clearTimeout(tabFilterTimeouts[tabId])
+	clearTimeout(tabSearchTimeouts[tabId])
+
 	videoSearch.value[tabId] = ''
 	videoSort.value[tabId] = 'newest'
 	videoStatusFilter.value[tabId] = ''
@@ -664,6 +611,18 @@ const resetVideoFilters = (tabId) => {
 	videoOnlyDownloaded.value[tabId] = false
 	videoAuthorFilter.value[tabId] = ''
 	videoMinViews.value[tabId] = 0
+	videoMinRating.value[tabId] = 0
+	videoMinLikes.value[tabId] = 0
+	videoIncludeTags.value[tabId] = []
+	videoExcludeTags.value[tabId] = []
+	videoFileSizeRange.value[tabId] = ''
+	videoDateFrom.value[tabId] = ''
+	videoDateTo.value[tabId] = ''
+	videoMinDuration.value[tabId] = 0
+	videoMaxDuration.value[tabId] = 0
+	videoOnlyWithRating.value[tabId] = false
+	videoOnlyWithAuthor.value[tabId] = false
+	showVideoFilters.value[tabId] = false
 	videoPage.value[tabId] = 1
 	loadVideosForTab(tabId)
 }
@@ -983,15 +942,20 @@ const cancelJob = async (job) => {
 
 // Maps UI sort value → { sort_by, sort_order } for backend
 const tabSortMap = {
-	newest:       { sort_by: 'discovered_at', sort_order: 'desc' },
-	oldest:       { sort_by: 'discovered_at', sort_order: 'asc' },
-	'views-desc': { sort_by: 'view_count',    sort_order: 'desc' },
-	'views-asc':  { sort_by: 'view_count',    sort_order: 'asc' },
-	'duration-desc': { sort_by: 'duration',   sort_order: 'desc' },
-	'duration-asc':  { sort_by: 'duration',   sort_order: 'asc' },
-	'title-asc':  { sort_by: 'title',         sort_order: 'asc' },
-	'title-desc': { sort_by: 'title',         sort_order: 'desc' },
-	'likes-desc': { sort_by: 'like_count',    sort_order: 'desc' },
+	newest: { sort_by: 'discovered_at', sort_order: 'desc' },
+	oldest: { sort_by: 'discovered_at', sort_order: 'asc' },
+	'views-desc': { sort_by: 'view_count', sort_order: 'desc' },
+	'views-asc': { sort_by: 'view_count', sort_order: 'asc' },
+	'likes-desc': { sort_by: 'like_count', sort_order: 'desc' },
+	'likes-asc': { sort_by: 'like_count', sort_order: 'asc' },
+	'rating-desc': { sort_by: 'rating', sort_order: 'desc' },
+	'rating-asc': { sort_by: 'rating', sort_order: 'asc' },
+	'duration-desc': { sort_by: 'duration', sort_order: 'desc' },
+	'duration-asc': { sort_by: 'duration', sort_order: 'asc' },
+	'title-asc': { sort_by: 'title', sort_order: 'asc' },
+	'title-desc': { sort_by: 'title', sort_order: 'desc' },
+	'filesize-desc': { sort_by: 'file_size', sort_order: 'desc' },
+	'filesize-asc': { sort_by: 'file_size', sort_order: 'asc' },
 }
 
 const loadVideosForTab = async (tabId) => {
@@ -1006,8 +970,8 @@ const loadVideosForTab = async (tabId) => {
 
 		const params = new URLSearchParams({
 			source,
-			page:       String(videoPage.value[tabId] || 1),
-			limit:      String(videosPerPage.value),
+			page: String(videoPage.value[tabId] || 1),
+			limit: String(videosPerPage.value),
 			sort_by,
 			sort_order,
 		})
@@ -1026,6 +990,43 @@ const loadVideosForTab = async (tabId) => {
 		const minViews = videoMinViews.value[tabId] || 0
 		if (minViews > 0) params.set('min_views', String(minViews))
 
+		const minRating = videoMinRating.value[tabId] || 0
+		if (minRating > 0) params.set('min_rating', String(minRating))
+
+		const minLikes = videoMinLikes.value[tabId] || 0
+		if (minLikes > 0) params.set('min_likes', String(minLikes))
+
+		const includeTags = videoIncludeTags.value[tabId] || []
+		if (includeTags.length > 0) params.set('include_tags', includeTags.join(','))
+
+		const excludeTags = videoExcludeTags.value[tabId] || []
+		if (excludeTags.length > 0) params.set('exclude_tags', excludeTags.join(','))
+
+		const dateFrom = videoDateFrom.value[tabId] || ''
+		if (dateFrom) params.set('date_from', dateFrom)
+
+		const dateTo = videoDateTo.value[tabId] || ''
+		if (dateTo) params.set('date_to', dateTo)
+
+		const minDuration = videoMinDuration.value[tabId] || 0
+		if (minDuration > 0) params.set('min_duration', String(minDuration * 60))
+
+		const maxDuration = videoMaxDuration.value[tabId] || 0
+		if (maxDuration > 0) params.set('max_duration', String(maxDuration * 60))
+
+		const fileSizeRange = videoFileSizeRange.value[tabId] || ''
+		if (fileSizeRange) {
+			const sizeMap = { tiny: [0, 104857600], small: [104857600, 524288000], medium: [524288000, 2147483648], large: [2147483648, 10737418240], huge: [10737418240, 0] }
+			const range = sizeMap[fileSizeRange]
+			if (range) {
+				if (range[0] > 0) params.set('min_file_size', String(range[0]))
+				if (range[1] > 0) params.set('max_file_size', String(range[1]))
+			}
+		}
+
+		if (videoOnlyWithRating.value[tabId]) params.set('only_with_rating', 'true')
+		if (videoOnlyWithAuthor.value[tabId]) params.set('only_with_author', 'true')
+
 		const response = await fetch(`http://localhost:8080/api/v1/scraper/videos?${params}`)
 		const data = await response.json()
 
@@ -1042,11 +1043,14 @@ const loadVideosForTab = async (tabId) => {
 	}
 }
 
-// Called by filter dropdowns / checkboxes — resets to page 1 then reloads
+// Called by filter dropdowns / checkboxes — resets to page 1 then reloads (debounced to batch clearAll events)
 const onTabFilterChange = (tabId) => {
-	videoPage.value[tabId] = 1
-	customTabSelectedVideos.value[tabId] = new Set()
-	loadVideosForTab(tabId)
+	clearTimeout(tabFilterTimeouts[tabId])
+	tabFilterTimeouts[tabId] = setTimeout(() => {
+		videoPage.value[tabId] = 1
+		customTabSelectedVideos.value[tabId] = new Set()
+		loadVideosForTab(tabId)
+	}, 50)
 }
 
 // Called by search/author inputs — debounced
@@ -1065,7 +1069,53 @@ const activeTabFilterCount = (tabId) => {
 	if (videoOnlyDownloaded.value[tabId]) n++
 	if (videoAuthorFilter.value[tabId]) n++
 	if (videoMinViews.value[tabId] > 0) n++
+	if ((videoMinRating.value[tabId] || 0) > 0) n++
+	if ((videoMinLikes.value[tabId] || 0) > 0) n++
+	if ((videoIncludeTags.value[tabId] || []).length > 0) n++
+	if ((videoExcludeTags.value[tabId] || []).length > 0) n++
+	if (videoFileSizeRange.value[tabId]) n++
+	if (videoDateFrom.value[tabId]) n++
+	if (videoDateTo.value[tabId]) n++
+	if ((videoMinDuration.value[tabId] || 0) > 0) n++
+	if ((videoMaxDuration.value[tabId] || 0) > 0) n++
+	if (videoOnlyWithRating.value[tabId]) n++
+	if (videoOnlyWithAuthor.value[tabId]) n++
 	return n
+}
+
+// Tag helpers for generic scraper tabs
+const addIncludeTag = (tabId) => {
+	const tag = newIncludeTag.value.trim()
+	if (!tag) return
+	if (!videoIncludeTags.value[tabId]) videoIncludeTags.value[tabId] = []
+	if (!videoIncludeTags.value[tabId].includes(tag)) {
+		videoIncludeTags.value[tabId].push(tag)
+		newIncludeTag.value = ''
+		onTabFilterChange(tabId)
+	}
+}
+
+const removeIncludeTag = (tabId, tag) => {
+	const tags = videoIncludeTags.value[tabId] || []
+	videoIncludeTags.value[tabId] = tags.filter((t) => t !== tag)
+	onTabFilterChange(tabId)
+}
+
+const addExcludeTag = (tabId) => {
+	const tag = newExcludeTag.value.trim()
+	if (!tag) return
+	if (!videoExcludeTags.value[tabId]) videoExcludeTags.value[tabId] = []
+	if (!videoExcludeTags.value[tabId].includes(tag)) {
+		videoExcludeTags.value[tabId].push(tag)
+		newExcludeTag.value = ''
+		onTabFilterChange(tabId)
+	}
+}
+
+const removeExcludeTag = (tabId, tag) => {
+	const tags = videoExcludeTags.value[tabId] || []
+	videoExcludeTags.value[tabId] = tags.filter((t) => t !== tag)
+	onTabFilterChange(tabId)
 }
 
 // Video filtering, sorting and pagination
