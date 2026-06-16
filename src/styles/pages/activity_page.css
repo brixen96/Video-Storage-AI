@@ -1,4 +1,4 @@
-.activity-page {
+﻿.activity-page {
 	min-height: calc(100vh - 60px);
 	background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
 	color: #fff;
@@ -9,15 +9,15 @@
 	background: rgba(255, 255, 255, 0.05);
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	border-radius: 1rem;
-	transition: all 0.3s ease;
+	transition: all var(--transition-normal);
 	backdrop-filter: blur(10px);
 }
 
 .stat-card:hover {
 	background: rgba(255, 255, 255, 0.1);
-	border-color: #00d9ff;
+	border-color: var(--color-accent);
 	transform: translateY(-2px);
-	box-shadow: 0 5px 15px rgba(0, 217, 255, 0.3);
+	box-shadow: 0 5px 15px rgba(var(--color-accent-rgb), 0.3);
 }
 
 .stat-card .card-body {
@@ -25,7 +25,7 @@
 }
 
 .stat-card h2 {
-	color: #00d9ff;
+	color: var(--color-accent);
 	font-weight: bold;
 }
 
@@ -46,8 +46,8 @@
 .form-select:focus,
 .form-control:focus {
 	background: rgba(255, 255, 255, 0.15);
-	border-color: #00d9ff;
-	box-shadow: 0 0 0 0.2rem rgba(0, 217, 255, 0.25);
+	border-color: var(--color-accent);
+	box-shadow: 0 0 0 0.2rem rgba(var(--color-accent-rgb), 0.25);
 	color: #fff;
 }
 
@@ -57,7 +57,7 @@
 }
 
 .form-label {
-	color: #00d9ff;
+	color: var(--color-accent);
 	font-weight: 500;
 	margin-bottom: 0.5rem;
 }
@@ -70,13 +70,13 @@
 	background: rgba(255, 255, 255, 0.05);
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	border-radius: 1rem;
-	transition: all 0.3s ease;
+	transition: all var(--transition-normal);
 	backdrop-filter: blur(10px);
 }
 
 .activity-item:hover {
 	background: rgba(255, 255, 255, 0.08);
-	border-color: rgba(0, 217, 255, 0.5);
+	border-color: rgba(var(--color-accent-rgb), 0.5);
 	transform: translateX(5px);
 }
 
@@ -137,11 +137,11 @@
 .details-content {
 	background: rgba(0, 0, 0, 0.4);
 	border-radius: 0.5rem;
-	border: 1px solid rgba(0, 217, 255, 0.3);
+	border: 1px solid rgba(var(--color-accent-rgb), 0.3);
 }
 
 .details-content pre {
-	color: #00d9ff;
+	color: var(--color-accent);
 	font-size: 0.85rem;
 	max-height: 300px;
 	overflow-y: auto;
@@ -152,7 +152,7 @@
 }
 
 .badge.bg-cyan {
-	background-color: #00d9ff !important;
+	background-color: var(--color-accent) !important;
 	color: #000 !important;
 }
 
@@ -164,12 +164,12 @@
 }
 
 .btn-outline-primary {
-	border-color: #00d9ff;
-	color: #00d9ff;
+	border-color: var(--color-accent);
+	color: var(--color-accent);
 }
 
 .btn-outline-primary:hover {
-	background-color: #00d9ff;
+	background-color: var(--color-accent);
 	color: #000;
 }
 
@@ -190,8 +190,8 @@
 
 .btn-outline-secondary:hover {
 	background-color: rgba(255, 255, 255, 0.1);
-	border-color: #00d9ff;
-	color: #00d9ff;
+	border-color: var(--color-accent);
+	color: var(--color-accent);
 }
 
 /* Tab Navigation Styles */
@@ -204,20 +204,20 @@
 	border: none;
 	border-bottom: 3px solid transparent;
 	padding: 0.75rem 1.5rem;
-	transition: all 0.3s ease;
+	transition: all var(--transition-normal);
 	background: none;
 }
 
 .nav-tabs .nav-link:hover {
-	color: #00d9ff;
-	border-bottom-color: rgba(0, 217, 255, 0.3);
+	color: var(--color-accent);
+	border-bottom-color: rgba(var(--color-accent-rgb), 0.3);
 	background: rgba(255, 255, 255, 0.05);
 }
 
 .nav-tabs .nav-link.active {
-	color: #00d9ff;
-	border-bottom-color: #00d9ff;
-	background: rgba(0, 217, 255, 0.1);
+	color: var(--color-accent);
+	border-bottom-color: var(--color-accent);
+	background: rgba(var(--color-accent-rgb), 0.1);
 	font-weight: 600;
 }
 
@@ -246,13 +246,13 @@
 	gap: 1rem;
 	padding: 0.75rem 1rem;
 	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.2s ease;
+	transition: all var(--transition-fast);
 	align-items: start;
 }
 
 .console-log-entry:hover {
 	background: rgba(255, 255, 255, 0.05);
-	border-left: 3px solid #00d9ff;
+	border-left: 3px solid var(--color-accent);
 	padding-left: calc(1rem - 3px);
 }
 
@@ -296,13 +296,13 @@
 	grid-column: 1 / -1;
 	margin-top: 0.5rem;
 	background: rgba(0, 0, 0, 0.4);
-	border: 1px solid rgba(0, 217, 255, 0.3);
+	border: 1px solid rgba(var(--color-accent-rgb), 0.3);
 	border-radius: 0.5rem;
 	padding: 1rem;
 }
 
 .log-details-content pre {
-	color: #00d9ff;
+	color: var(--color-accent);
 	font-size: 0.85rem;
 	max-height: 300px;
 	overflow-y: auto;
@@ -323,25 +323,25 @@
 
 .console-log-container::-webkit-scrollbar-thumb,
 .log-details-content pre::-webkit-scrollbar-thumb {
-	background: rgba(0, 217, 255, 0.3);
+	background: rgba(var(--color-accent-rgb), 0.3);
 	border-radius: 4px;
 }
 
 .console-log-container::-webkit-scrollbar-thumb:hover,
 .log-details-content pre::-webkit-scrollbar-thumb:hover {
-	background: rgba(0, 217, 255, 0.5);
+	background: rgba(var(--color-accent-rgb), 0.5);
 }
 
 .task-progress-card {
 	background: rgba(255, 255, 255, 0.05);
 	border: 1px solid rgba(255, 255, 255, 0.1);
-	transition: all 0.3s ease;
+	transition: all var(--transition-normal);
 }
 
 /* Force all cards and elements to dark theme */
 .activity-page .card {
 	background: rgba(0, 0, 0, 0.3) !important;
-	border: 1px solid rgba(0, 217, 255, 0.2) !important;
+	border: 1px solid rgba(var(--color-accent-rgb), 0.2) !important;
 	color: #fff !important;
 }
 
@@ -351,13 +351,13 @@
 }
 
 .activity-page .card-header {
-	background: rgba(0, 217, 255, 0.1) !important;
-	border-bottom: 1px solid rgba(0, 217, 255, 0.2) !important;
-	color: #00d9ff !important;
+	background: rgba(var(--color-accent-rgb), 0.1) !important;
+	border-bottom: 1px solid rgba(var(--color-accent-rgb), 0.2) !important;
+	color: var(--color-accent) !important;
 }
 
 .activity-page .card-header h5 {
-	color: #00d9ff !important;
+	color: var(--color-accent) !important;
 	margin: 0;
 }
 
