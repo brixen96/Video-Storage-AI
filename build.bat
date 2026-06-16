@@ -55,6 +55,8 @@ if %ERRORLEVEL% neq 0 (
 
 :: ── 3. Build Go binaries ─────────────────────
 set LDFLAGS=-s -w -X github.com/brixen96/video-storage-ai/internal/config.Version=%VERSION%
+echo       LDFLAGS: %LDFLAGS%
+echo       Version will be: %VERSION%
 
 echo [3/5] Building API server (VideoStorageAI-API.exe)...
 cd /d "%API_DIR%"
