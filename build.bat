@@ -13,7 +13,7 @@ set "RELEASE_DIR=%ROOT%release"
 
 :: Read version from VERSION file and auto-increment patch
 set /p VERSION=<"%ROOT%VERSION"
-if "%VERSION%"=="" set VERSION=0.1.0
+if "%VERSION%""=="" set VERSION=0.1.0
 
 :: Parse major.minor.patch and increment patch
 for /f "tokens=1-3 delims=." %%a in ("%VERSION%") do (
@@ -29,21 +29,20 @@ echo %VERSION%> "%ROOT%VERSION"
 echo Version: %VERSION% (auto-incremented patch)
 echo.
 
-:: ── 0. Stop services (silent -- ok if not installed or no admin) ──
-echo [0/5] Stopping services (if running)...
+:: ?? 0. Stop services ??????????????????????????
+echo [0/5] Stopping services...
 sc stop VideoStorageAI-API > nul 2>&1
 sc stop VideoStorageAI-Web > nul 2>&1
-:: Give them a moment to stop so the exe files are released
 timeout /t 3 /nobreak > nul
-echo       Done (errors here are normal if services are not installed).
+echo       Services stopped.
 echo.
 
-:: ── 1. Clean release folder ──────────────────
+:: ?? 1. Clean release folder ??????????????????
 echo [1/5] Cleaning release folder...
 if exist "%RELEASE_DIR%" rmdir /s /q "%RELEASE_DIR%"
 mkdir "%RELEASE_DIR%"
 
-:: ── 2. Build frontend ────────────────────────
+:: ?? 2. Build frontend ????????????????????????
 echo [2/5] Building frontend (npm run build)...
 cd /d "%ROOT%"
 call npm run build
@@ -53,7 +52,7 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-:: ── 3. Build Go binaries ─────────────────────
+:: ?? 3. Build Go binaries ?????????????????????
 set LDFLAGS=-s -w -X github.com/brixen96/video-storage-ai/internal/config.Version=%VERSION%
 echo       LDFLAGS: %LDFLAGS%
 echo       Version will be: %VERSION%
@@ -81,9 +80,8 @@ if %ERRORLEVEL% neq 0 (
 :: Copy VERSION file next to the binary so the web server can read it
 copy "%ROOT%VERSION" "%RELEASE_DIR%\VERSION" > nul 2>&1
 
-:: ── 3b. Generate release .env with absolute AppData paths ──
+:: ?? 3b. Generate release .env with absolute AppData paths ??
 echo [3b/5] Writing release\.env with your user AppData paths...
-:: Convert backslashes to forward slashes so godotenv can parse paths with spaces
 set "APPDATA_FWD=%APPDATA:\=/%"
 set "DATA_DIR=%APPDATA_FWD%/Video Storage AI"
 (
@@ -97,7 +95,7 @@ echo SERVER_HOST=localhost
 echo SERVER_MODE=release
 ) > "%RELEASE_DIR%\.env"
 
-:: ── 4. Copy frontend dist ────────────────────
+:: ?? 4. Copy frontend dist ????????????????????
 echo [4/5] Copying frontend dist...
 xcopy /E /I /Q "%ROOT%dist" "%RELEASE_DIR%\dist\"
 if %ERRORLEVEL% neq 0 (
@@ -106,59 +104,17 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-:: ── Create helper scripts in release/ ────────
-(
-echo @echo off
-echo echo Installing Video Storage AI services...
-echo echo This requires Administrator privileges.
-echo echo.
-echo "%%~dp0VideoStorageAI-API.exe" install
-echo "%%~dp0VideoStorageAI-Web.exe" install
-echo.
-echo echo Starting services...
-echo "%%~dp0VideoStorageAI-API.exe" start
-echo "%%~dp0VideoStorageAI-Web.exe" start
-echo.
-echo echo Done^^! Open http://localhost:3000 in your browser.
-echo pause
-) > "%RELEASE_DIR%\install-services.bat"
-
-(
-echo @echo off
-echo echo Stopping and uninstalling Video Storage AI services...
-echo "%%~dp0VideoStorageAI-API.exe" stop
-echo "%%~dp0VideoStorageAI-Web.exe" stop
-echo "%%~dp0VideoStorageAI-API.exe" uninstall
-echo "%%~dp0VideoStorageAI-Web.exe" uninstall
-echo echo Done.
-echo pause
-) > "%RELEASE_DIR%\uninstall-services.bat"
-
-:: ── 5. Restart services ───────────────────────
-echo [5/5] Restarting services (if installed)...
+:: ?? 5. Restart services ???????????????????????
+echo [5/5] Restarting services...
 sc start VideoStorageAI-API > nul 2>&1
 sc start VideoStorageAI-Web > nul 2>&1
-echo       Done (errors here are normal if services are not installed).
+timeout /t 3 /nobreak > nul
+echo       Services started.
 echo.
 
-:: ── Summary ───────────────────────────────────
+:: ?? Summary ???????????????????????????????????
 echo =============================================
 echo   Build complete!  v%VERSION%
 echo =============================================
 echo.
-echo Release folder: %RELEASE_DIR%
-echo.
-echo Contents:
-for %%f in ("%RELEASE_DIR%\*") do echo   %%~nxf
-echo   dist\  (frontend)
-echo.
-echo ── To run interactively (no install needed) ──
-echo   %RELEASE_DIR%\VideoStorageAI-API.exe
-echo   %RELEASE_DIR%\VideoStorageAI-Web.exe
-echo   Then open http://localhost:3000
-echo.
-echo ── To install as Windows services (run as Admin) ──
-echo   %RELEASE_DIR%\install-services.bat
-echo.
-
-endlocal
+echo   http://localhost:3000
