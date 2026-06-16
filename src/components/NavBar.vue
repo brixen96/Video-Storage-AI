@@ -177,11 +177,8 @@ export default {
 			websocketService.connect()
 		}
 
-		// Fetch app version from API health endpoint
-		const apiBase = window.VSAI_API_URL || 'http://localhost:8080'
-		fetch(`${apiBase}/health`).then(r => r.json()).then(data => {
-			if (data.version) this.appVersion = data.version
-		}).catch(() => {})
+		// Use build-time version injected by web server (window.VSAI_VERSION)
+		this.appVersion = window.VSAI_VERSION || 'dev'
 	},
 	beforeUnmount() {
 		if (this.unsubscribeConnection) {

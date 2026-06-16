@@ -169,7 +169,7 @@ func serveIndex(w http.ResponseWriter, distPath, apiURL string) {
 		return
 	}
 
-	script := fmt.Sprintf(`<script>window.VSAI_API_URL = "%s";</script>`, apiURL)
+	script := fmt.Sprintf(`<script>window.VSAI_API_URL = "%s"; window.VSAI_VERSION = "%s";</script>`, apiURL, config.Version)
 	html := strings.Replace(string(data), "</head>", script+"\n</head>", 1)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
