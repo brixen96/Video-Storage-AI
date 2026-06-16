@@ -599,6 +599,9 @@ export default {
 	async mounted() {
 		await this.loadLibraries()
 	},
+	onActivated() {
+		this.loadLibraries()
+	},
 	methods: {
 		async loadLibraries() {
 			this.loading = true

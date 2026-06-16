@@ -531,6 +531,9 @@ export default {
 		// Keyboard shortcuts
 		document.addEventListener('keydown', this.handleKeydown)
 	},
+	onActivated() {
+		this.loadLists()
+	},
 	beforeUnmount() {
 		document.removeEventListener('click', this.closeContextMenu)
 		document.removeEventListener('keydown', this.handleKeydown)

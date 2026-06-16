@@ -556,6 +556,10 @@ export default {
 		document.addEventListener('mousemove', this.handlePanelResize)
 		document.addEventListener('mouseup', this.stopPanelResize)
 	},
+	onActivated() {
+		this.loadLibraries()
+		this.initializeTabs()
+	},
 	beforeUnmount() {
 		document.removeEventListener('click', this.handleGlobalClick)
 		document.removeEventListener('click', this.closeContextMenu)

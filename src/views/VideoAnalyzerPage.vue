@@ -415,6 +415,12 @@ export default {
 		this.libraries = res.data || res || []
 		await this.preloadFromQuery()
 	},
+	onActivated() {
+		librariesAPI.getAll().then(res => {
+			this.libraries = res.data || res || []
+		})
+		this.preloadFromQuery()
+	},
 
 	watch: {
 		showPicker(val) {

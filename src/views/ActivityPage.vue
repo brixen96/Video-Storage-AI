@@ -554,6 +554,10 @@ export default {
 			}
 		})
 	},
+	onActivated() {
+		this.loadStatus()
+		this.loadActivities()
+	},
 	beforeUnmount() {
 		if (this.unsubscribeStatus) {
 			this.unsubscribeStatus()

@@ -263,6 +263,9 @@ export default {
 			})
 		)
 	},
+	onActivated() {
+		this.loadAll()
+	},
 	beforeUnmount() {
 		if (this.refreshInterval) clearInterval(this.refreshInterval)
 		this.wsUnsubscribers.forEach((unsub) => unsub())
