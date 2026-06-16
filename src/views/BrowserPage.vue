@@ -392,7 +392,7 @@
 </template>
 
 <script>
-import { librariesAPI, videosAPI, filesAPI, videoListsAPI, getAssetURL } from '@/services/api'
+import { librariesAPI, videosAPI, filesAPI, videoListsAPI, getAssetURL, API_ORIGIN } from '@/services/api'
 import VideoPlayer from '@/components/VideoPlayer.vue'
 import AddToListModal from '@/components/AddToListModal.vue'
 import { BrowserPaginationControls, BrowserSearchFilterBar, BrowserBreadcrumbNav, BrowserContextMenu, BrowserAssignPerformerModal, VideoRating } from '@/components/browser'
@@ -729,7 +729,7 @@ export default {
 					return
 				}
 			} catch (error) {
-				console.log('No primary library found')
+				console.error('Error loading primary library:', error)
 			}
 
 			await this.addTabToPanel(this.splitPanels[0])
@@ -919,7 +919,6 @@ export default {
 		},
 		async handleItemDrop(event, targetTab) {
 			if (!this.draggedItem || !this.draggedFromTab) {
-				console.log('handleItemDrop: No dragged item or source tab')
 				return
 			}
 
@@ -937,15 +936,6 @@ export default {
 			const itemType = draggedItem.type === 'folder' ? 'Folder' : 'File'
 			const itemName = draggedItem.name
 
-			console.log('Moving item:', {
-				type: itemType,
-				name: itemName,
-				from: sourceTab.title,
-				to: targetTab.title,
-				sourcePath: draggedItem.path,
-				targetPath: targetTab.currentPath
-			})
-
 			// Show loading toast
 			const loadingToastId = this.$toast.loading(
 				`Moving ${itemType}`,
@@ -961,12 +951,9 @@ export default {
 					target_path: targetTab.currentPath || '', // Move to current folder in target library
 				})
 
-				console.log('Move API call successful')
-
 				// Remove loading toast
 				try {
 					this.$toast.removeToast(loadingToastId)
-					console.log('Loading toast removed')
 				} catch (e) {
 					console.error('Error removing toast:', e)
 				}
@@ -976,39 +963,28 @@ export default {
 					`${itemType} Moved`,
 					`"${itemName}" moved successfully to ${targetTab.title}`
 				)
-				console.log('Success toast shown')
 
 				// Small delay to ensure filesystem has updated
-				console.log('Waiting for filesystem to update...')
 				await new Promise(resolve => setTimeout(resolve, 200))
-
-				console.log('Refreshing source tab:', sourceTab.title)
-				console.log('Refreshing target tab:', targetTab.title)
 
 				// Clear items to force UI update
 				const sourceTabIndex = this.tabs.findIndex(t => t.id === sourceTab.id)
 				const targetTabIndex = this.tabs.findIndex(t => t.id === targetTab.id)
-				console.log('Source tab index:', sourceTabIndex, 'Target tab index:', targetTabIndex)
 
 				if (sourceTabIndex !== -1) {
 					this.tabs[sourceTabIndex].items = []
-					console.log('Cleared source tab items')
 				}
 				if (targetTabIndex !== -1) {
 					this.tabs[targetTabIndex].items = []
-					console.log('Cleared target tab items')
 				}
 
 				// Wait a moment for UI to clear
 				await this.$nextTick()
-				console.log('UI tick complete, loading content...')
 
 				// Refresh both tabs to show updated content
 				await this.loadLibraryContent(sourceTab)
-				console.log('Source tab refreshed, items count:', this.tabs[sourceTabIndex]?.items?.length || 0)
 
 				await this.loadLibraryContent(targetTab)
-				console.log('Target tab refreshed, items count:', this.tabs[targetTabIndex]?.items?.length || 0)
 
 			} catch (error) {
 				console.error('Error in handleItemDrop:', error)
@@ -1142,23 +1118,17 @@ export default {
 		},
 		async startBackgroundThumbnailGeneration(tab) {
 			try {
-				console.log(`Starting background thumbnail generation for folder: ${tab.currentPath}`)
 				const response = await librariesAPI.generateThumbnails(tab.libraryId, tab.currentPath)
 
 				if (response && response.message && response.message.includes('already exist')) {
-					console.log('All thumbnails already exist')
 					return
 				}
-
-				console.log('Background thumbnail generation initiated')
 			} catch (error) {
 				console.error('Failed to start background thumbnail generation:', error)
 			}
 		},
 		async refreshCurrentFolder(tab) {
-			console.log('Refreshing current folder...')
 			await this.loadLibraryContent(tab)
-			console.log('Folder refreshed')
 		},
 		// ==========================
 		// Selection Management
@@ -1288,8 +1258,7 @@ export default {
 			this.selectedVideoId = null
 			this.selectedLibraryId = null
 		},
-		async handleVideoConverted(convertedVideo) {
-			console.log('Video converted:', convertedVideo)
+		async handleVideoConverted() {
 			const activeTab = this.tabs.find((t) => t.id === this.activeTabId)
 			if (activeTab && activeTab.libraryId) {
 				await this.loadLibraryContent(activeTab)
@@ -1325,7 +1294,7 @@ export default {
 			try {
 				if (item.type === 'folder') {
 					// Update all videos in the folder recursively
-					const response = await fetch('http://localhost:8080/api/v1/videos/content-type/folder', {
+					const response = await fetch(`${API_ORIGIN}/api/v1/videos/content-type/folder`, {
 						method: 'PATCH',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
@@ -1490,7 +1459,6 @@ export default {
 			return getAssetURL(path)
 		},
 		showContextMenu(event, tab, item) {
-			console.log('showContextMenu called', { tab, item, x: event.clientX, y: event.clientY })
 			event.stopPropagation()
 			event.preventDefault()
 			this.contextMenu.visible = true
@@ -1656,11 +1624,8 @@ export default {
 		loadPreviewFrames(item) {
 			if (!item.preview_path) {
 				this.previewFrames = []
-				console.log('No preview_path for item:', item.name)
 				return
 			}
-
-			console.log('Loading preview frames for:', item.name, 'preview_path:', item.preview_path)
 
 			// Generate URLs for all 10 preview frames
 			// preview_path is like "1/someFolder/videoName" (directory containing frames)
@@ -1670,7 +1635,6 @@ export default {
 				frames.push(this.getAssetURL(framePath))
 			}
 			this.previewFrames = frames
-			console.log('Loaded', frames.length, 'preview frames')
 		},
 		handleItemHover(event, item) {
 			// Only show preview for videos
@@ -1747,7 +1711,6 @@ export default {
 			const path = item.full_path || item.path
 			try {
 				await navigator.clipboard.writeText(path)
-				console.log('Path copied to clipboard:', path)
 			} catch (error) {
 				console.error('Failed to copy path:', error)
 			}

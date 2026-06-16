@@ -394,7 +394,7 @@ import Rule34VideoTab from '@/components/scraper/tabs/Rule34VideoTab.vue'
 import MotherlessTab from '@/components/scraper/tabs/MotherlessTab.vue'
 import HQPornerTab from '@/components/scraper/tabs/HQPornerTab.vue'
 import LeakVidsTab from '@/components/scraper/tabs/LeakVidsTab.vue'
-import { jdownloaderAPI, scrapersAPI, deleteVideosBySource } from '@/services/api'
+import { jdownloaderAPI, scrapersAPI, deleteVideosBySource, API_ORIGIN } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -542,7 +542,7 @@ const activeTimeouts = ref([])
 // Scraper Tabs Functions
 const loadScraperTabs = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/scraper/tabs')
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/tabs`)
 		const data = await response.json()
 
 		if (data.success && data.data) {
@@ -633,7 +633,7 @@ const confirmDeleteTab = async (tab) => {
 	}
 
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/tabs/${tab.id}`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/tabs/${tab.id}`, {
 			method: 'DELETE',
 		})
 		const data = await response.json()
@@ -700,7 +700,7 @@ const saveTabConfig = async () => {
 	}
 
 	try {
-		const url = showEditTabModal.value ? `http://localhost:8080/api/v1/scraper/tabs/${editingTab.value.id}` : 'http://localhost:8080/api/v1/scraper/tabs'
+		const url = showEditTabModal.value ? `${API_ORIGIN}/api/v1/scraper/tabs/${editingTab.value.id}` : `${API_ORIGIN}/api/v1/scraper/tabs`
 
 		const method = showEditTabModal.value ? 'PUT' : 'POST'
 
@@ -830,7 +830,7 @@ const startCustomTabScrape = async (tab) => {
 	}
 
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/scraper/jobs/start', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/jobs/start`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -858,7 +858,7 @@ const startCustomTabScrape = async (tab) => {
 
 const loadTabJobProgress = async (tabId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs?tabId=${tabId}`)
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/jobs?tabId=${tabId}`)
 		const data = await response.json()
 
 		if (data.success && data.data && data.data.length > 0) {
@@ -888,7 +888,7 @@ const loadTabJobProgress = async (tabId) => {
 const pollJobProgress = async (tabId, jobId) => {
 	const checkProgress = async () => {
 		try {
-			const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs/${jobId}`)
+			const response = await fetch(`${API_ORIGIN}/api/v1/scraper/jobs/${jobId}`)
 			const data = await response.json()
 
 			if (data.success && data.data) {
@@ -920,7 +920,7 @@ const cancelJob = async (job) => {
 	}
 
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/jobs/${job.id}/cancel`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/jobs/${job.id}/cancel`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 		})
@@ -1027,7 +1027,7 @@ const loadVideosForTab = async (tabId) => {
 		if (videoOnlyWithRating.value[tabId]) params.set('only_with_rating', 'true')
 		if (videoOnlyWithAuthor.value[tabId]) params.set('only_with_author', 'true')
 
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/videos?${params}`)
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/videos?${params}`)
 		const data = await response.json()
 
 		if (data.success && data.data) {

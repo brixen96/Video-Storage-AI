@@ -2,7 +2,10 @@ import axios from 'axios'
 
 // Resolve the API base URL. In production the web server injects window.VSAI_API_URL
 // into index.html before the bundle loads. In development it falls back to localhost:8080.
-const API_ORIGIN = window.VSAI_API_URL || 'http://localhost:8080'
+export const API_ORIGIN = window.VSAI_API_URL || 'http://localhost:8080'
+
+// Helper to build full API URLs (use for non-axios requests like fetch or <img src>)
+export const getApiBase = () => API_ORIGIN
 
 // Create axios instance with base configuration
 const api = axios.create({
@@ -94,7 +97,7 @@ export const videosAPI = {
 	addTags: (id, tagIds, signal) => api.post(`/videos/${id}/tags`, { tag_ids: tagIds }, { signal }),
 	removeTags: (id, tagIds, signal) => api.delete(`/videos/${id}/tags`, { data: { tag_ids: tagIds }, signal }),
 	bulk: (operation, videoIds, data = {}, signal) => api.post('/videos/bulk', { operation, video_ids: videoIds, ...data }, { signal }),
-	getThumbnail: (id) => `http://localhost:8080/api/v1/videos/${id}/thumbnail`,
+	getThumbnail: (id) => `${API_ORIGIN}/api/v1/videos/${id}/thumbnail`,
 	openInExplorer: (id, signal) => api.post(`/videos/${id}/open-in-explorer`, {}, { signal }),
 	updateVideoMarksByPath: (filePath, marks, signal) => api.patch('/videos/marks-by-path', { file_path: filePath, ...marks }, { signal }),
 	locateFile: (id) => api.get(`/videos/${id}/locate`),

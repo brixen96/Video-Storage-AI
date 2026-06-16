@@ -391,6 +391,7 @@
 <script>
 import { performersAPI } from '@/services/api'
 import { tagsAPI } from '@/services/api'
+import { API_ORIGIN } from '@/services/api'
 import settingsService from '@/services/settingsService'
 import { DeleteConfirmationModal, SearchBox } from '@/components/shared'
 import { PerformerContextMenu } from '@/components/performers'
@@ -559,14 +560,14 @@ export default {
 		getThumbnailUrl(thumbnailPath) {
 			if (!thumbnailPath) return null
 			if (thumbnailPath.startsWith('http://') || thumbnailPath.startsWith('https://')) return thumbnailPath
-			if (thumbnailPath.startsWith('/assets/')) return `http://localhost:8080${thumbnailPath}`
-			return `http://localhost:8080/assets/${thumbnailPath}`
+			if (thumbnailPath.startsWith('/assets/')) return `${API_ORIGIN}${thumbnailPath}`
+			return `${API_ORIGIN}/assets/${thumbnailPath}`
 		},
 		getPreviewUrl(path) {
 			if (!path) return ''
 			if (path.startsWith('http://') || path.startsWith('https://')) return path
 			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
-			return `http://localhost:8080${pathParts.join('/')}`
+			return `${API_ORIGIN}${pathParts.join('/')}`
 		},
 		startVideoPreview(performer) {
 			this.hoveredPerformer[performer.id] = true
@@ -723,7 +724,7 @@ export default {
 			if (!confirm('This will delete all performers without preview videos or metadata. Are you sure?')) return
 			this.isCleaningUp = true
 			try {
-				const response = await fetch('http://localhost:8080/api/v1/performers/cleanup', { method: 'POST' })
+				const response = await fetch(`${API_ORIGIN}/api/v1/performers/cleanup`, { method: 'POST' })
 				const data = await response.json()
 				if (data.success) {
 					this.$toast.success(`Cleaned up ${data.data.deleted_count} empty performers`)

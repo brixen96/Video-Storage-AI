@@ -326,6 +326,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+import { API_ORIGIN } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -348,7 +349,7 @@ const overallStatus = computed(() => {
 const refreshHealth = async () => {
 	loading.value = true
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/system/health')
+		const response = await fetch(`${API_ORIGIN}/api/v1/system/health`)
 		const data = await response.json()
 		if (data.success) {
 			health.value = data.data
@@ -427,7 +428,7 @@ const checkSite = async (site) => {
 	site.checking = true
 	site.status = 'checking'
 	try {
-		const res = await fetch(`http://localhost:8080/api/v1/sites/status?url=${encodeURIComponent(site.url)}`)
+		const res = await fetch(`${API_ORIGIN}/api/v1/sites/status?url=${encodeURIComponent(site.url)}`)
 		const data = await res.json()
 		if (data.success) {
 			site.status = data.data.online ? 'online' : 'offline'

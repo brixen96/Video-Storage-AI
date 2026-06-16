@@ -527,7 +527,7 @@
 </template>
 
 <script>
-import { performersAPI, databaseAPI, videosAPI, systemAPI, aiAPI, getAssetURL } from '@/services/api'
+import { performersAPI, databaseAPI, videosAPI, systemAPI, aiAPI, getAssetURL, API_ORIGIN } from '@/services/api'
 import websocketService from '@/services/websocket'
 
 export default {
@@ -609,7 +609,7 @@ export default {
 
 		async loadActiveTasks() {
 			try {
-				const response = await fetch('http://localhost:8080/api/v1/activity?status=running')
+				const response = await fetch(`${API_ORIGIN}/api/v1/activity?status=running`)
 				const data = await response.json()
 
 				if (data.success && data.data) {
@@ -937,7 +937,7 @@ export default {
 
 			this.isDbOperationRunning = true
 			try {
-				const response = await fetch('http://localhost:8080/api/v1/activity/clear-all', {
+				const response = await fetch(`${API_ORIGIN}/api/v1/activity/clear-all`, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',

@@ -112,9 +112,9 @@
 
 <script>
 import { useFormatters } from '@/composables/useFormatters'
-import { getAssetURL } from '@/services/api'
+import { getAssetURL, API_ORIGIN } from '@/services/api'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = `${API_ORIGIN}/api/v1`
 
 export default {
 	name: 'AddToListModal',

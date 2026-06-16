@@ -414,7 +414,6 @@ const updateStudioCategory = async (studio, newCategory) => {
 		await studiosAPI.update(studio.id, { category: newCategory })
 		studio.category = newCategory
 		// No toast library available in this page, just log success
-		console.log(`Updated ${studio.name} to ${getCategoryName(newCategory)}`)
 	} catch (error) {
 		console.error('Failed to update studio category:', error)
 	}
@@ -445,9 +444,8 @@ const selectStudio = (studio) => {
 	selectedStudio.value = studio
 }
 
-const selectGroup = (group) => {
+const selectGroup = () => {
 	// Navigate to group details or show modal
-	console.log('Selected group:', group)
 }
 
 const openCreateModal = () => {
@@ -512,10 +510,8 @@ const saveStudio = async () => {
 
 		if (editingStudio.value) {
 			await studiosAPI.update(editingStudio.value.id, data)
-			console.log('Studio updated successfully')
 		} else {
 			await studiosAPI.create(data)
-			console.log('Studio created successfully')
 		}
 
 		closeStudioModal()
@@ -537,10 +533,8 @@ const saveGroup = async () => {
 
 		if (editingGroup.value) {
 			await groupsAPI.update(editingGroup.value.id, data)
-			console.log('Group updated successfully')
 		} else {
 			await groupsAPI.create(data)
-			console.log('Group created successfully')
 		}
 
 		closeGroupModal()
@@ -560,7 +554,6 @@ const deleteStudio = (studio) => {
 const confirmDeleteStudio = async () => {
 	try {
 		await studiosAPI.delete(deleteModal.value.item.id)
-		console.log('Studio deleted successfully')
 		loadStudios()
 		if (selectedStudio.value?.id === deleteModal.value.item.id) {
 			selectedStudio.value = null
@@ -582,7 +575,6 @@ const deleteGroup = (group) => {
 const confirmDeleteGroup = async () => {
 	try {
 		await groupsAPI.delete(deleteModal.value.item.id)
-		console.log('Group deleted successfully')
 		loadGroups()
 	} catch (error) {
 		console.error('Failed to delete group:', error)

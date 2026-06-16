@@ -179,6 +179,7 @@
 
 <script setup>
 import { ref, onMounted, getCurrentInstance } from 'vue'
+import { API_ORIGIN } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -196,7 +197,7 @@ const showDeleteModal = ref(false)
 const loadBackups = async () => {
 	loading.value = true
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/backups')
+			const response = await fetch(`${API_ORIGIN}/api/v1/backups`)
 		const data = await response.json()
 		if (data.success) {
 			backups.value = data.data.backups || []
@@ -211,7 +212,7 @@ const loadBackups = async () => {
 
 const loadStats = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/backups/stats')
+			const response = await fetch(`${API_ORIGIN}/api/v1/backups/stats`)
 		const data = await response.json()
 		if (data.success) {
 			stats.value = data.data
@@ -224,7 +225,7 @@ const loadStats = async () => {
 const createBackup = async () => {
 	creatingBackup.value = true
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/backups', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/backups`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ type: 'manual' }),
@@ -254,7 +255,7 @@ const restoreBackup = async () => {
 	restoring.value = true
 	try {
 		const response = await fetch(
-			`http://localhost:8080/api/v1/backups/${selectedBackup.value.filename}/restore`,
+			`${API_ORIGIN}/api/v1/backups/${selectedBackup.value.filename}/restore`,
 			{
 				method: 'POST',
 			}
@@ -283,7 +284,7 @@ const confirmDelete = (backup) => {
 const deleteBackup = async () => {
 	deleting.value = true
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/backups/${selectedBackup.value.filename}`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/backups/${selectedBackup.value.filename}`, {
 			method: 'DELETE',
 		})
 		const data = await response.json()
@@ -304,7 +305,7 @@ const deleteBackup = async () => {
 }
 
 const downloadBackup = (backup) => {
-	window.open(`http://localhost:8080/api/v1/backups/${backup.filename}/download`, '_blank')
+	window.open(`${API_ORIGIN}/api/v1/backups/${backup.filename}/download`, '_blank')
 }
 
 const formatTime = (dateStr) => {

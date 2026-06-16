@@ -202,7 +202,7 @@
 						<div v-if="performerVideos.length > 0" class="videos-grid">
 							<div v-for="video in performerVideos" :key="video.id" class="video-item" @click="openVideo(video)">
 								<div class="video-thumbnail">
-									<img v-if="video.thumbnail_path" :src="`http://localhost:8080/assets/${video.thumbnail_path}`" :alt="video.title" loading="lazy" />
+									<img v-if="video.thumbnail_path" :src="`${API_ORIGIN}/assets/${video.thumbnail_path}`" :alt="video.title" loading="lazy" />
 									<div v-else class="no-thumbnail">
 										<font-awesome-icon :icon="['fas', 'film']" size="2x" />
 									</div>
@@ -251,7 +251,7 @@
 </template>
 
 <script>
-import { performersAPI } from '@/services/api'
+import { performersAPI, API_ORIGIN } from '@/services/api'
 import { useFormatters } from '@/composables/useFormatters'
 
 export default {
@@ -377,7 +377,7 @@ export default {
 			if (!path) return ''
 			if (path.startsWith('http://') || path.startsWith('https://')) return path
 			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
-			return `http://localhost:8080${pathParts.join('/')}`
+			return `${API_ORIGIN}${pathParts.join('/')}`
 		},
 		getPerformerPreviews(performer) {
 			if (this.performerPreviews[performer.id]) {

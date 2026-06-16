@@ -163,6 +163,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, getCurrentInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { SearchBox } from '@/components/shared'
+import { API_ORIGIN } from '@/services/api'
 import websocketService from '@/services/websocket'
 import ThreadPostCard from '@/components/ThreadPostCard.vue'
 import ThreadJDModal from '@/components/ThreadJDModal.vue'
@@ -268,7 +269,7 @@ const totalLinks = computed(() => {
 // Methods
 const loadLinkStats = async () => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${route.params.id}/link-stats`)
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/link-stats`)
 		const data = await response.json()
 		if (data.success) {
 			linkStats.value = data.data
@@ -281,7 +282,7 @@ const loadLinkStats = async () => {
 const verifyLinks = async () => {
 	verifying.value = true
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${route.params.id}/verify-links`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/verify-links`, {
 			method: 'POST',
 		})
 		const data = await response.json()
@@ -311,7 +312,7 @@ const exportLinks = async () => {
 		}
 
 		// Trigger download
-		const url = `http://localhost:8080/api/v1/scraper/threads/${route.params.id}/export-links?${params.toString()}`
+		const url = `${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/export-links?${params.toString()}`
 		window.open(url, '_blank')
 
 		toast.success(`Exporting links as ${exportFormat.value.toUpperCase()}...`)
@@ -324,7 +325,7 @@ const exportLinks = async () => {
 // Download tracking functions
 const loadDownloadStats = async () => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/downloads/threads/${route.params.id}/stats`)
+		const response = await fetch(`${API_ORIGIN}/api/v1/downloads/threads/${route.params.id}/stats`)
 		const data = await response.json()
 		if (data.success) {
 			downloadStats.value = data.data
@@ -336,7 +337,7 @@ const loadDownloadStats = async () => {
 
 const markAsDownloaded = async (linkId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/mark-downloaded`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/downloads/links/${linkId}/mark-downloaded`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -363,7 +364,7 @@ const markAsDownloaded = async (linkId) => {
 
 const markAsFailed = async (linkId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/mark-failed`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/downloads/links/${linkId}/mark-failed`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ notes: 'User marked as failed' }),
@@ -387,7 +388,7 @@ const markAsFailed = async (linkId) => {
 
 const resetDownloadStatus = async (linkId) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/downloads/links/${linkId}/reset`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/downloads/links/${linkId}/reset`, {
 			method: 'POST',
 		})
 		const data = await response.json()
@@ -411,16 +412,13 @@ const resetDownloadStatus = async (linkId) => {
 const loadThread = async () => {
 	loading.value = true
 	try {
-		console.log('Loading thread:', route.params.id)
-		const response = await fetch(`http://localhost:8080/api/v1/scraper/threads/${route.params.id}`)
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}`)
 		const data = await response.json()
-		console.log('Thread data received:', data)
 
 		if (data.success) {
 			thread.value = data.data.thread
 			posts.value = data.data.posts || []
 			downloadLinks.value = data.data.download_links || []
-			console.log('Loaded:', posts.value.length, 'posts and', downloadLinks.value.length, 'links')
 		} else {
 			toast.error(data.message || 'Failed to load thread')
 			console.error('Server error:', data.message)
@@ -434,16 +432,13 @@ const loadThread = async () => {
 }
 
 const rescrapeThread = async () => {
-	console.log('Rescrape button clicked for thread:', route.params.id)
 	loading.value = true
 	try {
-		const url = `http://localhost:8080/api/v1/scraper/threads/${route.params.id}/rescrape`
-		console.log('Sending rescrape request to:', url)
+		const url = `${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/rescrape`
 		const response = await fetch(url, {
 			method: 'POST',
 		})
 		const data = await response.json()
-		console.log('Rescrape response:', data)
 
 		if (data.success) {
 			toast.success('Thread rescraping started. Check Tasks page for progress.')
@@ -474,13 +469,11 @@ const confirmDelete = async () => {
 const deleteThread = async () => {
 	loading.value = true
 	try {
-		const url = `http://localhost:8080/api/v1/scraper/threads/${route.params.id}`
-		console.log('Sending delete request to:', url)
+		const url = `${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}`
 		const response = await fetch(url, {
 			method: 'DELETE',
 		})
 		const data = await response.json()
-		console.log('Delete response:', data)
 
 		if (data.success) {
 			toast.success('Thread deleted successfully')
@@ -513,7 +506,7 @@ const createPerformer = async () => {
 
 	creatingPerformer.value = true
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/scraper/performers/create-from-thread', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/performers/create-from-thread`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -546,7 +539,7 @@ const getPostImages = (post) => post.metadata?.attachments || []
 
 const openJDModal = async () => {
 	try {
-		const statusResponse = await fetch('http://localhost:8080/api/v1/jdownloader/status')
+		const statusResponse = await fetch(`${API_ORIGIN}/api/v1/jdownloader/status`)
 		const statusData = await statusResponse.json()
 		if (!statusData.success && !statusData.available && !statusData.connected) {
 			toast.error('JDownloader is not running! Please start JDownloader and enable Direct Connection API.')

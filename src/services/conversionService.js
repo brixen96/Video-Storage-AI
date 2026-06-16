@@ -1,6 +1,7 @@
 import axios from 'axios'
+import { API_ORIGIN } from '@/services/api'
 
-const API_BASE_URL = 'http://localhost:8080/api/v1'
+const API_BASE_URL = `${API_ORIGIN}/api/v1`
 
 export default {
 	/**

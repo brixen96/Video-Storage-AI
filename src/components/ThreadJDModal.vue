@@ -77,6 +77,7 @@
 
 <script setup>
 import { ref, computed, watch, getCurrentInstance } from 'vue'
+import { API_ORIGIN } from '@/services/api'
 
 const props = defineProps({
 	links: { type: Array, default: () => [] },
@@ -222,7 +223,7 @@ const confirmSendToJD = async () => {
 			downloadPath: downloadPath || undefined,
 			autoStart: jdAutoStart.value,
 		}))
-		const response = await fetch('http://localhost:8080/api/v1/jdownloader/send', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/jdownloader/send`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ links }),

@@ -532,7 +532,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, getCurrentInstance } from 'vue'
 import { useRouter } from 'vue-router'
-import { aiCompanionAPI, aiAPI, getAssetURL, videosAPI, librariesAPI, activityAPI, performersAPI } from '@/services/api'
+import { aiCompanionAPI, aiAPI, getAssetURL, videosAPI, librariesAPI, activityAPI, performersAPI, API_ORIGIN } from '@/services/api'
 import websocketService from '@/services/websocket'
 import MarkdownMessage from './MarkdownMessage.vue'
 
@@ -1291,7 +1291,7 @@ const sendCompanionMessage = async () => {
 			.map((msg) => ({ role: msg.role, content: msg.content }))
 
 		streamAbortController.value = new AbortController()
-		const response = await fetch('http://localhost:8080/api/v1/ai/chat/stream', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/ai/chat/stream`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ message: `[User is on: ${pageContext}]\n${userMessage}`, history: historyPayload }),

@@ -460,7 +460,7 @@
 <script setup>
 import { ref, onMounted, computed, getCurrentInstance, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { performersAPI, tagsAPI, getAssetURL } from '@/services/api'
+import { performersAPI, tagsAPI, getAssetURL, API_ORIGIN } from '@/services/api'
 import { useFormatters } from '@/composables/useFormatters'
 import { LoadingState, EmptyState, StatCard } from '@/components/shared'
 
@@ -784,7 +784,7 @@ const getThumbnailURL = (video) => {
 	if (video.thumbnail_path) {
 		return getAssetURL(video.thumbnail_path)
 	}
-	return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
+	return `${API_ORIGIN}/api/v1/videos/${video.id}/thumbnail`
 }
 
 // formatDuration and formatDate now provided by useFormatters composable

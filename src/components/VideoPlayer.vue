@@ -80,6 +80,7 @@
 
 <script>
 import conversionService from '@/services/conversionService'
+import { API_ORIGIN } from '@/services/api'
 
 export default {
 	name: 'VideoPlayer',
@@ -116,20 +117,20 @@ export default {
 			// If video has an ID (from database), use the video stream endpoint
 			if (this.video.id || this.videoId) {
 				const id = this.video.id || this.videoId
-				return `http://localhost:8080/api/v1/videos/${id}/stream`
+				return `${API_ORIGIN}/api/v1/videos/${id}/stream`
 			}
 
 			// Otherwise, use the library stream endpoint (for browser videos)
 			if (this.libraryId && this.video.path) {
 				const path = encodeURIComponent(this.video.path)
-				return `http://localhost:8080/api/v1/libraries/${this.libraryId}/stream?path=${path}`
+				return `${API_ORIGIN}/api/v1/libraries/${this.libraryId}/stream?path=${path}`
 			}
 
 			// Fallback: try using full_path if available
 			if (this.video.full_path) {
 				// Use direct file path streaming (may need backend support)
 				const path = encodeURIComponent(this.video.full_path)
-				return `http://localhost:8080/api/v1/stream?path=${path}`
+				return `${API_ORIGIN}/api/v1/stream?path=${path}`
 			}
 
 			console.error('Unable to construct video URL', this.video)

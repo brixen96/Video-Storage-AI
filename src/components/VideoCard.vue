@@ -157,7 +157,7 @@
 </template>
 
 <script>
-import { getAssetURL } from '@/services/api'
+import { getAssetURL, API_ORIGIN } from '@/services/api'
 
 export default {
 	name: 'VideoCard',
@@ -225,7 +225,7 @@ export default {
 			if (video.thumbnail_path) {
 				return getAssetURL(video.thumbnail_path)
 			}
-			return `http://localhost:8080/api/v1/videos/${video.id}/thumbnail`
+			return `${API_ORIGIN}/api/v1/videos/${video.id}/thumbnail`
 		},
 		loadPreviewFrames() {
 			// Scraped videos: thumbnail_frames array takes priority
@@ -333,7 +333,7 @@ export default {
 		},
 		async openInFirefox(url) {
 			try {
-				const response = await fetch('http://localhost:8080/api/v1/system/open-url', {
+				const response = await fetch(`${API_ORIGIN}/api/v1/system/open-url`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ url })

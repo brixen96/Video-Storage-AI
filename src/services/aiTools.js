@@ -378,8 +378,6 @@ export const toolDefinitions = [
  * These actually perform the operations when the AI calls a tool
  */
 export const executeTool = async (toolName, args) => {
-	console.log(`Executing tool: ${toolName}`, args)
-
 	switch (toolName) {
 		case 'get_library_stats': {
 			const response = await databaseAPI.getStats()

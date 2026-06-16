@@ -379,7 +379,7 @@ import { defineAsyncComponent } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
 import VideoFilterSidebar from '@/components/VideoFilterSidebar.vue'
 import VideoContextMenu from '@/components/VideoContextMenu.vue'
-import { videosAPI, librariesAPI, scrapersAPI, jdownloaderAPI, getAssetURL } from '@/services/api'
+import { videosAPI, librariesAPI, scrapersAPI, jdownloaderAPI, getAssetURL, API_ORIGIN } from '@/services/api'
 import settingsService from '@/services/settingsService'
 import { BrowserPaginationControls } from '@/components/browser'
 import { DeleteConfirmationModal } from '@/components/shared'
@@ -756,7 +756,6 @@ export default {
 			return sorted
 		},
 		async refreshVideos() {
-			console.log('Refreshing videos...')
 			await this.loadVideos()
 			this.$toast.success('Videos refreshed')
 		},
@@ -1143,7 +1142,6 @@ export default {
 		},
 		toggleFavorite(video) {
 			// Placeholder for favorite toggle
-			console.log('Toggle favorite:', video)
 			this.$toast.success(`Favorite toggled for ${video.title}`)
 		},
 		async analyzePath(video) {
@@ -1256,9 +1254,8 @@ export default {
 				this.previewingPerformer = null
 			}
 		},
-		onPerformerPreviewLoaded(performer) {
+		onPerformerPreviewLoaded() {
 			// Preview loaded successfully
-			console.log(`Preview loaded for ${performer.name}`)
 		},
 		calculateAge(birthdate) {
 			if (!birthdate) return ''
@@ -1282,9 +1279,8 @@ export default {
 			// If path already starts with /assets/, just prepend the base URL
 			if (performer.preview_path.startsWith('/assets/') || performer.preview_path.startsWith('assets/')) {
 				const cleanPath = performer.preview_path.startsWith('/') ? performer.preview_path.slice(1) : performer.preview_path
-				console.log(cleanPath)
 
-				return `http://localhost:8080/${cleanPath}`
+				return `${API_ORIGIN}/${cleanPath}`
 			}
 			// Otherwise use getAssetURL for full path conversion
 			return getAssetURL(performer.preview_path)

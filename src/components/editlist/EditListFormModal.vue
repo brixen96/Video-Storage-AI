@@ -56,8 +56,9 @@
 
 <script setup>
 import { ref, computed, watch, getCurrentInstance } from 'vue'
+import { API_ORIGIN } from '@/services/api'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = `${API_ORIGIN}/api/v1`
 
 const props = defineProps({
 	visible: { type: Boolean, default: false },

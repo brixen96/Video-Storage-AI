@@ -29,7 +29,7 @@
 						<div class="apm-preview-image">
 							<img
 								v-if="selectedPerformer.thumbnail_path"
-								:src="`http://localhost:8080${selectedPerformer.thumbnail_path}`"
+											:src="`${API_ORIGIN}${selectedPerformer.thumbnail_path}`"
 								:alt="selectedPerformer.name"
 							/>
 							<div v-else class="apm-preview-placeholder">
@@ -82,7 +82,7 @@
 						<div class="apm-card-image">
 							<img
 								v-if="p.thumbnail_path"
-								:src="`http://localhost:8080${p.thumbnail_path}`"
+								:src="`${API_ORIGIN}${p.thumbnail_path}`"
 								:alt="p.name"
 							/>
 							<div v-else class="apm-card-placeholder">
@@ -123,7 +123,7 @@
 
 <script setup>
 import { ref, watch, getCurrentInstance } from 'vue'
-import { performersAPI, videosAPI } from '@/services/api'
+import { performersAPI, videosAPI, API_ORIGIN } from '@/services/api'
 
 const props = defineProps({
 	visible: { type: Boolean, default: false },
@@ -173,7 +173,7 @@ const confirmAssign = async () => {
 	loading.value = true
 	try {
 		if (item.type === 'folder') {
-			const response = await fetch('http://localhost:8080/api/v1/videos/performer/folder', {
+			const response = await fetch(`${API_ORIGIN}/api/v1/videos/performer/folder`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ folder_path: item.full_path, performer_id: selectedId.value }),

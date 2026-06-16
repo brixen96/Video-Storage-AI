@@ -74,6 +74,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
 import { useRouter } from 'vue-router'
+import { API_ORIGIN } from '@/services/api'
 import websocketService from '@/services/websocket'
 
 const { proxy } = getCurrentInstance()
@@ -111,7 +112,7 @@ let unsubscribeNotification = null
 const loadNotifications = async () => {
 	loading.value = true
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/notifications?limit=50')
+		const response = await fetch(`${API_ORIGIN}/api/v1/notifications?limit=50`)
 		const data = await response.json()
 		if (data.success) {
 			notifications.value = data.data.notifications || []
@@ -125,7 +126,7 @@ const loadNotifications = async () => {
 
 const loadStats = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/notifications/stats')
+		const response = await fetch(`${API_ORIGIN}/api/v1/notifications/stats`)
 		const data = await response.json()
 		if (data.success) {
 			unreadCount.value = data.data.unread || 0
@@ -144,7 +145,7 @@ const togglePanel = async () => {
 
 const markAllAsRead = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/notifications/read-all', {
+		const response = await fetch(`${API_ORIGIN}/api/v1/notifications/read-all`, {
 			method: 'POST',
 		})
 		const data = await response.json()
@@ -163,7 +164,7 @@ const handleNotificationClick = async (notification) => {
 	// Mark as read
 	if (!notification.is_read) {
 		try {
-			await fetch(`http://localhost:8080/api/v1/notifications/${notification.id}/read`, {
+			await fetch(`${API_ORIGIN}/api/v1/notifications/${notification.id}/read`, {
 				method: 'POST',
 			})
 			notification.is_read = true
@@ -182,7 +183,7 @@ const handleNotificationClick = async (notification) => {
 
 const clearAll = async () => {
 	try {
-		const response = await fetch('http://localhost:8080/api/v1/notifications', { method: 'DELETE' })
+		const response = await fetch(`${API_ORIGIN}/api/v1/notifications`, { method: 'DELETE' })
 		const data = await response.json()
 		if (data.success) {
 			notifications.value = []
@@ -197,7 +198,7 @@ const clearAll = async () => {
 
 const archiveNotification = async (id) => {
 	try {
-		const response = await fetch(`http://localhost:8080/api/v1/notifications/${id}/archive`, {
+		const response = await fetch(`${API_ORIGIN}/api/v1/notifications/${id}/archive`, {
 			method: 'POST',
 		})
 		const data = await response.json()
