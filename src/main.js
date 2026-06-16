@@ -5,6 +5,8 @@ import router from './router'
 import store from './store'
 import FontAwesomeIcon from './plugins/fontawesome'
 import { consoleLogAPI } from './services/api'
+// Import design tokens (must be first CSS import)
+import './styles/design-tokens.css'
 // Import Bootstrap JS for interactive components
 import 'bootstrap/dist/js/bootstrap.bundle'
 
