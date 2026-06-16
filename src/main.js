@@ -9,19 +9,23 @@ import { consoleLogAPI } from './services/api'
 import 'bootstrap/dist/js/bootstrap.bundle'
 
 // Setup frontend console logging to API
+let isLogging = false // Prevent feedback loop
 const sendConsoleLog = (level, message, details = {}) => {
+    if (isLogging) return // Don't send logs about failed log sends
     try {
+        isLogging = true
         consoleLogAPI.create({
             source: 'frontend',
             level: level,
             message: message,
             details: details
-        }).catch(err => {
-            // Silently fail if console log API is unavailable
-            console.warn('Failed to send console log to API:', err)
+        }).catch(() => {
+            // Silently fail — do NOT log the failure (prevents feedback loop)
         })
     } catch (err) {
         // Ignore errors in logging system
+    } finally {
+        isLogging = false
     }
 }
 
@@ -31,14 +35,26 @@ const originalConsoleWarn = console.warn
 
 console.error = (...args) => {
     originalConsoleError(...args)
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')
-    sendConsoleLog('error', message, { args: args.map(a => String(a)) })
+    // Don't send console errors that are about the logging system itself
+    const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')
+    if (msg.includes('console log') || msg.includes('sendConsoleLog')) return
+    // Debounce: only send one error per second to prevent floods
+    if (!console.error._lastSend || Date.now() - console.error._lastSend > 1000) {
+        console.error._lastSend = Date.now()
+        sendConsoleLog('error', msg.slice(0, 500))
+    }
 }
 
 console.warn = (...args) => {
     originalConsoleWarn(...args)
-    const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')
-    sendConsoleLog('warning', message, { args: args.map(a => String(a)) })
+    // Don't send console warnings about the logging system itself
+    const msg = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ')
+    if (msg.includes('console log') || msg.includes('sendConsoleLog')) return
+    // Debounce: only send one warning per 5 seconds
+    if (!console.warn._lastSend || Date.now() - console.warn._lastSend > 5000) {
+        console.warn._lastSend = Date.now()
+        sendConsoleLog('warning', msg.slice(0, 500))
+    }
 }
 
 // Don't override console.info to avoid spam - only capture errors and warnings

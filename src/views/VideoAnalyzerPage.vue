@@ -401,7 +401,12 @@ export default {
 			pickerPage: 1,
 			pickerTotal: 0,
 			libraries: [],
+			searchTimer: null,
 		}
+	},
+
+	beforeUnmount() {
+		if (this.searchTimer) clearTimeout(this.searchTimer)
 	},
 
 	computed: {

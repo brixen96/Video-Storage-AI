@@ -49,38 +49,55 @@ export function memoizedComputed(fn, deps = [], options = {}) {
  * Create a debounced computed property that only updates after a delay
  * Useful for search filters and expensive real-time computations
  *
- * @param {Function} fn - The computation function
+ * @param {Function} fn - Computation function
  * @param {number} delay - Debounce delay in milliseconds
- * @returns {Object} - { value: Ref, immediate: Function }
+ * @returns {Object} - { value: Ref, immediate: Function, stop: Function }
  */
 export function debouncedComputed(fn, delay = 300) {
 	const value = ref(fn())
 	let timeoutId = null
+	let stopped = false
 
 	const updateValue = () => {
+		if (stopped) return
 		if (timeoutId) {
 			clearTimeout(timeoutId)
 		}
 		timeoutId = setTimeout(() => {
-			value.value = fn()
+			if (!stopped) {
+				value.value = fn()
+			}
+			timeoutId = null
 		}, delay)
 	}
 
 	// Create computed for dependency tracking
 	const tracker = computed(() => fn())
 
-	// Watch for changes
-	watch(tracker, updateValue)
+	// Watch for changes — returns a stop handle
+	const stopWatch = watch(tracker, updateValue)
 
 	// Immediate update function (bypass debounce)
 	const immediate = () => {
+		if (stopped) return
 		if (timeoutId) {
 			clearTimeout(timeoutId)
+			timeoutId = null
 		}
 		value.value = fn()
 	}
 
-	return { value, immediate }
+	// Cleanup function — call this when the consuming component unmounts
+	const stop = () => {
+		stopped = true
+		stopWatch()
+		if (timeoutId) {
+			clearTimeout(timeoutId)
+			timeoutId = null
+		}
+	}
+
+	return { value, immediate, stop }
 }
 
 /**

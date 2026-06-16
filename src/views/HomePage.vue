@@ -224,8 +224,7 @@ export default {
 				max_pages_to_check: 3,
 			},
 			refreshInterval: null,
-			wsUnsubscribers: [],
-		}
+			wsUnsubscribers: [],		scraperCheckTimers: [],		}
 	},
 	created() {
 		const { formatDuration } = useFormatters()
@@ -265,9 +264,25 @@ export default {
 	},
 	onActivated() {
 		this.loadAll()
+		// Restart the refresh interval when reactivated
+		if (!this.refreshInterval) {
+			this.refreshInterval = setInterval(() => {
+				this.loadRunningTasks()
+				this.loadStats()
+			}, 30000)
+		}
+	},
+	onDeactivated() {
+		// Pause the refresh interval while deactivated to avoid wasted work
+		if (this.refreshInterval) {
+			clearInterval(this.refreshInterval)
+			this.refreshInterval = null
+		}
 	},
 	beforeUnmount() {
 		if (this.refreshInterval) clearInterval(this.refreshInterval)
+		this.scraperCheckTimers.forEach(t => clearTimeout(t))
+		this.scraperCheckTimers = []
 		this.wsUnsubscribers.forEach((unsub) => unsub())
 		this.wsUnsubscribers = []
 	},
@@ -345,11 +360,13 @@ export default {
 			this.checkingScrapers = { ...this.checkingScrapers, [scraperType]: true }
 			try {
 				await autoUpdateAPI.checkNow(scraperType)
-				setTimeout(() => {
+				const timer = setTimeout(() => {
+					this.scraperCheckTimers = this.scraperCheckTimers.filter(t => t !== timer)
 					this.loadScraperConfigs()
 					this.loadFeed()
 					this.loadStats()
 				}, 2000)
+				this.scraperCheckTimers.push(timer)
 			} catch (error) { console.error('Failed to check scraper:', error) }
 			finally { this.checkingScrapers = { ...this.checkingScrapers, [scraperType]: false } }
 		},

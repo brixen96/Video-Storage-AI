@@ -79,7 +79,6 @@
 <script>
 import { activityAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
-import { debounce } from '@/utils/debounce'
 
 export default {
 	name: 'ActivityStatusWidget',
@@ -92,12 +91,11 @@ export default {
 			unsubscribeWs: null,
 			unsubscribeStatus: null,
 			unsubscribeConnection: null,
-			debouncedLoadStatus: null,
+			debounceTimer: null,
 		}
 	},
 	created() {
-		// Create debounced version once so it shares the timer across calls
-		this.debouncedLoadStatus = debounce(() => this.loadStatus(), 2000)
+		// No-op — timer is managed via debouncedLoadStatus method
 	},
 	computed: {
 		statusColor() {
@@ -167,12 +165,26 @@ export default {
 		this.wsConnected = websocketService.isConnected()
 	},
 	beforeUnmount() {
+		// Cancel any pending debounced load
+		if (this.debounceTimer) {
+			clearTimeout(this.debounceTimer)
+			this.debounceTimer = null
+		}
 		// Unsubscribe from WebSocket events
 		if (this.unsubscribeWs) this.unsubscribeWs()
 		if (this.unsubscribeStatus) this.unsubscribeStatus()
 		if (this.unsubscribeConnection) this.unsubscribeConnection()
 	},
 	methods: {
+		debouncedLoadStatus() {
+			if (this.debounceTimer) {
+				clearTimeout(this.debounceTimer)
+			}
+			this.debounceTimer = setTimeout(() => {
+				this.debounceTimer = null
+				this.loadStatus()
+			}, 2000)
+		},
 		async loadStatus() {
 			try {
 				const response = await activityAPI.getStatus()

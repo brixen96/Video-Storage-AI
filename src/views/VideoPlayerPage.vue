@@ -540,7 +540,7 @@ export default {
 		window.addEventListener('keydown', this.handleKeyboard)
 		this.keyboardHintTimer = setTimeout(() => {
 			this.showKeyboardHint = true
-			setTimeout(() => { this.showKeyboardHint = false }, 3000)
+			this._keyboardHintHideTimer = setTimeout(() => { this.showKeyboardHint = false }, 3000)
 		}, 1500)
 		const videoId = this.$route.params.id
 		// Detect video type from route name
@@ -916,6 +916,7 @@ export default {
 		window.removeEventListener('keydown', this.handleKeyboard)
 		this.cancelAutoPlay()
 		if (this.keyboardHintTimer) clearTimeout(this.keyboardHintTimer)
+		if (this._keyboardHintHideTimer) clearTimeout(this._keyboardHintHideTimer)
 	},
 	watch: {
 		async '$route.params.id'(newId) {

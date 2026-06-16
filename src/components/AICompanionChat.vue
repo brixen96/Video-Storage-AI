@@ -1811,6 +1811,7 @@ Try one of the suggested prompts above, or ask me anything about your library!`,
 })
 
 onUnmounted(() => {
+	if (_mentionTimer) clearTimeout(_mentionTimer)
 	if (unsubscribeCompanionEvent) unsubscribeCompanionEvent()
 	if (unsubscribeActivityUpdate) unsubscribeActivityUpdate()
 	window.removeEventListener('open-ai-chat', handleOpenAIChat)

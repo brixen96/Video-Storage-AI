@@ -426,7 +426,6 @@ export default {
 			activities: [],
 			status: {},
 			loading: false,
-			autoRefresh: null,
 			filters: {
 				status: '',
 				task_type: '',
@@ -516,31 +515,8 @@ export default {
 			}
 		})
 
-		// Poll every 10 seconds to clean up stale running tasks that may have completed without websocket notification
-		this.staleTaskCleanup = setInterval(async () => {
-			// Only check if we have running tasks in our local list
-			const localRunningTasks = this.activities.filter(a => a.status === 'running')
-			if (localRunningTasks.length > 0) {
-				try {
-					// Fetch actual running tasks from the server
-					const response = await activityAPI.getAll({ status: 'running', limit: 100 })
-					const serverRunningTasks = response.data || []
-					const serverRunningIds = new Set(serverRunningTasks.map(t => t.id))
-
-					// Find local "running" tasks that are no longer running on the server
-					const staleTasks = localRunningTasks.filter(a => !serverRunningIds.has(a.id))
-
-					if (staleTasks.length > 0) {
-						// Remove only the stale running tasks (they've completed without websocket notification)
-						const staleIds = new Set(staleTasks.map(t => t.id))
-						this.activities = this.activities.filter(a => !staleIds.has(a.id))
-						this.$toast.success('Tasks completed', `${staleTasks.length} task${staleTasks.length > 1 ? 's' : ''} finished`)
-					}
-				} catch (error) {
-					// Silently fail - not critical
-				}
-			}
-		}, 10000)
+		// Start polling to clean up stale running tasks
+		this.startStaleTaskCleanup()
 
 		// Subscribe to console log updates via WebSocket
 		this.unsubscribeConsoleLog = websocketService.on('console_log', (logData) => {
@@ -554,9 +530,23 @@ export default {
 			}
 		})
 	},
-	onActivated() {
+	activated() {
 		this.loadStatus()
 		this.loadActivities()
+		// Restart stale task cleanup interval when reactivated
+		if (!this.staleTaskCleanup) {
+			this.startStaleTaskCleanup()
+		}
+	},
+	deactivated() {
+		// Stop stale task cleanup interval when deactivated
+		if (this.staleTaskCleanup) {
+			clearInterval(this.staleTaskCleanup)
+			this.staleTaskCleanup = null
+		}
+		// Clear any pending failed task timers
+		Object.values(this.failedTaskTimers).forEach((timer) => clearTimeout(timer))
+		this.failedTaskTimers = {}
 	},
 	beforeUnmount() {
 		if (this.unsubscribeStatus) {
@@ -594,6 +584,27 @@ export default {
 			} catch (error) {
 				console.error('Failed to load status:', error)
 			}
+		},
+		startStaleTaskCleanup() {
+			// Poll every 10 seconds to clean up stale running tasks
+			this.staleTaskCleanup = setInterval(async () => {
+				const localRunningTasks = this.activities.filter(a => a.status === 'running')
+				if (localRunningTasks.length > 0) {
+					try {
+						const response = await activityAPI.getAll({ status: 'running', limit: 100 })
+						const serverRunningTasks = response.data || []
+						const serverRunningIds = new Set(serverRunningTasks.map(t => t.id))
+						const staleTasks = localRunningTasks.filter(a => !serverRunningIds.has(a.id))
+						if (staleTasks.length > 0) {
+							const staleIds = new Set(staleTasks.map(t => t.id))
+							this.activities = this.activities.filter(a => !staleIds.has(a.id))
+							this.$toast.success('Tasks completed', `${staleTasks.length} task${staleTasks.length > 1 ? 's' : ''} finished`)
+						}
+					} catch (error) {
+						// Silently fail - not critical
+					}
+				}
+			}, 10000)
 		},
 		async deleteActivity(id) {
 			try {

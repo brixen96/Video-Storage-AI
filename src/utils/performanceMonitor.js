@@ -7,6 +7,7 @@ class PerformanceMonitor {
 	constructor() {
 		this.metrics = new Map()
 		this.marks = new Map()
+		this.maxMetricsPerName = 100 // Cap to prevent unbounded memory growth
 		this.enabled = process.env.NODE_ENV === 'development'
 	}
 
@@ -38,11 +39,15 @@ class PerformanceMonitor {
 		const duration = performance.now() - startTime
 		this.marks.delete(name)
 
-		// Store metric
+		// Store metric (capped to prevent unbounded memory growth)
 		if (!this.metrics.has(name)) {
 			this.metrics.set(name, [])
 		}
-		this.metrics.get(name).push(duration)
+		const metricValues = this.metrics.get(name)
+		metricValues.push(duration)
+		if (metricValues.length > this.maxMetricsPerName) {
+			metricValues.splice(0, metricValues.length - this.maxMetricsPerName)
+		}
 
 		if (log) {
 			const color = duration < 100 ? 'green' : duration < 500 ? 'orange' : 'red'
