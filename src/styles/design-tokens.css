@@ -40,12 +40,17 @@
   
   /* Solid background layers */
   --bg-navy: #1a1a2e;              /* Primary dark background */
+  --bg-navy-deep: #0f3460;         /* Deep navy -- navbar border, active links */
   --bg-panel: #16213e;             /* Panel/card/header background */
   --bg-surface: #1a2942;           /* Elevated surface — inputs, dropdowns */
   --bg-surface-hover: #1e2a47;     /* Hovered/active surfaces */
   --bg-surface-alt: #2d2d44;       /* Alternative surface (scraper) */
   --bg-code: #282c34;              /* Code block background */
   --bg-black: #000;                /* Video player backgrounds */
+
+  /* Surface overlays */
+  --surface-subtle: rgba(255, 255, 255, 0.1);
+  --surface-elevated: rgba(255, 255, 255, 0.15);
   
   /* ═══════════════════════════════════════════════════════════════════════════
      📝 TEXT COLORS (Hierarchy)
@@ -53,6 +58,7 @@
   
   --text-primary: #ffffff;         /* Headings, active elements */
   --text-secondary: #e0e0e0;       /* Body text, descriptions */
+  --text-tertiary: rgba(255, 255, 255, 0.8);  /* Nav links, secondary body text */
   --text-muted: rgba(255, 255, 255, 0.6);  /* Subdued text */
   --text-faint: rgba(255, 255, 255, 0.5);  /* Placeholder text */
   --text-disabled: #b0b0b0;        /* Disabled/readonly elements */

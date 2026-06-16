@@ -377,7 +377,7 @@
 
 <script setup>
 /* eslint-disable no-unused-vars */
-import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, getCurrentInstance, defineAsyncComponent } from 'vue'
 import { LoadingState, EmptyState, StatCard } from '@/components/shared'
 import AutoUpdatePanel from '@/components/scraper/AutoUpdatePanel.vue'
 import ScrapedVideoCard from '@/components/scraper/ScrapedVideoCard.vue'
@@ -387,13 +387,13 @@ import ScraperJobProgress from '@/components/scraper/ScraperJobProgress.vue'
 import ScraperFilterPanel from '@/components/scraper/ScraperFilterPanel.vue'
 import ScraperPaginationControls from '@/components/scraper/ScraperPaginationControls.vue'
 import SimpcityTab from '@/components/scraper/tabs/SimpcityTab.vue'
-import LuxureTVTab from '@/components/scraper/tabs/LuxureTVTab.vue'
-import PornHubTab from '@/components/scraper/tabs/PornHubTab.vue'
-import SexuriaTab from '@/components/scraper/tabs/SexuriaTab.vue'
-import Rule34VideoTab from '@/components/scraper/tabs/Rule34VideoTab.vue'
-import MotherlessTab from '@/components/scraper/tabs/MotherlessTab.vue'
-import HQPornerTab from '@/components/scraper/tabs/HQPornerTab.vue'
-import LeakVidsTab from '@/components/scraper/tabs/LeakVidsTab.vue'
+const LuxureTVTab = defineAsyncComponent(() => import('@/components/scraper/tabs/LuxureTVTab.vue'))
+const PornHubTab = defineAsyncComponent(() => import('@/components/scraper/tabs/PornHubTab.vue'))
+const SexuriaTab = defineAsyncComponent(() => import('@/components/scraper/tabs/SexuriaTab.vue'))
+const Rule34VideoTab = defineAsyncComponent(() => import('@/components/scraper/tabs/Rule34VideoTab.vue'))
+const MotherlessTab = defineAsyncComponent(() => import('@/components/scraper/tabs/MotherlessTab.vue'))
+const HQPornerTab = defineAsyncComponent(() => import('@/components/scraper/tabs/HQPornerTab.vue'))
+const LeakVidsTab = defineAsyncComponent(() => import('@/components/scraper/tabs/LeakVidsTab.vue'))
 import { jdownloaderAPI, scrapersAPI, deleteVideosBySource, API_ORIGIN } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
