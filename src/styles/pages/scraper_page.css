@@ -2356,14 +2356,14 @@
 	width: 260px;
 	max-height: calc(100vh - 5rem);
 	overflow-y: auto;
-	background: #16213e;
-	border: 1px solid rgba(102, 126, 234, 0.2);
-	border-radius: 12px;
-	padding: 1rem;
+	background: var(--bg-panel);
+	border: 1px solid var(--border-accent);
+	border-radius: var(--radius-lg);
+	padding: var(--space-md);
 }
 .sfp-inner::-webkit-scrollbar { width: 4px; }
 .sfp-inner::-webkit-scrollbar-track { background: transparent; }
-.sfp-inner::-webkit-scrollbar-thumb { background: rgba(102, 126, 234, 0.3); border-radius: 2px; }
+.sfp-inner::-webkit-scrollbar-thumb { background: rgba(var(--color-brand-rgb), 0.3); border-radius: 2px; }
 
 /* Filter panel header */
 .sfp-header {
@@ -2372,7 +2372,7 @@
 	justify-content: space-between;
 	margin-bottom: 0.875rem;
 	padding-bottom: 0.75rem;
-	border-bottom: 1px solid rgba(102, 126, 234, 0.2);
+	border-bottom: 1px solid var(--border-accent);
 }
 .sfp-title {
 	display: flex;
@@ -2380,7 +2380,7 @@
 	gap: 0.5rem;
 	font-size: 0.95rem;
 	font-weight: 700;
-	background: linear-gradient(135deg, #667eea 0%, #00d9ff 100%);
+	background: var(--gradient-accent);
 	-webkit-background-clip: text;
 	-webkit-text-fill-color: transparent;
 	background-clip: text;
@@ -2392,23 +2392,23 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	color: #fff !important;
+	background: var(--gradient-brand);
+	color: var(--text-primary) !important;
 	font-size: 0.7rem;
 	font-weight: 700;
 	border-radius: 10px;
-	-webkit-text-fill-color: #fff;
+	-webkit-text-fill-color: var(--text-primary);
 }
 .sfp-close-btn {
 	background: none;
 	border: none;
-	color: #5a6a8a;
+	color: var(--text-dim);
 	cursor: pointer;
 	padding: 0.2rem 0.4rem;
 	border-radius: 6px;
-	transition: all 0.2s;
+	transition: all var(--transition-fast);
 }
-.sfp-close-btn:hover { color: #fff; background: rgba(102, 126, 234, 0.2); }
+.sfp-close-btn:hover { color: var(--text-primary); background: var(--border-accent); }
 
 /* Clear all button */
 .sfp-clear-all {
@@ -2417,13 +2417,13 @@
 	margin-bottom: 0.75rem;
 	background: rgba(255, 107, 107, 0.1);
 	border: 1px solid rgba(255, 107, 107, 0.3);
-	border-radius: 8px;
-	color: #ff6b6b;
+	border-radius: var(--radius-md);
+	color: var(--color-danger-soft);
 	font-size: 0.8rem;
 	cursor: pointer;
-	transition: all 0.2s;
+	transition: all var(--transition-fast);
 }
-.sfp-clear-all:hover { background: rgba(255, 107, 107, 0.2); border-color: #ff6b6b; }
+.sfp-clear-all:hover { background: rgba(255, 107, 107, 0.2); border-color: var(--color-danger-soft); }
 
 /* Filter sections */
 .sfp-section {
@@ -2435,7 +2435,7 @@
 	gap: 0.4rem;
 	font-size: 0.75rem;
 	font-weight: 600;
-	color: #00d9ff;
+	color: var(--color-accent);
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 	margin-bottom: 0.5rem;
@@ -2443,20 +2443,20 @@
 
 /* Select inputs inside panel */
 .sfp-select {
-	background: rgba(26, 41, 66, 0.6) !important;
-	border-color: rgba(102, 126, 234, 0.2) !important;
-	color: #e0e0e0 !important;
-	border-radius: 8px !important;
+	background: var(--input-bg) !important;
+	border-color: var(--border-accent) !important;
+	color: var(--text-secondary) !important;
+	border-radius: var(--radius-md) !important;
 	font-size: 0.85rem !important;
-	transition: all 0.2s ease;
+	transition: all var(--transition-fast);
 }
 .sfp-select:focus {
-	background: rgba(26, 41, 66, 0.9) !important;
-	border-color: #667eea !important;
-	color: #fff !important;
-	box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2) !important;
+	background: var(--input-bg-focus) !important;
+	border-color: var(--color-brand) !important;
+	color: var(--text-primary) !important;
+	box-shadow: 0 0 0 3px var(--input-shadow-focus) !important;
 }
-.sfp-select option { background: #1a2942; color: #e0e0e0; }
+.sfp-select option { background: var(--bg-surface); color: var(--text-secondary); }
 
 /* Duration chip group */
 .sfp-btn-group {
@@ -2466,22 +2466,22 @@
 }
 .sfp-chip {
 	padding: 0.4rem 0.5rem;
-	background: rgba(26, 41, 66, 0.6);
-	border: 1px solid rgba(102, 126, 234, 0.2);
-	border-radius: 8px;
-	color: #a0b0cc;
+	background: var(--input-bg);
+	border: 1px solid var(--border-accent);
+	border-radius: var(--radius-md);
+	color: var(--text-dim);
 	cursor: pointer;
 	font-size: 0.78rem;
 	font-weight: 500;
-	transition: all 0.2s ease;
+	transition: all var(--transition-fast);
 	text-align: center;
 }
-.sfp-chip:hover { background: rgba(102, 126, 234, 0.2); border-color: #667eea; color: #fff; }
+.sfp-chip:hover { background: var(--border-accent); border-color: var(--color-brand); color: var(--text-primary); }
 .sfp-chip.active {
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	background: var(--gradient-brand);
 	border-color: transparent;
-	color: #fff;
-	box-shadow: 0 3px 10px rgba(102, 126, 234, 0.3);
+	color: var(--text-primary);
+	box-shadow: 0 3px 10px rgba(var(--color-brand-rgb), 0.3);
 }
 .sfp-chip.exclude-chip {
 	background: rgba(239, 68, 68, 0.15);
@@ -2491,7 +2491,7 @@
 .sfp-chip.exclude-chip:hover {
 	background: rgba(239, 68, 68, 0.25);
 	border-color: #ef4444;
-	color: #fff;
+	color: var(--text-primary);
 }
 
 /* Tag chip list (inline, wrapping) */
@@ -2510,19 +2510,19 @@
 
 /* Text input inside filter panel */
 .sfp-input {
-	background: rgba(26, 41, 66, 0.6);
-	border: 1px solid rgba(102, 126, 234, 0.2);
-	color: #e0e0e0;
-	border-radius: 8px;
+	background: var(--input-bg);
+	border: 1px solid var(--border-accent);
+	color: var(--text-secondary);
+	border-radius: var(--radius-md);
 }
 .sfp-input:focus {
-	background: rgba(26, 41, 66, 0.8);
-	border-color: #667eea;
-	color: #fff;
-	box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+	background: var(--input-bg-focus);
+	border-color: var(--color-brand);
+	color: var(--text-primary);
+	box-shadow: 0 0 0 2px var(--input-shadow-focus);
 	outline: none;
 }
-.sfp-input::placeholder { color: #607080; }
+.sfp-input::placeholder { color: var(--text-placeholder); }
 
 /* Range row for date/duration inputs */
 .sfp-range-row {
@@ -2535,7 +2535,7 @@
 	min-width: 0;
 }
 .sfp-range-sep {
-	color: #607080;
+	color: var(--text-placeholder);
 	font-size: 0.85rem;
 	flex-shrink: 0;
 }
@@ -2552,13 +2552,13 @@
 	gap: 0.5rem;
 }
 .sfp-slider-label {
-	color: #8899aa;
+	color: var(--text-dim);
 	font-size: 0.75rem;
 	width: 24px;
 	flex-shrink: 0;
 }
 .sfp-slider-val {
-	color: #c0d0e0;
+	color: var(--text-secondary);
 	font-size: 0.75rem;
 	width: 44px;
 	text-align: right;
@@ -2570,7 +2570,7 @@
 	height: 6px;
 	-webkit-appearance: none;
 	appearance: none;
-	background: rgba(102, 126, 234, 0.2);
+	background: var(--border-accent);
 	border-radius: 3px;
 	outline: none;
 }
@@ -2579,39 +2579,39 @@
 	appearance: none;
 	width: 16px;
 	height: 16px;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	background: var(--gradient-brand);
 	border-radius: 50%;
 	cursor: pointer;
-	box-shadow: 0 1px 6px rgba(102, 126, 234, 0.4);
-	transition: all 0.15s ease;
+	box-shadow: 0 1px 6px rgba(var(--color-brand-rgb), 0.4);
+	transition: all var(--transition-fast);
 }
 .sfp-slider::-webkit-slider-thumb:hover {
 	transform: scale(1.2);
-	box-shadow: 0 2px 10px rgba(102, 126, 234, 0.6);
+	box-shadow: 0 2px 10px rgba(var(--color-brand-rgb), 0.6);
 }
 .sfp-slider::-moz-range-thumb {
 	width: 16px;
 	height: 16px;
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	background: var(--gradient-brand);
 	border-radius: 50%;
 	cursor: pointer;
 	border: none;
-	box-shadow: 0 1px 6px rgba(102, 126, 234, 0.4);
+	box-shadow: 0 1px 6px rgba(var(--color-brand-rgb), 0.4);
 }
 .sfp-duration-value {
 	font-size: 0.7rem;
-	color: #667eea;
+	color: var(--color-brand);
 	margin-left: 0.5rem;
 	font-weight: 600;
 }
 .sfp-slider-reset {
 	font-size: 0.7rem;
-	color: #ff6b6b;
+	color: var(--color-danger-soft);
 	cursor: pointer;
 	text-align: center;
 	padding: 0.25rem 0;
 	opacity: 0.8;
-	transition: opacity 0.2s;
+	transition: opacity var(--transition-fast);
 }
 .sfp-slider-reset:hover {
 	opacity: 1;
@@ -2623,51 +2623,51 @@
 	align-items: center;
 	gap: 0.6rem;
 	padding: 0.6rem 0.75rem;
-	background: rgba(26, 41, 66, 0.4);
-	border: 1px solid rgba(102, 126, 234, 0.15);
+	background: var(--input-bg);
+	border: 1px solid var(--border-accent);
 	border-radius: 10px;
 	cursor: pointer;
-	transition: all 0.2s ease;
+	transition: all var(--transition-fast);
 }
-.sfp-toggle-row:hover { background: rgba(26, 41, 66, 0.7); border-color: rgba(102, 126, 234, 0.3); }
-.sfp-toggle-row.active { background: rgba(102, 126, 234, 0.15); border-color: #667eea; }
+.sfp-toggle-row:hover { background: var(--input-bg-focus); border-color: rgba(var(--color-brand-rgb), 0.3); }
+.sfp-toggle-row.active { background: rgba(var(--color-brand-rgb), 0.15); border-color: var(--color-brand); }
 .sfp-toggle-icon {
 	width: 32px;
 	height: 32px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: rgba(102, 126, 234, 0.2);
+	background: var(--border-accent);
 	border-radius: 7px;
-	color: #667eea;
+	color: var(--color-brand);
 	flex-shrink: 0;
-	transition: all 0.2s;
+	transition: all var(--transition-fast);
 }
 .sfp-toggle-row.active .sfp-toggle-icon {
-	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-	color: #fff;
+	background: var(--gradient-brand);
+	color: var(--text-primary);
 }
-.sfp-toggle-label { flex: 1; font-size: 0.85rem; color: #a0b0cc; }
-.sfp-toggle-row.active .sfp-toggle-label { color: #fff; font-weight: 500; }
+.sfp-toggle-label { flex: 1; font-size: 0.85rem; color: var(--text-dim); }
+.sfp-toggle-row.active .sfp-toggle-label { color: var(--text-primary); font-weight: 500; }
 .sfp-toggle-switch {
 	width: 34px;
 	height: 18px;
-	background: rgba(102, 126, 234, 0.2);
+	background: var(--border-accent);
 	border-radius: 9px;
 	position: relative;
 	flex-shrink: 0;
-	transition: background 0.2s;
+	transition: background var(--transition-fast);
 }
-.sfp-toggle-switch.on { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+.sfp-toggle-switch.on { background: var(--gradient-brand); }
 .sfp-toggle-knob {
 	position: absolute;
 	top: 2px;
 	left: 2px;
 	width: 14px;
 	height: 14px;
-	background: #fff;
+	background: var(--text-primary);
 	border-radius: 50%;
-	transition: transform 0.2s;
+	transition: transform var(--transition-fast);
 }
 .sfp-toggle-switch.on .sfp-toggle-knob { transform: translateX(16px); }
 
