@@ -78,6 +78,9 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
+:: Copy VERSION file next to the binary so the web server can read it
+copy "%ROOT%VERSION" "%RELEASE_DIR%\VERSION" > nul 2>&1
+
 :: ── 3b. Generate release .env with absolute AppData paths ──
 echo [3b/5] Writing release\.env with your user AppData paths...
 :: Convert backslashes to forward slashes so godotenv can parse paths with spaces

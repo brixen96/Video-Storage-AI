@@ -46,6 +46,22 @@ func (p *webProgram) run() {
 	apiURL := fmt.Sprintf("http://localhost:%s", userCfg.ServerPort)
 	webPort := userCfg.WebPort
 
+	// If ldflags didn't inject a version, try reading the VERSION file next to the binary
+	if config.Version == "dev" || config.Version == "" {
+		exeDir := ""
+		if exePath, err := os.Executable(); err == nil {
+			exeDir = filepath.Dir(exePath)
+		}
+		// Try production path first (next to exe), then fallback to repo root
+		for _, dir := range []string{exeDir, filepath.Join(exeDir, "..")} {
+			versionFile := filepath.Join(dir, "VERSION")
+			if data, err := os.ReadFile(versionFile); err == nil {
+				config.Version = strings.TrimSpace(string(data))
+				break
+			}
+		}
+	}
+
 	// Locate dist/ next to the executable (production layout)
 	exePath, err := os.Executable()
 	if err != nil {
