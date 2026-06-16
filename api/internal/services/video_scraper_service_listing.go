@@ -3,13 +3,13 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/httpclient"
 )
 
 // ScrapePage scrapes a listing page for videos with pagination support
@@ -361,7 +361,11 @@ func (s *VideoScraperService) TestScrapeListingPage(pageURL string) (map[string]
 	}
 	source := parsedURL.Host
 
-	resp, err := http.Get(pageURL)
+	req, err := httpclient.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := httpclient.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch page: %w", err)
 	}
@@ -681,7 +685,11 @@ func (s *VideoScraperService) scrapeListingPage(pageURL, source, siteType string
 	if siteType == "" {
 		siteType = "custom"
 	}
-	resp, err := http.Get(pageURL)
+	req, err := httpclient.NewRequest("GET", pageURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := httpclient.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch page: %w", err)
 	}

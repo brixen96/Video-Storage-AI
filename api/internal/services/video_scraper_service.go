@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/brixen96/video-storage-ai/internal/httpclient"
 )
 
 // VideoScraperService handles scraping videos from various sites
@@ -318,7 +318,11 @@ func (s *VideoScraperService) scrapeYouTube(video *ScrapedVideo, videoURL string
 	// For YouTube, we would typically use yt-dlp or YouTube API
 	// For now, this is a placeholder that extracts basic metadata
 
-	resp, err := http.Get(videoURL)
+	req, err := httpclient.NewRequest("GET", videoURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := httpclient.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch YouTube page: %w", err)
 	}
@@ -364,7 +368,11 @@ func (s *VideoScraperService) scrapeYouTube(video *ScrapedVideo, videoURL string
 
 // scrapeVimeo scrapes video metadata from Vimeo
 func (s *VideoScraperService) scrapeVimeo(video *ScrapedVideo, videoURL string) error {
-	resp, err := http.Get(videoURL)
+	req, err := httpclient.NewRequest("GET", videoURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := httpclient.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch Vimeo page: %w", err)
 	}
@@ -401,7 +409,11 @@ func (s *VideoScraperService) scrapeVimeo(video *ScrapedVideo, videoURL string) 
 
 // scrapeGenericSite scrapes video metadata from a generic site
 func (s *VideoScraperService) scrapeGenericSite(video *ScrapedVideo, videoURL string) error {
-	resp, err := http.Get(videoURL)
+	req, err := httpclient.NewRequest("GET", videoURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := httpclient.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch page: %w", err)
 	}
