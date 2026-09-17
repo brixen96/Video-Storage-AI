@@ -375,6 +375,206 @@ func (s *AICompanionService) registerLibraryTools() {
 			}, "required": []string{"video_id", "target_library"}},
 		},
 	}, s.toolMoveVideoToLibrary)
+
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "score_library_structure",
+			Description: "Score a library's folder structure from 0-100. Evaluates consistency, naming, depth, clutter, and coverage. Returns a grade (A-F), breakdown, and specific improvement suggestions.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name to score"},
+			}, "required": []string{"library_name"}},
+		},
+	}, s.toolScoreLibraryStructure)
+}
+
+func (s *AICompanionService) toolScoreLibraryStructure(args map[string]interface{}) (interface{}, error) {
+	libraryName, _ := args["library_name"].(string)
+	var libID int64
+	var libPath, libNameFull string
+	err := s.db.QueryRow("SELECT id, name, path FROM libraries WHERE name LIKE ?", "%"+libraryName+"%").Scan(&libID, &libNameFull, &libPath)
+	if err != nil {
+		return map[string]interface{}{"error": "library not found: " + libraryName}, nil
+	}
+
+	// Gather metrics from DB
+	var totalVideos, videosAtRoot, videosInCatchAll int
+	libPathSlash := filepath.ToSlash(libPath)
+
+	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ?", libID).Scan(&totalVideos)
+	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path = ?", libID, libPath).Scan(&videosAtRoot)
+	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND (file_path LIKE ? OR file_path LIKE ?)",
+		libID, "%"+string(filepath.Separator)+"Downloads%Torrents%", "%"+string(filepath.Separator)+"Users%").Scan(&videosInCatchAll)
+
+	// Folder analysis
+	type folderInfo struct{ depth, count int; names []string }
+	folderMap := map[string]*folderInfo{}
+	var maxDepth int
+	var totalFolders int
+	var emptyFolders int
+
+	rows, err := s.db.Query("SELECT file_path FROM videos WHERE library_id = ?", libID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var fp string
+			if rows.Scan(&fp) != nil { continue }
+			rel := filepath.ToSlash(fp)
+			if strings.HasPrefix(rel, libPathSlash) {
+				rel = strings.TrimPrefix(rel, libPathSlash)
+				rel = strings.TrimPrefix(rel, "/")
+			}
+			parts := strings.Split(rel, "/")
+			for d := 1; d < len(parts); d++ {
+				folderKey := strings.Join(parts[:d], "/")
+				if folderMap[folderKey] == nil {
+					folderMap[folderKey] = &folderInfo{names: []string{filepath.Base(folderKey)}}
+					totalFolders++
+				}
+				folderMap[folderKey].count++
+				folderMap[folderKey].depth = d
+				if d > maxDepth { maxDepth = d }
+			}
+		}
+	}
+
+	// Count folders with very few videos (clutter)
+	singleVideoFolders := 0
+	for _, fi := range folderMap {
+		if fi.count == 1 { singleVideoFolders++ }
+	}
+
+	// Naming quality — check for special chars, very long names
+	badNames := 0
+	for name := range folderMap {
+		base := filepath.Base(name)
+		if len(base) > 60 { badNames++ }
+		for _, ch := range []string{"|", "!", "@", "#", "&", "³", "⁄", "¦"} {
+			if strings.Contains(base, ch) { badNames++; break }
+		}
+	}
+
+	// New folder / empty folder detection on disk
+	_ = filepath.Walk(libPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || !info.IsDir() || path == libPath { return nil }
+		base := filepath.Base(path)
+		if base == "New folder" || base == ".thumb" || base == "Proxy" {
+			emptyFolders++
+		}
+		entries, _ := os.ReadDir(path)
+		if len(entries) == 0 { emptyFolders++ }
+		return nil
+	})
+
+	// ── Scoring ──
+	scores := map[string]int{}
+
+	// Coverage (0-30): what % of videos are NOT in catch-all folders
+	catchAllPct := 0.0
+	if totalVideos > 0 { catchAllPct = float64(videosInCatchAll) / float64(totalVideos) * 100 }
+	coverageScore := int(30 * (1 - catchAllPct/100))
+	if coverageScore < 0 { coverageScore = 0 }
+	scores["coverage"] = coverageScore
+
+	// Consistency (0-25): penalize deep nesting and single-video folders
+	consistencyScore := 25
+	if maxDepth > 3 { consistencyScore -= (maxDepth - 3) * 5 }
+	if totalFolders > 0 {
+		singlePct := float64(singleVideoFolders) / float64(totalFolders) * 100
+		if singlePct > 30 {
+			consistencyScore -= 10
+		} else if singlePct > 15 {
+			consistencyScore -= 5
+		}
+	}
+	if consistencyScore < 0 { consistencyScore = 0 }
+	scores["consistency"] = consistencyScore
+
+	// Naming (0-20): penalize bad folder names
+	namingScore := 20
+	if totalFolders > 0 {
+		badPct := float64(badNames) / float64(totalFolders) * 100
+		if badPct > 20 {
+			namingScore -= 15
+		} else if badPct > 10 {
+			namingScore -= 10
+		} else if badPct > 5 {
+			namingScore -= 5
+		}
+	}
+	if namingScore < 0 { namingScore = 0 }
+	scores["naming"] = namingScore
+
+	// Clutter (0-15): penalize empty/New folders
+	clutterScore := 15
+	if emptyFolders > 10 {
+		clutterScore -= 10
+	} else if emptyFolders > 5 {
+		clutterScore -= 5
+	}
+	if clutterScore < 0 { clutterScore = 0 }
+	scores["clutter"] = clutterScore
+
+	// Root cleanliness (0-10): penalize videos at library root
+	rootScore := 10
+	if totalVideos > 0 {
+		rootPct := float64(videosAtRoot) / float64(totalVideos) * 100
+		if rootPct > 20 {
+			rootScore -= 8
+		} else if rootPct > 5 {
+			rootScore -= 4
+		}
+	}
+	if rootScore < 0 { rootScore = 0 }
+	scores["root_cleanliness"] = rootScore
+
+	totalScore := 0
+	for _, s := range scores { totalScore += s }
+
+	// Grade
+	grade := "F"
+	switch {
+	case totalScore >= 90: grade = "A"
+	case totalScore >= 80: grade = "B"
+	case totalScore >= 70: grade = "C"
+	case totalScore >= 50: grade = "D"
+	}
+
+	// Suggestions
+	var suggestions []string
+	if catchAllPct > 20 {
+		suggestions = append(suggestions, fmt.Sprintf("%.0f%% of videos are in catch-all folders — use batch_move_by_pattern to restructure", catchAllPct))
+	}
+	if maxDepth > 3 {
+		suggestions = append(suggestions, fmt.Sprintf("Folders go %d levels deep — flatten to max 3 levels", maxDepth))
+	}
+	if singleVideoFolders > 10 {
+		suggestions = append(suggestions, fmt.Sprintf("%d folders with only 1 video — consolidate into parent folders", singleVideoFolders))
+	}
+	if emptyFolders > 0 {
+		suggestions = append(suggestions, fmt.Sprintf("%d empty/New folders detected — clean up with plan_structure_improvements", emptyFolders))
+	}
+	if badNames > 0 {
+		suggestions = append(suggestions, fmt.Sprintf("%d folders with problematic names (special chars, too long) — use rename_folder", badNames))
+	}
+	if videosAtRoot > 5 {
+		suggestions = append(suggestions, fmt.Sprintf("%d videos sitting at library root — move into subfolders", videosAtRoot))
+	}
+	if len(suggestions) == 0 {
+		suggestions = append(suggestions, "Library structure looks good!")
+	}
+
+	return map[string]interface{}{
+		"library":       libNameFull,
+		"score":         totalScore,
+		"grade":         grade,
+		"scores":        scores,
+		"total_videos":  totalVideos,
+		"total_folders": totalFolders,
+		"max_depth":     maxDepth,
+		"empty_folders": emptyFolders,
+		"catch_all_pct": fmt.Sprintf("%.1f%%", catchAllPct),
+		"suggestions":   suggestions,
+	}, nil
 }
 
 func (s *AICompanionService) toolSuggestVideoPlacement(args map[string]interface{}) (interface{}, error) {
