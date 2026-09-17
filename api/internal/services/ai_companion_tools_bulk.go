@@ -445,12 +445,242 @@ func (s *AICompanionService) toolMoveFolderContents(args map[string]interface{})
 		"dry_run":              dryRun,
 		"library":              libName,
 		"source_subfolder":     srcRel,
-		"target_subfolder":     tgtRel,
 		"total_in_source":      totalInFolder,
 		"processed_this_call":  len(vids),
 		"success":              success,
 		"failed":               fail,
 		"remaining":            totalInFolder - len(vids),
 		"results":              results,
+	}, nil
+}
+
+// ── batch_move_by_pattern ─────────────────────────────────────────────────────
+// Moves videos from a source folder to performer-based subfolders automatically.
+// Uses the priority rule: Performer > Tag > Studio > _Unsorted.
+// Processes up to 200 videos per call — for a 16k catch-all, the AI calls this ~80 times.
+
+func (s *AICompanionService) registerBatchMoveByPatternTool() {
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "batch_move_by_pattern",
+			Description: `Move videos from a source folder into performer-based subfolders automatically. For each video, looks up its performers in the database and places it into 'Performers/<Name>/'. Videos with no performers go to '_Unsorted/'. Processes up to 200 per call. Use dry_run=true first to preview the plan.`,
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"library_name": map[string]interface{}{
+						"type": "string", "description": "Library name or partial name",
+					},
+					"source_subfolder": map[string]interface{}{
+						"type": "string", "description": "Relative path of the folder to restructure (e.g. 'Z/Downloads/Torrents')",
+					},
+					"target_base": map[string]interface{}{
+						"type":        "string",
+						"description": "Base folder for organized output (default: 'Performers'). Videos go to <target_base>/<PerformerName>/",
+					},
+					"fallback_folder": map[string]interface{}{
+						"type":        "string",
+						"description": "Folder for videos with no performers (default: '_Unsorted')",
+					},
+					"max_videos": map[string]interface{}{
+						"type":        "number",
+						"description": "Max videos to process per call (default: 200, max: 500)",
+					},
+					"dry_run": map[string]interface{}{
+						"type": "boolean", "description": "Simulate only (default: true)",
+					},
+				},
+				"required": []string{"library_name", "source_subfolder"},
+			},
+		},
+	}, s.toolBatchMoveByPattern)
+}
+
+func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{}) (interface{}, error) {
+	libName, _ := args["library_name"].(string)
+	srcRel, _ := args["source_subfolder"].(string)
+	targetBase, _ := args["target_base"].(string)
+	fallbackFolder, _ := args["fallback_folder"].(string)
+	maxVids := intArg(args, "max_videos", 200)
+	if maxVids > 500 { maxVids = 500 }
+	dryRun := true
+	if v, ok := args["dry_run"].(bool); ok { dryRun = v }
+	if v, ok := args["dry_run"].(string); ok && v == "false" { dryRun = false }
+	if targetBase == "" { targetBase = "Performers" }
+	if fallbackFolder == "" { fallbackFolder = "_Unsorted" }
+
+	var libID int64
+	var libPath string
+	err := s.db.QueryRow("SELECT id, path FROM libraries WHERE name LIKE ?", "%"+libName+"%").Scan(&libID, &libPath)
+	if err != nil {
+		return map[string]interface{}{"error": "library not found: " + libName}, nil
+	}
+
+	// Find videos in source folder with their performers in one query
+	rows, err := s.db.Query(`
+		SELECT v.id, v.title, v.file_path,
+		       COALESCE(GROUP_CONCAT(DISTINCT p.name), '') as performers
+		FROM videos v
+		LEFT JOIN video_performers vp ON v.id = vp.video_id
+		LEFT JOIN performers p ON vp.performer_id = p.id
+		WHERE v.library_id = ? AND v.file_path LIKE ?
+		GROUP BY v.id
+		ORDER BY v.title
+		LIMIT ?`, libID, "%"+string(filepath.Separator)+srcRel+"%", maxVids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type batchVideo struct {
+		id         int64
+		title      string
+		filePath   string
+		performers string
+	}
+	var vids []batchVideo
+	for rows.Next() {
+		var v batchVideo
+		if rows.Scan(&v.id, &v.title, &v.filePath, &v.performers) == nil {
+			vids = append(vids, v)
+		}
+	}
+
+	// Count total in source
+	var totalCount int
+	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
+		libID, "%"+string(filepath.Separator)+srcRel+"%").Scan(&totalCount)
+
+	// Build placement plan
+	type placement struct {
+		videoID   int64
+		title     string
+		srcPath   string
+		tgtPath   string
+		performer string
+		status    string
+		error     string
+	}
+	var placements []placement
+	performerCounts := map[string]int{}
+
+	for _, v := range vids {
+		srcFullPath := v.filePath
+		if !filepath.IsAbs(v.filePath) {
+			srcFullPath = filepath.Join(libPath, v.filePath)
+		}
+		filename := filepath.Base(srcFullPath)
+
+		var tgtSub string
+		var performer string
+		if v.performers != "" {
+			// Use first performer for folder placement
+			parts := strings.Split(v.performers, ",")
+			performer = strings.TrimSpace(parts[0])
+			tgtSub = filepath.Join(targetBase, performer)
+			performerCounts[performer]++
+		} else {
+			tgtSub = fallbackFolder
+			performerCounts[fallbackFolder]++
+		}
+		tgtFullPath := filepath.Join(libPath, filepath.FromSlash(tgtSub), filename)
+
+		placements = append(placements, placement{
+			videoID: v.id, title: v.title, srcPath: srcFullPath,
+			tgtPath: tgtFullPath, performer: performer,
+		})
+	}
+
+	if dryRun {
+		// Show top performers and what would happen
+		type perfCount struct { name string; count int }
+		var sorted []perfCount
+		for name, count := range performerCounts {
+			sorted = append(sorted, perfCount{name, count})
+		}
+		// Simple sort by count desc
+		for i := 0; i < len(sorted); i++ {
+			for j := i + 1; j < len(sorted); j++ {
+				if sorted[j].count > sorted[i].count {
+					sorted[i], sorted[j] = sorted[j], sorted[i]
+				}
+			}
+		}
+		if len(sorted) > 20 { sorted = sorted[:20] }
+
+		return map[string]interface{}{
+			"dry_run":           true,
+			"library":           libName,
+			"source":            srcRel,
+			"target_base":       targetBase,
+			"total_in_source":   totalCount,
+			"processed_this":    len(vids),
+			"would_move":        len(placements),
+			"unique_performers": len(performerCounts),
+			"top_destinations":  sorted,
+			"sample_placements": placements,
+		}, nil
+	}
+
+	// Execute moves
+	success, fail, skip := 0, 0, 0
+	for i := range placements {
+		p := &placements[i]
+
+		if _, statErr := os.Stat(p.srcPath); os.IsNotExist(statErr) {
+			p.status = "skipped"
+			p.error = "source missing"
+			skip++
+			continue
+		}
+		if _, statErr := os.Stat(p.tgtPath); statErr == nil {
+			p.status = "skipped"
+			p.error = "destination exists"
+			skip++
+			continue
+		}
+		os.MkdirAll(filepath.Dir(p.tgtPath), 0755)
+
+		if err := os.Rename(p.srcPath, p.tgtPath); err != nil {
+			// Fallback: copy + delete
+			data, re := os.ReadFile(p.srcPath)
+			if re != nil {
+				p.status = "failed"; p.error = re.Error(); fail++; continue
+			}
+			if we := os.WriteFile(p.tgtPath, data, 0644); we != nil {
+				p.status = "failed"; p.error = we.Error(); fail++; continue
+			}
+			os.Remove(p.srcPath)
+		}
+
+		// Update DB
+		s.db.Exec("UPDATE videos SET file_path = ?, updated_at = ? WHERE id = ?",
+			p.tgtPath, time.Now(), p.videoID)
+
+		// Learn placement
+		if p.performer != "" {
+			memKey := "placement_" + strings.ToLower(strings.ReplaceAll(p.performer, " ", "_"))
+			_ = s.SaveMemory(&models.Memory{
+				Key: memKey, Value: fmt.Sprintf("Performer '%s' → %s/%s", p.performer, targetBase, p.performer),
+				Category: "insight", Importance: 8,
+			})
+		}
+
+		p.status = "success"
+		success++
+	}
+
+	return map[string]interface{}{
+		"dry_run":           false,
+		"library":           libName,
+		"source":            srcRel,
+		"target_base":       targetBase,
+		"total_in_source":   totalCount,
+		"processed_this":    len(vids),
+		"success":           success,
+		"failed":            fail,
+		"skipped":           skip,
+		"remaining":         totalCount - len(vids),
+		"performers_used":   len(performerCounts),
+		"summary":           performerCounts,
 	}, nil
 }
