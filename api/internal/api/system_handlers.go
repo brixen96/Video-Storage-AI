@@ -555,7 +555,7 @@ func openLoginHelper(c *gin.Context) {
 	var loginURL string
 	switch request.Site {
 	case "simpcity":
-		loginURL = "https://simpcity.is/login/"
+		loginURL = "https://simpcity.cr/login/"
 	default:
 		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
 			"Unknown site",
@@ -593,7 +593,7 @@ func openLoginHelper(c *gin.Context) {
 		"instructions": []string{
 			"1. Log in to your account in the Firefox window that opened",
 			"2. After logging in, press F12 to open Developer Tools",
-			"3. Go to Storage tab → Cookies → simpcity.is",
+			"3. Go to Storage tab → Cookies → simpcity.cr",
 			"4. Copy all cookie values",
 			"5. Paste them back in the app",
 		},

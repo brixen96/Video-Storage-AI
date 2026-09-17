@@ -407,7 +407,7 @@ const formatTime = (date) => {
 
 // ---- Website Connectivity ----
 const SCRAPER_SITES = [
-	{ name: 'Simpcity', url: 'https://simpcity.is' },
+	{ name: 'Simpcity', url: 'https://simpcity.cr' },
 	{ name: 'PornHub', url: 'https://www.pornhub.com' },
 	{ name: 'LuxureTV', url: 'https://www.luxuretv.com' },
 	{ name: 'Sexuria', url: 'https://sexuria.com' },

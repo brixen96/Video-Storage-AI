@@ -1,12 +1,12 @@
 # Web Scraper Setup Guide
 
-## Authentication Setup for simpcity.is
+## Authentication Setup for simpcity.cr
 
-Since simpcity.is requires login to access forum threads, you need to provide your session cookie to the scraper.
+Since simpcity.cr requires login to access forum threads, you need to provide your session cookie to the scraper.
 
 ### How to Get Your Session Cookie
 
-1. **Login to simpcity.is** in your browser (Chrome/Edge recommended)
+1. **Login to simpcity.cr** in your browser (Chrome/Edge recommended)
 
 2. **Open Developer Tools**:
    - Press `F12` or right-click → "Inspect"
@@ -14,18 +14,18 @@ Since simpcity.is requires login to access forum threads, you need to provide yo
 
 3. **Find the Session Cookie**:
    - In the left sidebar, expand "Cookies"
-   - Click on `https://simpcity.is`
+   - Click on `https://simpcity.cr`
    - Look for cookies named like `xf_session`, `xf_user`, or similar
    - Copy the entire cookie string including name and value
 
-4. **Alternative - Copy All Cookies** (Recommended for simpcity.is):
+4. **Alternative - Copy All Cookies** (Recommended for simpcity.cr):
    - Go to "Network" tab in Dev Tools
    - Refresh the page
-   - Click on any request to simpcity.is
+   - Click on any request to simpcity.cr
    - In the "Headers" section, find "Cookie:" under "Request Headers"
    - Copy the entire cookie string (looks like: `cookie1=value1; cookie2=value2; ...`)
 
-**Important for simpcity.is**: The cookies use `ogaddgmetaprof_` prefix, not `xf_`. You need these cookies:
+**Important for simpcity.cr**: The cookies use `ogaddgmetaprof_` prefix, not `xf_`. You need these cookies:
 - `ogaddgmetaprof_csrf`
 - `ogaddgmetaprof_session`
 - `ogaddgmetaprof_user`
@@ -51,7 +51,7 @@ curl -X POST http://localhost:8080/api/v1/scraper/session \
   -d '{"cookie":"your_cookie_string_here"}'
 ```
 
-**Example Cookie String (simpcity.is):**
+**Example Cookie String (simpcity.cr):**
 ```
 ogaddgmetaprof_csrf=YwWS-c1Le7F024lc; ogaddgmetaprof_session=NQDij4aJxP8-YUBuY0-vNBD1HKQ_peuB; ogaddgmetaprof_user=22148309%2CpJqMDnLPhG7QGA68Laizns9IWnGbGI5oef-9VhJB; cucksed=b3; cucksid=583ae1f4649e30d9968f89a97840ac73e0ad10b22d40590a45478e97964a2165
 ```
@@ -82,7 +82,7 @@ Response:
 
 1. Navigate to the **Scraper** page
 2. Click "**New Scrape Job**"
-3. Paste the thread URL (e.g., `https://simpcity.is/threads/performer-name.123456/`)
+3. Paste the thread URL (e.g., `https://simpcity.cr/threads/performer-name.123456/`)
 4. Click "**Start Scraping**"
 5. Monitor progress in the **Tasks** page
 
@@ -109,7 +109,7 @@ Your session cookie is not set or has expired. Follow the steps above to set a n
 
 ### Error: "unexpected status code: 403"
 
-Your session cookie has expired. Login to simpcity.is again and get a new cookie.
+Your session cookie has expired. Login to simpcity.cr again and get a new cookie.
 
 ### Downloads Links Not Found
 
@@ -120,7 +120,7 @@ The scraper uses regex patterns to detect links. If links aren't being found:
 
 ### Thread Not Scraping
 
-- Ensure the URL is valid and starts with `https://simpcity.is/threads/`
+- Ensure the URL is valid and starts with `https://simpcity.cr/threads/`
 - Check the Tasks page for error messages
 - Verify your session cookie is still valid
 

@@ -66,7 +66,7 @@ func (s *ScraperService) VerifySessionCookie() (bool, string, error) {
 	}
 
 	// Try to access the account page which requires authentication
-	req, err := http.NewRequest("GET", "https://simpcity.is/account/", nil)
+	req, err := http.NewRequest("GET", "https://simpcity.cr/account/", nil)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to create request: %w", err)
 	}

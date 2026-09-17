@@ -53,7 +53,7 @@ func NewScraperService(activitySvc *ActivityService, aiCompanionSvc *AICompanion
 	return svc
 }
 
-// ScrapeThread scrapes a single thread from simpcity.is
+// ScrapeThread scrapes a single thread from simpcity.cr
 func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, error) {
 	// Clean the URL: remove common suffixes like /unread, /latest
 	cleanURL := strings.TrimSuffix(threadURL, "/")

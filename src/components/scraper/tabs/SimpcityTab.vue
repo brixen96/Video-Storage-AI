@@ -353,7 +353,7 @@
 								:style="{ background: siteStatus === 'online' ? '#28a745' : siteStatus === 'offline' ? '#dc3545' : siteStatus === 'checking' ? '#ffc107' : '#6c757d' }"
 							></span>
 							<span class="small">
-								<strong>simpcity.su</strong>
+								<strong>simpcity.cr</strong>
 								<span v-if="siteStatus === 'online'" class="text-success ms-1">Online</span>
 								<span v-else-if="siteStatus === 'offline'" class="text-danger ms-1">Offline</span>
 								<span v-else-if="siteStatus === 'checking'" class="text-warning ms-1">Checking...</span>
@@ -496,7 +496,7 @@
 					<div class="mb-3">
 						<label class="form-label">Session Cookie</label>
 						<textarea v-model="authCookie" class="form-control" rows="4" placeholder="Paste cookie table from DevTools (Ctrl+A in cookie list) or cookie header string..."></textarea>
-						<small class="form-text text-muted"> Paste the cookie table directly from DevTools (F12 → Application → Cookies → simpcity.is → Ctrl+A → Ctrl+C) </small>
+						<small class="form-text text-muted"> Paste the cookie table directly from DevTools (F12 → Application → Cookies → simpcity.cr → Ctrl+A → Ctrl+C) </small>
 					</div>
 					<div class="alert alert-info small">
 						<font-awesome-icon :icon="['fas', 'lightbulb']" class="me-2" />
@@ -535,7 +535,7 @@
 				<div class="modal-body">
 					<div class="mb-3">
 						<label class="form-label">Thread URL</label>
-						<input v-model="scrapeURL" type="text" class="form-control" placeholder="https://simpcity.is/threads/thread-name.123456/" />
+						<input v-model="scrapeURL" type="text" class="form-control" placeholder="https://simpcity.cr/threads/thread-name.123456/" />
 						<small class="form-text text-muted">Enter the full URL of the thread you want to scrape</small>
 					</div>
 					<div class="alert alert-info">
@@ -662,7 +662,7 @@
 					</div>
 					<div class="mb-3">
 						<label class="form-label">Forum Category URL</label>
-						<input v-model="forumURL" type="text" class="form-control" placeholder="https://simpcity.is/forums/xxx-porn.50/" />
+						<input v-model="forumURL" type="text" class="form-control" placeholder="https://simpcity.cr/forums/xxx-porn.50/" />
 						<small class="form-text text-muted"> Or enter a custom forum category URL </small>
 					</div>
 					<div class="alert alert-warning">
@@ -745,20 +745,20 @@ const showForumScrapeModal = ref(false)
 const showDeleteConfirmModal = ref(false)
 const showDeleteAllConfirmModal = ref(false)
 const scrapeURL = ref('')
-const forumURL = ref('https://simpcity.is/forums/xxx-porn.50/')
+const forumURL = ref('https://simpcity.cr/forums/xxx-porn.50/')
 const simpcityForums = ref([
-	{ name: 'XXX Porn', url: 'https://simpcity.is/forums/xxx-porn.50/' },
-	{ name: 'OnlyFans', url: 'https://simpcity.is/forums/onlyfans.8/' },
-	{ name: 'Hotwives / QoS', url: 'https://simpcity.is/forums/hotwives-qos.96/' },
-	{ name: 'Fansly', url: 'https://simpcity.is/forums/fansly.58/' },
-	{ name: 'Patreon', url: 'https://simpcity.is/forums/patreon.9/' },
-	{ name: 'MYM Fans', url: 'https://simpcity.is/forums/mym-fans.56/' },
-	{ name: 'Snapchat', url: 'https://simpcity.is/forums/snapchat.12/' },
-	{ name: 'Cosplayers', url: 'https://simpcity.is/forums/cosplayers.45/' },
-	{ name: 'TikTok', url: 'https://simpcity.is/forums/tiktok.14/' },
-	{ name: 'Twitch', url: 'https://simpcity.is/forums/twitch.18/' },
-	{ name: 'Instagram', url: 'https://simpcity.is/forums/instagram.19/' },
-	{ name: 'YouTube', url: 'https://simpcity.is/forums/youtube.20/' },
+	{ name: 'XXX Porn', url: 'https://simpcity.cr/forums/xxx-porn.50/' },
+	{ name: 'OnlyFans', url: 'https://simpcity.cr/forums/onlyfans.8/' },
+	{ name: 'Hotwives / QoS', url: 'https://simpcity.cr/forums/hotwives-qos.96/' },
+	{ name: 'Fansly', url: 'https://simpcity.cr/forums/fansly.58/' },
+	{ name: 'Patreon', url: 'https://simpcity.cr/forums/patreon.9/' },
+	{ name: 'MYM Fans', url: 'https://simpcity.cr/forums/mym-fans.56/' },
+	{ name: 'Snapchat', url: 'https://simpcity.cr/forums/snapchat.12/' },
+	{ name: 'Cosplayers', url: 'https://simpcity.cr/forums/cosplayers.45/' },
+	{ name: 'TikTok', url: 'https://simpcity.cr/forums/tiktok.14/' },
+	{ name: 'Twitch', url: 'https://simpcity.cr/forums/twitch.18/' },
+	{ name: 'Instagram', url: 'https://simpcity.cr/forums/instagram.19/' },
+	{ name: 'YouTube', url: 'https://simpcity.cr/forums/youtube.20/' },
 ])
 const authCookie = ref('')
 const sessionCookieSet = ref(false)
@@ -886,7 +886,7 @@ const openLoginHelper = async () => {
 		const data = await scrapersAPI.openLoginHelper('simpcity')
 		if (data.success) {
 			toast.success('Login page opened in Firefox')
-			loginHelperInstructions.value = ['Log in to your Simpcity account', 'Press F12 to open Developer Tools', 'Go to Application tab → Cookies → simpcity.is', 'Select all cookies (Ctrl+A) and copy their values', 'Paste them in the text area below']
+			loginHelperInstructions.value = ['Log in to your Simpcity account', 'Press F12 to open Developer Tools', 'Go to Application tab → Cookies → simpcity.cr', 'Select all cookies (Ctrl+A) and copy their values', 'Paste them in the text area below']
 		} else {
 			toast.error(data.message || 'Failed to open browser')
 		}
@@ -902,7 +902,7 @@ const openLoginHelper = async () => {
 const checkSiteHealth = async () => {
 	siteStatus.value = 'checking'
 	try {
-		const data = await siteHealthAPI.check('https://simpcity.su')
+		const data = await siteHealthAPI.check('https://simpcity.cr')
 		if (data.data?.online) {
 			siteStatus.value = 'online'
 			siteLatency.value = data.data.latency_ms
