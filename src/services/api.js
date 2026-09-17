@@ -248,14 +248,14 @@ export const aiAPI = {
 	// Companion status
 	getStatus: () => api.get('/ai/status'),
 
-	// LM Studio config
+	// AI config (OpenRouter)
 	getConfig: () => api.get('/ai/config'),
 	updateConfig: (data) => api.put('/ai/config', data),
 	testConnection: () => api.post('/ai/test-connection'),
 }
 
-// LM Studio AI Companion API
-const lmStudioAPI = axios.create({
+// OpenRouter AI Companion API
+const openRouterAPI = axios.create({
 	baseURL: 'http://localhost:1234/v1',
 	headers: {
 		'Content-Type': 'application/json',
@@ -283,10 +283,10 @@ export const aiCompanionAPI = {
 				requestBody.tool_choice = options.tool_choice
 			}
 
-			const response = await lmStudioAPI.post('/chat/completions', requestBody)
+			const response = await openRouterAPI.post('/chat/completions', requestBody)
 			return response.data
 		} catch (error) {
-			console.error('LM Studio API Error:', error)
+			console.error('OpenRouter API Error:', error)
 			throw error
 		}
 	},

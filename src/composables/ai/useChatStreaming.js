@@ -36,7 +36,7 @@ export function useChatStreaming() {
 	 * @param {object} hooks - { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn }
 	 */
 	const streamMessage = (fullMessage, historyPayload, hooks = {}) => {
-		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn } = hooks
+		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage } = hooks
 
 		isStreaming.value = true
 		activeToolCall.value = ''
@@ -96,6 +96,15 @@ export function useChatStreaming() {
 								activeToolCall.value = tool
 								streamToolSteps.value.push(tool)
 								onToolCall?.(tool)
+							} catch { /* ignore */ }
+							currentEventType = ''
+							continue
+						}
+
+						if (currentEventType === 'token_usage') {
+							try {
+								const usage = JSON.parse(data)
+								onTokenUsage?.(usage)
 							} catch { /* ignore */ }
 							currentEventType = ''
 							continue

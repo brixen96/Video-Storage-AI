@@ -916,6 +916,47 @@ func runMigrations() error {
 	DB.Exec(`ALTER TABLE videos ADD COLUMN last_watched_at DATETIME`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_videos_watched ON videos(watched)`)
 
+	// Migration 56: FTS5 full-text search for memories
+	var hasFTS int
+	DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='memories_fts'`).Scan(&hasFTS)
+	if hasFTS == 0 {
+		log.Println("Migration 56: Creating FTS5 full-text search index for memories...")
+		for _, step := range []string{
+			`CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(key, value, category, content='memories', content_rowid='id')`,
+			`INSERT INTO memories_fts(rowid, key, value, category) SELECT id, key, value, category FROM memories`,
+			`CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+				INSERT INTO memories_fts(rowid, key, value, category) VALUES (new.id, new.key, new.value, new.category);
+			END`,
+			`CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+				INSERT INTO memories_fts(memories_fts, rowid, key, value, category) VALUES ('delete', old.id, old.key, old.value, old.category);
+			END`,
+			`CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+				INSERT INTO memories_fts(memories_fts, rowid, key, value, category) VALUES ('delete', old.id, old.key, old.value, old.category);
+				INSERT INTO memories_fts(rowid, key, value, category) VALUES (new.id, new.key, new.value, new.category);
+			END`,
+		} {
+			if _, err := DB.Exec(step); err != nil {
+				log.Printf("Migration 56 (FTS5 memories): %v", err)
+			}
+		}
+	}
+
+	// Migration 57: Companion improvement plans
+	DB.Exec(`CREATE TABLE IF NOT EXISTS companion_plans (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		library_id INTEGER NOT NULL,
+		plan_name TEXT NOT NULL,
+		plan_data TEXT NOT NULL DEFAULT '{}',
+		status TEXT NOT NULL DEFAULT 'draft',
+		total_actions INTEGER DEFAULT 0,
+		completed_actions INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		executed_at DATETIME,
+		FOREIGN KEY (library_id) REFERENCES libraries(id) ON DELETE CASCADE
+	)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_plans_status ON companion_plans(status)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_plans_library ON companion_plans(library_id)`)
+
 	return nil
 }
 

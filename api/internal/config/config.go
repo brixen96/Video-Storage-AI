@@ -167,7 +167,7 @@ func Load() (*Config, error) {
 			Host:         getEnv("SERVER_HOST", "localhost"),
 			Mode:         getEnv("SERVER_MODE", "release"),
 			ReadTimeout:  getEnvAsInt("SERVER_READ_TIMEOUT", 15),
-			WriteTimeout: getEnvAsInt("SERVER_WRITE_TIMEOUT", 15),
+			WriteTimeout: getEnvAsInt("SERVER_WRITE_TIMEOUT", 600), // 10 minutes — SSE streams need generous write timeout
 		},
 		Database: DatabaseConfig{
 			Path:        getEnv("DATABASE_PATH", filepath.Join(dataDir, "videos.db")),

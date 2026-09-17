@@ -242,9 +242,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.GET("/memories/search", searchAIMemories)     // Search memories
 			ai.PUT("/memories/:id", updateAIMemory)          // Update memory
 			ai.DELETE("/memories/:id", deleteAIMemory)       // Delete memory
-			ai.GET("/config", getAIConfig)                   // Get AI/LM Studio config
-			ai.PUT("/config", updateAIConfig)                // Update AI/LM Studio config
-			ai.POST("/test-connection", testAIConnection)    // Test LM Studio connection
+			ai.GET("/config", getAIConfig)                   // Get AI config
+			ai.PUT("/config", updateAIConfig)                // Update AI config
+			ai.POST("/test-connection", testAIConnection)    // Test OpenRouter connection
 		}
 
 		// Scraper endpoints

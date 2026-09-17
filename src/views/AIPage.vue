@@ -31,12 +31,12 @@
 			<div v-if="activeTab === 'companion'" class="companion-tab">
 				<!-- Status & Config Row -->
 				<div class="row g-4 mb-4">
-					<!-- LM Studio Connection Status -->
+					<!-- AI Connection Status -->
 					<div class="col-md-4">
 						<div class="status-card">
 							<div class="status-card-header">
 								<font-awesome-icon :icon="['fas', 'server']" class="me-2" />
-								LM Studio Connection
+								OpenRouter Connection
 							</div>
 							<div class="status-card-body">
 								<div class="status-indicator" :class="companionOnline ? 'online' : 'offline'">
@@ -46,7 +46,7 @@
 								<div v-if="aiConfig" class="config-details mt-3">
 									<div class="config-item">
 										<span class="config-label">URL</span>
-										<span class="config-value">{{ aiConfig.lm_studio_url || 'Not configured' }}</span>
+										<span class="config-value">{{ aiConfig.api_url || 'Not configured' }}</span>
 									</div>
 									<div class="config-item">
 										<span class="config-label">Model</span>
@@ -416,7 +416,7 @@ const testConnection = async () => {
 		connectionTestResult.value = { success: true, message: res?.message || 'Connection successful!' }
 		companionOnline.value = true
 	} catch {
-		connectionTestResult.value = { success: false, message: 'Connection failed. Check LM Studio is running.' }
+						connectionTestResult.value = { success: false, message: 'Connection failed. Check your OpenRouter API key and network connection.' }
 		companionOnline.value = false
 	} finally {
 		testingConnection.value = false
@@ -460,7 +460,7 @@ const sendMessage = async () => {
 		const reply = res?.data?.response || res?.response || res?.data?.message || 'No response received.'
 		chatMessages.value.push({ role: 'assistant', content: reply, time: formatTime() })
 	} catch {
-		chatMessages.value.push({ role: 'assistant', content: 'Sorry, I encountered an error. Please check if LM Studio is running.', time: formatTime() })
+			chatMessages.value.push({ role: 'assistant', content: 'Sorry, I encountered an error. Please check your OpenRouter connection.', time: formatTime() })
 	} finally {
 		isSending.value = false
 		scrollToBottom()

@@ -90,17 +90,17 @@ func (s *AICompanionService) registerLibraryTools() {
 	s.registerTool(lmToolDefinition{
 		Type: "function", Function: lmToolFunction{
 			Name:        "scan_library_structure",
-			Description: "List the folder/directory structure of a library up to 3 levels deep. Use this to understand how a library is organized before suggesting placement.",
+			Description: "List the folder/directory structure of a library using database records. Use this to understand how a library is organized before suggesting placement. Use max_depth=1 for a quick overview.",
 			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
 				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name"},
-				"max_depth":    map[string]interface{}{"type": "number", "description": "How many levels deep to scan (default: 2, max: 4)"},
+				"max_depth":    map[string]interface{}{"type": "number", "description": "How many levels deep to scan (default: 1, max: 3)"},
 			}, "required": []string{"library_name"}},
 		},
 	}, func(args map[string]interface{}) (interface{}, error) {
 		libraryName, _ := args["library_name"].(string)
-		maxDepth := intArg(args, "max_depth", 2)
-		if maxDepth > 4 {
-			maxDepth = 4
+		maxDepth := intArg(args, "max_depth", 1)
+		if maxDepth > 3 {
+			maxDepth = 3
 		}
 		var libID int64
 		var libPath string
@@ -108,28 +108,48 @@ func (s *AICompanionService) registerLibraryTools() {
 		if err != nil {
 			return map[string]interface{}{"error": "library not found: " + libraryName}, nil
 		}
-		folders := []map[string]interface{}{}
-		_ = filepath.Walk(libPath, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil || !info.IsDir() || path == libPath {
-				return nil
+		libPathSlash := filepath.ToSlash(libPath)
+
+		// Build folder structure from database records — much faster than filesystem walk
+		folderCounts := map[string]int{}
+
+		rows, err := s.db.Query("SELECT file_path FROM videos WHERE library_id = ?", libID)
+		if err != nil {
+			return map[string]interface{}{"error": "query failed: " + err.Error()}, nil
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var fp string
+			if rows.Scan(&fp) != nil {
+				continue
 			}
-			relPath, _ := filepath.Rel(libPath, path)
-			parts := strings.Split(filepath.ToSlash(relPath), "/")
-			depth := len(parts)
-			if depth > maxDepth {
-				return filepath.SkipDir
+			rel := filepath.ToSlash(fp)
+			if strings.HasPrefix(rel, libPathSlash) {
+				rel = strings.TrimPrefix(rel, libPathSlash)
+				rel = strings.TrimPrefix(rel, "/")
 			}
-			var count int
-			s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
-				libID, "%"+string(filepath.Separator)+relPath+string(filepath.Separator)+"%").Scan(&count)
-			var direct int
-			s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
-				libID, "%"+string(filepath.Separator)+relPath+string(filepath.Separator)+"%.%").Scan(&direct)
+			parts := strings.Split(rel, "/")
+			// Count video at each folder level up to maxDepth
+			for d := 1; d <= maxDepth && d < len(parts); d++ {
+				folderKey := strings.Join(parts[:d], "/")
+				folderCounts[folderKey]++
+			}
+		}
+
+		folders := make([]map[string]interface{}, 0, len(folderCounts))
+		for path, count := range folderCounts {
 			folders = append(folders, map[string]interface{}{
-				"path": filepath.ToSlash(relPath), "depth": depth, "video_count": count + direct,
+				"path": path, "depth": len(strings.Split(path, "/")), "video_count": count,
 			})
-			return nil
+		}
+		// Sort by video count descending
+		sort.Slice(folders, func(i, j int) bool {
+			return folders[i]["video_count"].(int) > folders[j]["video_count"].(int)
 		})
+		if len(folders) > 100 {
+			folders = folders[:100]
+		}
 		return map[string]interface{}{
 			"library": libraryName, "root": libPath,
 			"folders": folders, "total_folders": len(folders),
@@ -165,48 +185,42 @@ func (s *AICompanionService) registerLibraryTools() {
 			studios    []string
 		}
 		var allVideos []videoMeta
-		rows, err := s.db.Query("SELECT id, file_path FROM videos WHERE library_id = ?", libID)
+
+		// Single query: join videos with performers, tags, and studios using GROUP_CONCAT
+		rows, err := s.db.Query(`
+			SELECT v.file_path,
+			       COALESCE(GROUP_CONCAT(DISTINCT p.name), '') as performers,
+			       COALESCE(GROUP_CONCAT(DISTINCT t.name), '') as tags,
+			       COALESCE(GROUP_CONCAT(DISTINCT st.name), '') as studios
+			FROM videos v
+			LEFT JOIN video_performers vp ON v.id = vp.video_id
+			LEFT JOIN performers p ON vp.performer_id = p.id
+			LEFT JOIN video_tags vt ON v.id = vt.video_id
+			LEFT JOIN tags t ON vt.tag_id = t.id
+			LEFT JOIN video_studios vs ON v.id = vs.video_id
+			LEFT JOIN studios st ON vs.studio_id = st.id
+			WHERE v.library_id = ?
+			GROUP BY v.id`, libID)
 		if err != nil {
 			return nil, err
 		}
-		type idPath struct {
-			id   int64
-			path string
-		}
-		var vidList []idPath
-		for rows.Next() {
-			var id int64
-			var fp string
-			if rows.Scan(&id, &fp) == nil {
-				vidList = append(vidList, idPath{id, fp})
-			}
-		}
-		rows.Close()
+		defer rows.Close()
 
-		for _, v := range vidList {
-			vm := videoMeta{fileDir: filepath.ToSlash(filepath.Dir(v.path))}
-			pr, _ := s.db.Query("SELECT p.name FROM performers p JOIN video_performers vp ON p.id = vp.performer_id WHERE vp.video_id = ?", v.id)
-			for pr.Next() {
-				var n string
-				pr.Scan(&n)
-				vm.performers = append(vm.performers, n)
+		for rows.Next() {
+			var fp, perfCSV, tagCSV, studioCSV string
+			if rows.Scan(&fp, &perfCSV, &tagCSV, &studioCSV) == nil {
+				vm := videoMeta{fileDir: filepath.ToSlash(filepath.Dir(fp))}
+				if perfCSV != "" {
+					vm.performers = strings.Split(perfCSV, ",")
+				}
+				if tagCSV != "" {
+					vm.tags = strings.Split(tagCSV, ",")
+				}
+				if studioCSV != "" {
+					vm.studios = strings.Split(studioCSV, ",")
+				}
+				allVideos = append(allVideos, vm)
 			}
-			pr.Close()
-			tr, _ := s.db.Query("SELECT t.name FROM tags t JOIN video_tags vt ON t.id = vt.tag_id WHERE vt.video_id = ?", v.id)
-			for tr.Next() {
-				var n string
-				tr.Scan(&n)
-				vm.tags = append(vm.tags, n)
-			}
-			tr.Close()
-			sr, _ := s.db.Query("SELECT st.name FROM studios st JOIN video_studios vs ON st.id = vs.studio_id WHERE vs.video_id = ?", v.id)
-			for sr.Next() {
-				var n string
-				sr.Scan(&n)
-				vm.studios = append(vm.studios, n)
-			}
-			sr.Close()
-			allVideos = append(allVideos, vm)
 		}
 
 		type folderStats struct {
@@ -328,6 +342,16 @@ func (s *AICompanionService) registerLibraryTools() {
 			"folders":          analyzed,
 		}, nil
 	})
+
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "review_library_structure",
+			Description: "Review a library's folder layout and recommend practical structure improvements based on detected patterns, folder depth, and dominant entities.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name to review"},
+				"max_depth":    map[string]interface{}{"type": "number", "description": "How many folder levels to analyze (default: 3)"},
+			}, "required": []string{"library_name"}},
+		}}, s.toolReviewLibraryStructure)
 
 	s.registerTool(lmToolDefinition{
 		Type: "function", Function: lmToolFunction{
@@ -591,4 +615,99 @@ func (s *AICompanionService) toolMoveVideoToLibrary(args map[string]interface{})
 		"from_library": srcLibName, "to_library": targetLibraryName,
 		"destination_path": tgtFullPath,
 	}, nil
+}
+
+func (s *AICompanionService) toolReviewLibraryStructure(args map[string]interface{}) (interface{}, error) {
+	libraryName, _ := args["library_name"].(string)
+	maxDepth := intArg(args, "max_depth", 3)
+	if maxDepth > 5 {
+		maxDepth = 5
+	}
+
+	var libID int64
+	var libPath, libNameFull string
+	err := s.db.QueryRow("SELECT id, name, path FROM libraries WHERE name LIKE ?", "%"+libraryName+"%").Scan(&libID, &libNameFull, &libPath)
+	if err != nil {
+		return map[string]interface{}{"error": "library not found: " + libraryName}, nil
+	}
+
+	folders := []map[string]interface{}{}
+	totalVideos := 0
+	_ = filepath.Walk(libPath, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || !info.IsDir() || path == libPath {
+			return nil
+		}
+		relPath, _ := filepath.Rel(libPath, path)
+		parts := strings.Split(filepath.ToSlash(relPath), "/")
+		depth := len(parts)
+		if depth > maxDepth {
+			return filepath.SkipDir
+		}
+		var count int
+		s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
+			libID, "%"+string(filepath.Separator)+relPath+string(filepath.Separator)+"%").Scan(&count)
+		folders = append(folders, map[string]interface{}{
+			"path": relPath,
+			"depth": depth,
+			"video_count": count,
+		})
+		totalVideos += count
+		return nil
+	})
+
+	// Build summary of root organization and suggestions.
+	rootCount := 0
+	for _, folder := range folders {
+		if folder["depth"].(int) == 1 {
+			rootCount++
+		}
+	}
+
+	summary := map[string]interface{}{
+		"library":      libNameFull,
+		"root":         libPath,
+		"total_folders": len(folders),
+		"root_folders":  rootCount,
+		"scanned_depth": maxDepth,
+		"total_videos":  totalVideos,
+	}
+
+	// Analyze organization pattern using the library analysis service.
+	analysisSvc := NewLibraryAnalysisService()
+	plan, err := analysisSvc.AnalyzeLibraryStructure(libID)
+	var analysis map[string]interface{}
+	if err == nil && plan != nil {
+		analysis = map[string]interface{}{
+			"library_id":    plan.LibraryID,
+			"library_name":  plan.LibraryName,
+			"library_root":  plan.LibraryRoot,
+			"total_videos":  plan.Stats.TotalVideos,
+			"content_type_changes": plan.ContentTypeChanges,
+			"tag_assignments":      plan.TagAssignments,
+			"performer_links":      plan.PerformerLinks,
+			"stats":               plan.Stats,
+		}
+		summary["analysis"] = analysis
+	}
+
+	// Recommendations based on structure and depth.
+	recommendations := []string{}
+	if rootCount > 8 {
+		recommendations = append(recommendations, "The library has many first-level folders. Consider grouping by performer, studio, or category to reduce root clutter.")
+	}
+	if totalVideos > 0 && len(folders) > 30 {
+		recommendations = append(recommendations, "There are many folders. Standardize on 2-3 folder levels and avoid deeply nested subfolders where possible.")
+	}
+	if analysis != nil {
+		if det, ok := analysis["detected_pattern"].(string); ok && det == "mixed" {
+			recommendations = append(recommendations, "The current structure appears mixed. Choose a dominant pattern such as performer-based or tag-based organization for easier navigation.")
+		}
+	}
+	if len(recommendations) == 0 {
+		recommendations = append(recommendations, "The library structure looks reasonably organized. Focus on consistent naming and complete metadata so video placement remains reliable.")
+	}
+
+	summary["recommendations"] = recommendations
+	summary["folders"] = folders
+	return summary, nil
 }

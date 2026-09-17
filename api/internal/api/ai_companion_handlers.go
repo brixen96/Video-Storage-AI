@@ -82,6 +82,10 @@ func aiCompanionChatStream(c *gin.Context) {
 		evt, _ := json.Marshal(map[string]string{"tool": toolName})
 		fmt.Fprintf(c.Writer, "event: tool_call\ndata: %s\n\n", string(evt))
 		flusher.Flush()
+	}, func(usage map[string]interface{}) {
+		evt, _ := json.Marshal(usage)
+		fmt.Fprintf(c.Writer, "event: token_usage\ndata: %s\n\n", string(evt))
+		flusher.Flush()
 	})
 
 	if err != nil {
@@ -170,7 +174,7 @@ func aiCompanionChat(c *gin.Context) {
 		return
 	}
 
-	// Try LLM (LM Studio) first, fall back to rule-based
+	// Try LLM (OpenRouter) first, fall back to rule-based
 	source := "llm"
 	response, err := aiCompanionService.ChatLLM(request.Message, request.History)
 	if err != nil {
@@ -393,7 +397,7 @@ func deleteAIMemory(c *gin.Context) {
 func getAIConfig(c *gin.Context) {
 	db := database.GetDB()
 	var config models.AIConfig
-	err := db.QueryRow(`SELECT id, COALESCE(api_url, lm_studio_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
+	err := db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
 		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
 	)
 	if err != nil {
@@ -465,7 +469,7 @@ func runVideoHealthCheck(c *gin.Context) {
 	respondSuccess(c, nil, "Health check started — watch the Activity page for progress")
 }
 
-// testAIConnection tests the LM Studio connection
+// testAIConnection tests the OpenRouter connection
 func testAIConnection(c *gin.Context) {
 	if aiCompanionService == nil {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg(
@@ -475,7 +479,7 @@ func testAIConnection(c *gin.Context) {
 		return
 	}
 
-	result := aiCompanionService.TestLMStudioConnection()
+	result := aiCompanionService.TestAIConnection()
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    result,

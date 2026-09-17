@@ -87,6 +87,11 @@
 							<font-awesome-icon :icon="['fas', 'sync-alt']" />
 						</button>
 					</template>
+					<!-- Token Usage Pill — shows after first LLM response -->
+					<button v-if="tokenUsage.total_tokens > 0" class="stat-pill stat-pill--tokens" :title="`${tokenUsage.prompt_tokens.toLocaleString()} prompt + ${tokenUsage.completion_tokens.toLocaleString()} completion` + (tokenUsage.reasoning_tokens > 0 ? ` (${tokenUsage.reasoning_tokens.toLocaleString()} reasoning)` : '')">
+						<font-awesome-icon :icon="['fas', 'microchip']" />
+						{{ formatTokenCount(tokenUsage.total_tokens) }} tokens
+					</button>
 					<button class="stat-strip-icon stat-strip-dismiss" @click="contextStatsDismissed = true" title="Dismiss">
 						<font-awesome-icon :icon="['fas', 'times']" />
 					</button>
@@ -551,19 +556,22 @@ const toast = proxy.$toast
 const {
 	chatHistory, showSearch, searchQuery, sentHistory, historyIndex, savedDraft,
 	pinnedMessages, filteredMessageCount, displayedMessages, chatStats,
-	resolveIndex, pushMessage, popMessages, removeMessage, replaceRange,
+	resolveIndex, pushMessage, popMessages, replaceRange,
 	clearSearch, loadHistory, clearHistory, pushPromptHistory,
 } = useChatHistory()
 
 const {
-	isStreaming, activeToolCall, streamToolSteps, deriveFollowUpActions,
+	isStreaming, activeToolCall, deriveFollowUpActions,
 	streamMessage, stopStreaming, toolLabel,
 } = useChatStreaming()
+
+// Token usage tracking — updated after each LLM response
+const tokenUsage = ref({ prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, total_tokens: 0 })
 
 const {
 	companionInput, textareaRef, slashActive, slashResults, slashIndex,
 	mentionActive, mentionResults, mentionIndex,
-	closeSlash, closeMention, handleInputKeydown: _rawHandleKeydown, autoResizeTextarea,
+	closeSlash, closeMention, handleInputKeydown: _rawHandleKeydown,
 	setupWatchers: setupInputWatchers, cleanupWatchers: cleanupInputWatchers,
 } = useChatInput({ sentHistory, historyIndex, savedDraft, pushPromptHistory })
 
@@ -579,7 +587,7 @@ const handleInputKeydown = (e) => {
 const {
 	isOpen, unreadCount, chatMessages, showStats, proactiveEnabled, companionConnected,
 	showMemoryPanel, memories, memoriesLoading, memoryCategory, memorySearch,
-	memoryCounts, filteredMemories, loadMemories, toggleMemoryPanel, deleteMemory, formatMemoryDate,
+	memoryCounts, filteredMemories, toggleMemoryPanel, deleteMemory, formatMemoryDate,
 	contextStats, contextStatsLoading, contextStatsDismissed, loadContextStats,
 	scrollToBottom, toggleProactive, toggleChat,
 	setupShortcuts, cleanupShortcuts,
@@ -712,6 +720,9 @@ const sendCompanionMessage = async () => {
 			if (followUps.length > 0) chatHistory.value[msgIndex].followUpActions = followUps
 			if (!isOpen.value) unreadCount.value++
 		},
+		onTokenUsage: (usage) => {
+			tokenUsage.value = { ...tokenUsage.value, ...usage }
+		},
 		onError: (error) => {
 			if (error.name === 'AbortError') {
 				const lastMsg = chatHistory.value[chatHistory.value.length - 1]
@@ -723,14 +734,27 @@ const sendCompanionMessage = async () => {
 			}
 			const lastMsg = chatHistory.value[chatHistory.value.length - 1]
 			if (lastMsg?.streaming) lastMsg.streaming = false
-			pushMessage({
-				role: 'assistant',
-				content: "I'm currently unavailable. Please check that the backend server is running and try again.",
-				timestamp: new Date(),
-			})
-			toast.error('AI Unavailable', 'Could not connect to AI Companion service. Please check the backend server.')
+			// If we have partial content, keep it — the AI started responding
+			if (lastMsg?.content && lastMsg.content.length > 0) {
+				lastMsg.content += '\n\n⚠️ *Stream interrupted*'
+				toast.warning('Stream Interrupted', 'The AI response was cut short. The partial answer is shown above.')
+			} else {
+				// No content at all — show error
+				pushMessage({
+					role: 'assistant',
+					content: "I couldn't complete that request. The model may be loading or the request timed out. Please try again.",
+					timestamp: new Date(),
+				})
+				toast.error('AI Error', 'The AI Companion could not respond. It may be processing a complex request — try again in a moment.')
+			}
 		},
 	})
+}
+
+const formatTokenCount = (n) => {
+	if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+	if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+	return String(n)
 }
 
 const askQuickQuestion = (question) => {
@@ -881,14 +905,14 @@ onMounted(async () => {
 	setupInputWatchers()
 
 	// Subscribe to proactive companion events via WebSocket
+	// ALL companion events are routed to the Notification Bell — never show in chat
 	unsubscribeCompanionEvent = websocketService.on('companion_event', (event) => {
-		if (!proactiveEnabled.value) return
-		pushMessage({
-			role: 'proactive', content: event.message, timestamp: new Date(),
-			severity: event.type || event.severity || 'info', source: event.source || 'system',
-		})
-		if (!isOpen.value) unreadCount.value++
-		nextTick(() => scrollToBottom())
+		// Companion events are system-level notifications. They go to the
+		// notification bell via the backend, not into the chat conversation.
+		// We only use the event to update the unread badge if the chat is closed.
+		if (!isOpen.value && event.severity !== 'info') {
+			unreadCount.value++
+		}
 	})
 
 	// Refresh context stats whenever an activity completes/fails

@@ -3,7 +3,7 @@
 import { databaseAPI, librariesAPI, performersAPI, videosAPI, tagsAPI, aiAPI } from './api'
 
 /**
- * Tool definitions for LM Studio function calling
+ * Tool definitions for OpenRouter function calling
  * These are the capabilities the AI has to interact with the database
  */
 export const toolDefinitions = [

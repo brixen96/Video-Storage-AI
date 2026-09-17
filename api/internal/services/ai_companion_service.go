@@ -2,7 +2,6 @@ package services
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -329,25 +328,25 @@ func (s *AICompanionService) GetAIConfig() models.AIConfig {
 	config := models.AIConfig{
 		ID:          1,
 		APIURL:      "https://openrouter.ai/api",
-		ModelName:   "mistralai/mistral-nemo",
+		ModelName:   "deepseek/deepseek-v4-flash",
 		Temperature: 0.7,
 		MaxTokens:   2000,
 		Enabled:     true,
 	}
-	s.db.QueryRow(`SELECT id, COALESCE(api_url, lm_studio_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
+	s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
 		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
 	)
-	if config.APIURL == "" || config.APIURL == "http://localhost:1234" {
+	if config.APIURL == "" {
 		config.APIURL = "https://openrouter.ai/api"
 	}
 	if config.ModelName == "" {
-		config.ModelName = "mistralai/mistral-nemo"
+		config.ModelName = "deepseek/deepseek-v4-flash"
 	}
 	return config
 }
 
-// TestLMStudioConnection tests connectivity to the configured AI provider
-func (s *AICompanionService) TestLMStudioConnection() map[string]interface{} {
+// TestAIConnection tests connectivity to the configured AI provider (OpenRouter)
+func (s *AICompanionService) TestAIConnection() map[string]interface{} {
 	config := s.GetAIConfig()
 	result := map[string]interface{}{
 		"connected": false,
@@ -402,7 +401,7 @@ func (s *AICompanionService) TestLMStudioConnection() map[string]interface{} {
 
 // ================== LLM Chat Integration ==================
 
-// lmToolDefinition represents a tool definition for the LM Studio API.
+// lmToolDefinition represents a tool definition for the LLM API.
 // Implementations live in ai_companion_tools_*.go; the registry is in ai_companion_tools.go.
 type lmToolDefinition struct {
 	Type     string         `json:"type"`
@@ -497,7 +496,7 @@ func topNFromMap(m map[string]int, n int) []string {
 	return out
 }
 
-// ChatLLM processes user messages using LM Studio with tool calling, falling back to rule-based
+// ChatLLM processes user messages using OpenRouter with tool calling, falling back to rule-based
 func (s *AICompanionService) ChatLLM(message string, history []map[string]string) (string, error) {
 	config := s.GetAIConfig()
 	if !config.Enabled {
@@ -517,7 +516,8 @@ You are helpful, concise, and knowledgeable about the user's video library, scra
 When the user asks about data (videos, performers, stats, etc.), use the appropriate tool to get real-time data rather than guessing.
 When the user asks about app status (running tasks, errors, scrapers, JDownloader), use the relevant status tools.
 You can save and recall memories to remember user preferences.
-You can help organize videos: use scan_library_structure to understand how Backup is organized, suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+You can help organize videos and libraries: use review_library_structure to inspect a library's folder layout, scan_library_structure to understand how Backup is organized, and analyze_library_structure to identify the dominant folder pattern. Use suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+Use OpenRouter reasoning and thinking tokens to plan library structure improvements and folder placement decisions before you answer.
 You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
 You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
 You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
@@ -537,6 +537,39 @@ Always run dry_run=true first and report what would be applied, then run for rea
 
 ## Saving Memories
 When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving
+
+## Library Improvement Planning (Dual-Mode)
+You have a powerful planning system for library organization. You operate in two modes:
+
+### 📋 PLANNING MODE (read-only, reasoning-heavy)
+When the user asks to "analyze", "review", "improve", "optimize", or "fix" their library structure:
+1. Call plan_structure_improvements with the library name and focus area
+2. This reads the entire library structure, finds issues, and builds a concrete improvement plan
+3. Review the plan with get_plan and present a summary to the user
+4. Use OpenRouter reasoning to think through the best improvements before presenting
+5. NO files are moved or changed in this mode — it's purely analytical
+
+### 🚀 EXECUTION MODE (writes, safety-checked)
+When the user approves a plan or asks to "execute", "apply", or "run" improvements:
+1. Call execute_plan with the plan ID and dry_run: false
+2. Each action is safety-checked before execution
+3. Report progress back to the user after each batch
+4. All changes are logged and reversible
+
+### Tool Usage Pattern
+- plan_structure_improvements(library_name, focus) → builds improvement plan (READ-ONLY)
+- list_plans(status) → shows all saved plans
+- get_plan(plan_id) → reviews full plan details
+- execute_plan(plan_id, dry_run) → runs or simulates the plan
+- delete_plan(plan_id) → removes a draft plan
+
+ALWAYS use planning mode first. Present the plan to the user for approval before executing. When in doubt, use dry_run=true to simulate first.
+
+## Efficiency Rules
+- NEVER call scan_library_structure for each library individually. Use get_all_libraries first to list them, then plan_structure_improvements on each one.
+- When analyzing multiple libraries, call plan_structure_improvements with focus="structure" — it is faster than scan_library_structure.
+- Keep tool calls minimal. If get_all_libraries gives you enough info, don't scan deeper.
+- If the user asks for a quick overview, call get_all_libraries first. Only go deeper if they ask.
 
 ` + appContext
 
@@ -560,13 +593,20 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 	// Tool calling loop (max 5 iterations)
 	for iteration := 0; iteration < 5; iteration++ {
 		reqBody := map[string]interface{}{
-			"model":       config.ModelName,
-			"messages":    messages,
-			"tools":       tools,
-			"tool_choice": "auto",
-			"temperature": config.Temperature,
-			"max_tokens":  config.MaxTokens,
-			"stream":      false,
+			"model":              config.ModelName,
+			"messages":           messages,
+			"tools":              tools,
+			"tool_choice":        "auto",
+			"temperature":        config.Temperature,
+			"max_tokens":         config.MaxTokens,
+			"stream":             false,
+			"parallel_tool_calls": false,
+			"include_reasoning":  true,
+			"reasoning": map[string]interface{}{
+				"enabled": true,
+				"effort":  "high",
+			},
+			"reasoning_effort":   "high",
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -574,29 +614,14 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 			return "", fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		client := &http.Client{Timeout: 120 * time.Second}
-		req, err := http.NewRequest("POST", config.APIURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
+		respBody, statusCode, err := doLLMRequest(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
 		if err != nil {
-			return "", fmt.Errorf("failed to build request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if config.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+config.APIKey)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("[AI] AI provider connection failed after %v: %v", time.Since(startTime), err)
-			return "", fmt.Errorf("AI provider connection failed: %w", err)
-		}
-		defer resp.Body.Close()
-
-		respBody, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return "", fmt.Errorf("failed to read LM Studio response: %w", err)
+			log.Printf("[AI] AI provider request failed after retries: %v", err)
+			return "", fmt.Errorf("AI provider request failed: %w", err)
 		}
 
-		if resp.StatusCode != 200 {
-			return "", fmt.Errorf("LM Studio returned status %d: %s", resp.StatusCode, string(respBody))
+		if statusCode != http.StatusOK {
+			return "", fmt.Errorf("AI provider returned status %d: %s", statusCode, string(respBody))
 		}
 
 		var result struct {
@@ -618,11 +643,11 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 		}
 
 		if err := json.Unmarshal(respBody, &result); err != nil {
-			return "", fmt.Errorf("failed to parse LM Studio response: %w", err)
+			return "", fmt.Errorf("failed to parse AI response: %w", err)
 		}
 
 		if len(result.Choices) == 0 {
-			return "", fmt.Errorf("no choices in LM Studio response")
+			return "", fmt.Errorf("no choices in AI response")
 		}
 
 		choice := result.Choices[0]
@@ -708,13 +733,14 @@ func extractVideoCards(toolName string, result interface{}) []map[string]interfa
 	return list
 }
 
-// ChatLLMStream processes user messages using LM Studio with tool calling and streams the final
+// ChatLLMStream processes user messages using OpenRouter with tool calling and streams the final
 // text response chunk-by-chunk via onChunk. onCards is called once (if non-nil) when the
 // response involves video results — the frontend uses these to render inline video cards.
 // onToolCall is called (if non-nil) just before each tool is executed so the caller can emit
 // progress events to the client.
+// onTokenUsage is called (if non-nil) with accumulated token usage after each LLM call.
 // Returns false from onChunk to abort (client gone).
-func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{}), onToolCall func(name string)) error {
+func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{}), onToolCall func(name string), onTokenUsage func(map[string]interface{})) error {
 	config := s.GetAIConfig()
 	if !config.Enabled {
 		return fmt.Errorf("LLM disabled in config")
@@ -728,7 +754,8 @@ You are helpful, concise, and knowledgeable about the user's video library, scra
 When the user asks about data (videos, performers, stats, etc.), use the appropriate tool to get real-time data rather than guessing.
 When the user asks about app status (running tasks, errors, scrapers, JDownloader), use the relevant status tools.
 You can save and recall memories to remember user preferences.
-You can help organize videos: use scan_library_structure to understand how Backup is organized, suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+You can help organize videos and libraries: use review_library_structure to inspect a library's folder layout, scan_library_structure to understand how Backup is organized, and analyze_library_structure to identify the dominant folder pattern. Use suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
+Use OpenRouter reasoning and thinking tokens to plan library structure improvements and folder placement decisions before you answer.
 You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
 You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
 You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
@@ -749,6 +776,39 @@ Always run dry_run=true first and report what would be applied, then run for rea
 ## Saving Memories
 When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.
 
+## Library Improvement Planning (Dual-Mode)
+You have a powerful planning system for library organization. You operate in two modes:
+
+### 📋 PLANNING MODE (read-only, reasoning-heavy)
+When the user asks to "analyze", "review", "improve", "optimize", or "fix" their library structure:
+1. Call plan_structure_improvements with the library name and focus area
+2. This reads the entire library structure, finds issues, and builds a concrete improvement plan
+3. Review the plan with get_plan and present a summary to the user
+4. Use OpenRouter reasoning to think through the best improvements before presenting
+5. NO files are moved or changed in this mode — it's purely analytical
+
+### 🚀 EXECUTION MODE (writes, safety-checked)
+When the user approves a plan or asks to "execute", "apply", or "run" improvements:
+1. Call execute_plan with the plan ID and dry_run: false
+2. Each action is safety-checked before execution
+3. Report progress back to the user after each batch
+4. All changes are logged and reversible
+
+### Tool Usage Pattern
+- plan_structure_improvements(library_name, focus) → builds improvement plan (READ-ONLY)
+- list_plans(status) → shows all saved plans
+- get_plan(plan_id) → reviews full plan details
+- execute_plan(plan_id, dry_run) → runs or simulates the plan
+- delete_plan(plan_id) → removes a draft plan
+
+ALWAYS use planning mode first. Present the plan to the user for approval before executing. When in doubt, use dry_run=true to simulate first.
+
+## Efficiency Rules
+- NEVER call scan_library_structure for each library individually. Use get_all_libraries first to list them, then plan_structure_improvements on each one.
+- When analyzing multiple libraries, call plan_structure_improvements with focus="structure" — it is faster than scan_library_structure.
+- Keep tool calls minimal. If get_all_libraries gives you enough info, don't scan deeper.
+- If the user asks for a quick overview, call get_all_libraries first. Only go deeper if they ask.
+
 ## Response Style
 - Be concise. Short bullet points over long paragraphs.
 - NEVER use markdown tables — the chat UI does not render them. Use bullet lists instead.
@@ -767,10 +827,14 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
 
 	tools := s.getLMToolDefinitions()
-	client := &http.Client{Timeout: 120 * time.Second}
 
 	// Accumulate video card data across all tool iterations
 	var collectedCards []map[string]interface{}
+
+	// Accumulate token usage across all LLM calls
+	totalPromptTokens := 0
+	totalCompletionTokens := 0
+	totalReasoningTokens := 0
 
 	type accToolCall struct {
 		id       string
@@ -780,13 +844,20 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 
 	for iteration := 0; iteration < 5; iteration++ {
 		reqBody := map[string]interface{}{
-			"model":       config.ModelName,
-			"messages":    messages,
-			"tools":       tools,
-			"tool_choice": "auto",
-			"temperature": config.Temperature,
-			"max_tokens":  config.MaxTokens,
-			"stream":      true,
+			"model":              config.ModelName,
+			"messages":           messages,
+			"tools":              tools,
+			"tool_choice":        "auto",
+			"temperature":        config.Temperature,
+			"max_tokens":         config.MaxTokens,
+			"stream":             true,
+			"parallel_tool_calls": false,
+			"include_reasoning":  true,
+			"reasoning": map[string]interface{}{
+				"enabled": true,
+				"effort":  "high",
+			},
+			"reasoning_effort":   "high",
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -794,24 +865,17 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		req, err := http.NewRequest("POST", config.APIURL+"/v1/chat/completions", bytes.NewReader(bodyBytes))
+		resp, err := openLLMStream(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
 		if err != nil {
-			return fmt.Errorf("failed to build request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if config.APIKey != "" {
-			req.Header.Set("Authorization", "Bearer "+config.APIKey)
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("AI provider connection failed: %w", err)
+			log.Printf("[AI] Stream open failed after retries: %v", err)
+			return fmt.Errorf("AI provider stream failed: %w", err)
 		}
 
 		var accContent strings.Builder
 		var accCalls []accToolCall
 		hasToolCalls := false
 
-		scanner := bufio.NewScanner(resp.Body)
+		scanner := bufio.NewScanner(resp)
 		scanner.Buffer(make([]byte, 512*1024), 512*1024) // 512KB per line — handles large tool result chunks
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -837,8 +901,30 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 						} `json:"tool_calls"`
 					} `json:"delta"`
 				} `json:"choices"`
+				Usage *struct {
+					PromptTokens     int `json:"prompt_tokens"`
+					CompletionTokens int `json:"completion_tokens"`
+					TotalTokens      int `json:"total_tokens"`
+					PromptTokensDetails *struct {
+						CachedTokens int `json:"cached_tokens"`
+					} `json:"prompt_tokens_details"`
+					CompletionTokensDetails *struct {
+						ReasoningTokens int `json:"reasoning_tokens"`
+					} `json:"completion_tokens_details"`
+				} `json:"usage,omitempty"`
 			}
-			if err := json.Unmarshal([]byte(data), &chunk); err != nil || len(chunk.Choices) == 0 {
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+			// Accumulate token usage (may arrive with or without choices)
+			if chunk.Usage != nil {
+				totalPromptTokens += chunk.Usage.PromptTokens
+				totalCompletionTokens += chunk.Usage.CompletionTokens
+				if chunk.Usage.CompletionTokensDetails != nil {
+					totalReasoningTokens += chunk.Usage.CompletionTokensDetails.ReasoningTokens
+				}
+			}
+			if len(chunk.Choices) == 0 {
 				continue
 			}
 
@@ -865,13 +951,23 @@ When the user says "remember", "note", "don't forget", or asks you to keep track
 				accContent.WriteString(delta.Content)
 				if !hasToolCalls {
 					if !onChunk(delta.Content) {
-						resp.Body.Close()
+						resp.Close()
 						return nil // client disconnected
 					}
 				}
 			}
 		}
-		resp.Body.Close()
+		resp.Close()
+
+		// Emit accumulated token usage after each LLM call
+		if onTokenUsage != nil && totalPromptTokens > 0 {
+			onTokenUsage(map[string]interface{}{
+				"prompt_tokens":     totalPromptTokens,
+				"completion_tokens": totalCompletionTokens,
+				"reasoning_tokens":  totalReasoningTokens,
+				"total_tokens":      totalPromptTokens + totalCompletionTokens,
+			})
+		}
 
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("stream read error: %w", err)
@@ -1062,8 +1158,50 @@ func (s *AICompanionService) GetMemories(category string, limit int) ([]models.M
 	return memories, nil
 }
 
-// SearchMemories searches memories by query string
+// SearchMemories searches memories using FTS5 full-text search with ranking.
+// Falls back to LIKE-based search if FTS is unavailable.
 func (s *AICompanionService) SearchMemories(query string) ([]models.Memory, error) {
+	// Build FTS5 match query — split on spaces for multi-word queries
+	ftsQuery := strings.TrimSpace(query)
+	if ftsQuery == "" {
+		return s.GetMemories("", 20)
+	}
+
+	// Try FTS5 search first with BM25 ranking
+	searchQuery := `SELECT m.id, m.key, m.value, m.category, m.importance, m.created_at, m.updated_at
+	                FROM memories m
+	                INNER JOIN memories_fts f ON m.id = f.rowid
+	                WHERE memories_fts MATCH ?
+	                ORDER BY rank, m.importance DESC, m.updated_at DESC
+	                LIMIT 20`
+
+	rows, err := s.db.Query(searchQuery, ftsQuery)
+	if err != nil {
+		// FTS unavailable or query syntax error — fall back to LIKE
+		log.Printf("[AI] FTS5 search failed, falling back to LIKE: %v", err)
+		return s.searchMemoriesLike(query)
+	}
+	defer rows.Close()
+
+	memories := []models.Memory{}
+	for rows.Next() {
+		var m models.Memory
+		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		memories = append(memories, m)
+	}
+
+	// If FTS returned nothing, try LIKE as a fallback (handles stop words, typos)
+	if len(memories) == 0 {
+		return s.searchMemoriesLike(query)
+	}
+
+	return memories, nil
+}
+
+// searchMemoriesLike is a LIKE-based fallback when FTS5 is unavailable or returns no results.
+func (s *AICompanionService) searchMemoriesLike(query string) ([]models.Memory, error) {
 	searchQuery := `SELECT id, key, value, category, importance, created_at, updated_at FROM memories
 	                WHERE key LIKE ? OR value LIKE ?
 	                ORDER BY importance DESC, updated_at DESC

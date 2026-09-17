@@ -389,7 +389,7 @@
 						</div>
 					</div>
 
-					<!-- LM Studio AI Settings Card -->
+					<!-- AI Settings Card -->
 					<div class="card bg-dark mb-4">
 						<div class="card-header d-flex justify-content-between align-items-center">
 							<h5 class="mb-0">
@@ -420,6 +420,7 @@
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Model</label>
 									<input v-model="aiConfig.modelName" type="text" class="form-control bg-dark text-white border-secondary" placeholder="mistralai/mistral-nemo" />
+                                    <small class="text-muted">Recommended: deepseek/deepseek-v4-flash for reasoning-enabled OpenRouter tasks.</small>
 								</div>
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Max Tokens</label>
@@ -1011,9 +1012,9 @@ export default {
 					models: data.models || [],
 				}
 				if (data.connected) {
-					this.$toast.success('LM Studio connected!')
+					this.$toast.success('Connected to OpenRouter!')
 				} else {
-					this.$toast.warning(data.error || 'Could not connect to LM Studio')
+					this.$toast.warning(data.error || 'Could not connect to OpenRouter')
 				}
 			} catch (error) {
 				console.error('Failed to test AI connection:', error)

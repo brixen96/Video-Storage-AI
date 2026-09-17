@@ -1362,23 +1362,38 @@ func (s *AICompanionService) MonitorConsoleLogsForErrors() {
 				}
 			}
 
-			// Alert if new significant errors appeared
+			// Alert if new significant errors appeared — route to notification bell, not chat
 			if len(significantErrors) > lastErrorCount && len(significantErrors) > 0 {
 				newErrors := len(significantErrors) - lastErrorCount
 				recentError := significantErrors[0]
 
-				s.emitEvent(CompanionEvent{
-					Type:    "notification",
-					Source:  "error_monitor",
-					Message: fmt.Sprintf("🚨 %d new error(s) detected! Latest: %s", newErrors, recentError.Message),
-					Data: map[string]interface{}{
+				// Create a proper notification instead of pushing into the chat
+				notifSvc := NewNotificationService(s.db)
+				priority := "normal"
+				if newErrors >= 3 {
+					priority = "high"
+				}
+				_, _ = notifSvc.Create(&models.CreateNotificationRequest{
+					Type:     "error_detected",
+					Priority: priority,
+					Title:    fmt.Sprintf("%d new error(s) detected", newErrors),
+					Message:  fmt.Sprintf("Latest: %s", truncate(recentError.Message, 120)),
+					Category: "system",
+					Metadata: map[string]interface{}{
 						"new_errors":    newErrors,
 						"total_errors":  len(significantErrors),
 						"latest_source": recentError.Source,
 						"latest_level":  recentError.Level,
 					},
-					Severity:  "error",
-					Timestamp: time.Now(),
+				})
+
+				// Also emit a lightweight companion event (non-error) so the UI can update the bell
+				s.emitEvent(CompanionEvent{
+					Type:     "system",
+					Source:   "error_monitor",
+					Message:  fmt.Sprintf("%d new error(s) — check notifications for details", newErrors),
+					Severity: "info",
+					Data:     map[string]interface{}{"new_errors": newErrors},
 				})
 			}
 

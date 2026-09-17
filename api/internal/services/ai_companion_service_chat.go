@@ -1644,7 +1644,7 @@ Keep your library organized with intelligent naming!`, nil
 			"🧠 Memory:\n" +
 			"- I remember our conversations\n" +
 			"- I learn your preferences over time\n\n" +
-			"For complex questions or natural conversations, I can connect to LM Studio for advanced AI capabilities!", nil
+			"I can connect to OpenRouter for advanced AI capabilities!", nil
 	}
 
 	// Default: try to find anything matching the message as a search
