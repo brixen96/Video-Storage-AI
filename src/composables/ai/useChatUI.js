@@ -1,10 +1,10 @@
 /**
  * useChatUI — panel visibility, context stats, message scrolling, memory panel, voice input.
  */
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { aiAPI, librariesAPI, activityAPI } from '@/services/api'
 
-export function useChatUI({ chatHistory, toggleChat }) {
+export function useChatUI() {
 	// --- Core UI state ---
 	const isOpen = ref(false)
 	const unreadCount = ref(0)

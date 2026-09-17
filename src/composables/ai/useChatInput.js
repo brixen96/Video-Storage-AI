@@ -5,7 +5,7 @@ import { ref, watch, nextTick } from 'vue'
 import { performersAPI } from '@/services/api'
 import { SLASH_COMMANDS } from './constants'
 
-export function useChatInput({ sentHistory, historyIndex, savedDraft, pushPromptHistory }) {
+export function useChatInput({ sentHistory, historyIndex, savedDraft }) {
 	const companionInput = ref('')
 	const textareaRef = ref(null)
 
