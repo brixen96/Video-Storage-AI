@@ -380,6 +380,81 @@ func (s *AICompanionService) runLibraryInsights() {
 			return true, msg, map[string]interface{}{"rated": rated, "total": total, "rating_pct": pct, "action": "rate_videos"}
 		},
 	)
+
+	// Library structure health — check if any library has a poor folder structure
+	s.checkInsight(
+		"insight_library_structure",
+		24*time.Hour,
+		func() (bool, string, map[string]interface{}) {
+			rows, err := s.db.Query("SELECT id, name, path FROM libraries ORDER BY name")
+			if err != nil {
+				return false, "", nil
+			}
+			defer rows.Close()
+
+			type libIssue struct {
+				Name  string `json:"name"`
+				Score int    `json:"score"`
+				Grade string `json:"grade"`
+				Top   string `json:"top_issue"`
+			}
+			var issues []libIssue
+
+			for rows.Next() {
+				var libID int64
+				var libName, libPath string
+				if rows.Scan(&libID, &libName, &libPath) != nil {
+					continue
+				}
+				// Quick scoring — just check catch-all and depth
+				var videoCount, catchAll, videosAtRoot int
+				s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ?", libID).Scan(&videoCount)
+				s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path = ?", libID, libPath).Scan(&videosAtRoot)
+				s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND (file_path LIKE ? OR file_path LIKE ?)",
+					libID, "%/Downloads%Torrents%", "%/Users%").Scan(&catchAll)
+
+				if videoCount == 0 {
+					continue
+				}
+
+				catchPct := float64(catchAll) / float64(videoCount) * 100
+				rootPct := float64(videosAtRoot) / float64(videoCount) * 100
+
+				// Quick score: 100 - penalties
+				score := 100
+				if catchPct > 50 { score -= 40 } else if catchPct > 30 { score -= 25 } else if catchPct > 15 { score -= 10 }
+				if rootPct > 20 { score -= 15 } else if rootPct > 5 { score -= 5 }
+				if score < 0 { score = 0 }
+
+				if score < 50 {
+					top := fmt.Sprintf("%.0f%% in catch-all", catchPct)
+					if catchPct < 5 {
+						top = fmt.Sprintf("%.0f%% at library root", rootPct)
+					}
+					grade := "F"
+					if score >= 40 { grade = "D" }
+					issues = append(issues, libIssue{Name: libName, Score: score, Grade: grade, Top: top})
+				}
+			}
+
+			if len(issues) == 0 {
+				return false, "", nil
+			}
+
+			// Build message
+			msg := "📁 **Library Structure Issues Detected**\n\n"
+			for _, issue := range issues {
+				msg += fmt.Sprintf("- **%s** scored %d/100 (%s) — %s\n", issue.Name, issue.Score, issue.Grade, issue.Top)
+			}
+			msg += "\nAsk me to run `score_library_structure` for a detailed breakdown, or `plan_structure_improvements` to create a fix plan!"
+
+			return true, msg, map[string]interface{}{
+				"issue_count": len(issues),
+				"issues":      issues,
+				"action":      "improve_structure",
+			}
+		},
+	)
 }
 
 // checkInsight runs a single insight check with cooldown guard.
