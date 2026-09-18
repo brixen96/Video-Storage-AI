@@ -385,6 +385,199 @@ func (s *AICompanionService) registerLibraryTools() {
 			}, "required": []string{"library_name"}},
 		},
 	}, s.toolScoreLibraryStructure)
+
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "get_all_library_scores",
+			Description: "Score ALL libraries in one call. Returns a ranked list with grades, scores, video counts, and top issues for each. Use this for quick cross-library comparison instead of scoring each library individually.",
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "required": []string{}},
+		},
+	}, s.toolGetAllLibraryScores)
+}
+
+func (s *AICompanionService) toolGetAllLibraryScores(args map[string]interface{}) (interface{}, error) {
+	// Get all libraries
+	rows, err := s.db.Query("SELECT id, name, path FROM libraries ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type libInfo struct{ id int64; name, path string }
+	var libs []libInfo
+	for rows.Next() {
+		var l libInfo
+		if rows.Scan(&l.id, &l.name, &l.path) == nil {
+			libs = append(libs, l)
+		}
+	}
+
+	type libScore struct {
+		Name         string         `json:"name"`
+		Score        int            `json:"score"`
+		Grade        string         `json:"grade"`
+		Videos       int            `json:"videos"`
+		Folders      int            `json:"folders"`
+		MaxDepth     int            `json:"max_depth"`
+		CatchAllPct  string         `json:"catch_all_pct"`
+		Suggestions  []string       `json:"top_issues"`
+		Scores       map[string]int `json:"scores"`
+	}
+
+	var results []libScore
+	totalVideos := 0
+
+	for _, lib := range libs {
+		var videoCount int
+		s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ?", lib.id).Scan(&videoCount)
+		totalVideos += videoCount
+
+		libPathSlash := sql.NullString{String: lib.path, Valid: true}
+		_ = libPathSlash
+
+		// Folder analysis
+		folderMap := map[string]int{}
+		var maxDepth int
+		var videosAtRoot, videosInCatchAll int
+
+		s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path = ?", lib.id, lib.path).Scan(&videosAtRoot)
+		s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND (file_path LIKE ? OR file_path LIKE ?)",
+			lib.id, "%/Downloads%Torrents%", "%/Users%").Scan(&videosInCatchAll)
+
+		vRows, err := s.db.Query("SELECT file_path FROM videos WHERE library_id = ?", lib.id)
+		if err == nil {
+			for vRows.Next() {
+				var fp string
+				if vRows.Scan(&fp) != nil { continue }
+				rel := fp
+				if strings.HasPrefix(rel, lib.path) {
+					rel = strings.TrimPrefix(rel, lib.path)
+					rel = strings.TrimPrefix(rel, "/")
+				}
+				rel = strings.ReplaceAll(rel, "\\", "/")
+				parts := strings.Split(rel, "/")
+				for d := 1; d < len(parts); d++ {
+					key := strings.Join(parts[:d], "/")
+					folderMap[key]++
+					if d > maxDepth { maxDepth = d }
+				}
+			}
+			vRows.Close()
+		}
+
+		totalFolders := len(folderMap)
+		singleVideoFolders := 0
+		for _, cnt := range folderMap {
+			if cnt == 1 { singleVideoFolders++ }
+		}
+
+		// Scores
+		scores := map[string]int{}
+
+		// Coverage (0-30)
+		catchAllPct := 0.0
+		if videoCount > 0 { catchAllPct = float64(videosInCatchAll) / float64(videoCount) * 100 }
+		coverageScore := int(30 * (1 - catchAllPct/100))
+		if coverageScore < 0 { coverageScore = 0 }
+		scores["coverage"] = coverageScore
+
+		// Consistency (0-25)
+		consistencyScore := 25
+		if maxDepth > 3 { consistencyScore -= (maxDepth - 3) * 5 }
+		if totalFolders > 0 {
+			singlePct := float64(singleVideoFolders) / float64(totalFolders) * 100
+			if singlePct > 30 {
+				consistencyScore -= 10
+			} else if singlePct > 15 {
+				consistencyScore -= 5
+			}
+		}
+		if consistencyScore < 0 { consistencyScore = 0 }
+		scores["consistency"] = consistencyScore
+
+		// Naming (0-20) — simplified check
+		namingScore := 20
+		badNames := 0
+		for name := range folderMap {
+			base := filepath.Base(name)
+			if len(base) > 60 { badNames++ }
+		}
+		if totalFolders > 0 {
+			badPct := float64(badNames) / float64(totalFolders) * 100
+			if badPct > 20 {
+				namingScore -= 15
+			} else if badPct > 10 {
+				namingScore -= 10
+			} else if badPct > 5 {
+				namingScore -= 5
+			}
+		}
+		if namingScore < 0 { namingScore = 0 }
+		scores["naming"] = namingScore
+
+		// Clutter (0-15) — simplified
+		clutterScore := 15
+		if singleVideoFolders > 20 { clutterScore -= 10 } else if singleVideoFolders > 10 { clutterScore -= 5 }
+		if clutterScore < 0 { clutterScore = 0 }
+		scores["clutter"] = clutterScore
+
+		// Root (0-10)
+		rootScore := 10
+		if videoCount > 0 {
+			rootPct := float64(videosAtRoot) / float64(videoCount) * 100
+			if rootPct > 20 {
+				rootScore -= 8
+			} else if rootPct > 5 {
+				rootScore -= 4
+			}
+		}
+		if rootScore < 0 { rootScore = 0 }
+		scores["root_cleanliness"] = rootScore
+
+		total := 0
+		for _, v := range scores { total += v }
+
+		grade := "F"
+		switch {
+		case total >= 90: grade = "A"
+		case total >= 80: grade = "B"
+		case total >= 70: grade = "C"
+		case total >= 50: grade = "D"
+		}
+
+		var issues []string
+		if catchAllPct > 20 {
+			issues = append(issues, fmt.Sprintf("%.0f%% in catch-all folders", catchAllPct))
+		}
+		if maxDepth > 3 {
+			issues = append(issues, fmt.Sprintf("Nested %d levels deep", maxDepth))
+		}
+		if singleVideoFolders > 10 {
+			issues = append(issues, fmt.Sprintf("%d single-video folders", singleVideoFolders))
+		}
+		if videosAtRoot > 5 {
+			issues = append(issues, fmt.Sprintf("%d videos at root", videosAtRoot))
+		}
+		if len(issues) == 0 {
+			issues = append(issues, "Looks good!")
+		}
+
+		results = append(results, libScore{
+			Name: lib.name, Score: total, Grade: grade, Videos: videoCount,
+			Folders: totalFolders, MaxDepth: maxDepth,
+			CatchAllPct: fmt.Sprintf("%.1f%%", catchAllPct),
+			Suggestions: issues, Scores: scores,
+		})
+	}
+
+	// Sort by score descending
+	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+
+	return map[string]interface{}{
+		"total_videos":  totalVideos,
+		"libraries":     results,
+		"library_count": len(results),
+	}, nil
 }
 
 func (s *AICompanionService) toolScoreLibraryStructure(args map[string]interface{}) (interface{}, error) {
