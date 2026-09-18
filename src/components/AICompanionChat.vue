@@ -452,6 +452,26 @@
 					</button>
 				</div>
 
+				<!-- Tool Progress Bar — shows during bulk operations -->
+				<transition name="slide-down">
+					<div v-if="toolProgress && toolProgress.type === 'batch_move_progress'" class="tool-progress-bar">
+						<div class="progress-header">
+							<font-awesome-icon :icon="['fas', 'spinner']" spin />
+							<span>Moving videos: {{ toolProgress.current }}/{{ toolProgress.total }}</span>
+							<span class="progress-pct">{{ Math.round(toolProgress.current / toolProgress.total * 100) }}%</span>
+						</div>
+						<div class="progress-track">
+							<div class="progress-fill" :style="{ width: (toolProgress.current / toolProgress.total * 100) + '%' }"></div>
+						</div>
+						<div class="progress-details">
+							<span class="text-success">{{ toolProgress.success }} done</span>
+							<span v-if="toolProgress.failed > 0" class="text-danger">{{ toolProgress.failed }} failed</span>
+							<span v-if="toolProgress.skipped > 0" class="text-warning">{{ toolProgress.skipped }} skipped</span>
+							<span class="text-muted">{{ toolProgress.remaining }} remaining</span>
+						</div>
+					</div>
+				</transition>
+
 				<!-- Chat Input -->
 				<div class="chat-input-container">
 					<!-- /command palette -->
@@ -567,6 +587,9 @@ const {
 
 // Token usage tracking — updated after each LLM response
 const tokenUsage = ref({ prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 0, total_tokens: 0 })
+
+// Tool progress tracking — shows during long-running operations like batch moves
+const toolProgress = ref(null)
 
 const {
 	companionInput, textareaRef, slashActive, slashResults, slashIndex,
@@ -715,6 +738,7 @@ const sendCompanionMessage = async () => {
 		scrollFn: async () => { await nextTick(); scrollToBottom() },
 		onDone: (toolSteps) => {
 			chatHistory.value[msgIndex].streaming = false
+			toolProgress.value = null
 			if (toolSteps.length > 0) chatHistory.value[msgIndex].toolSteps = toolSteps
 			const followUps = deriveFollowUpActions(chatHistory.value[msgIndex].content)
 			if (followUps.length > 0) chatHistory.value[msgIndex].followUpActions = followUps
@@ -722,6 +746,9 @@ const sendCompanionMessage = async () => {
 		},
 		onTokenUsage: (usage) => {
 			tokenUsage.value = { ...tokenUsage.value, ...usage }
+		},
+		onToolProgress: (progress) => {
+			toolProgress.value = progress
 		},
 		onError: (error) => {
 			if (error.name === 'AbortError') {

@@ -621,10 +621,25 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 		}, nil
 	}
 
-	// Execute moves
+	// Execute moves — report progress every 25 videos
 	success, fail, skip := 0, 0, 0
 	for i := range placements {
 		p := &placements[i]
+
+		// Report progress every 25 videos
+		if (i+1)%25 == 0 || i == len(placements)-1 {
+			s.ReportProgress(map[string]interface{}{
+				"type":         "batch_move_progress",
+				"current":      i + 1,
+				"total":        len(placements),
+				"success":      success,
+				"failed":       fail,
+				"skipped":      skip,
+				"remaining":    totalCount - (i + 1),
+				"source":       srcRel,
+				"target_base":  targetBase,
+			})
+		}
 
 		if _, statErr := os.Stat(p.srcPath); os.IsNotExist(statErr) {
 			p.status = "skipped"

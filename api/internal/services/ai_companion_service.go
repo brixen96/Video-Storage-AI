@@ -45,6 +45,19 @@ type AICompanionService struct {
 	recommendations   map[string]*Recommendation // recommendation_id -> Recommendation
 	lastActivityCheck time.Time                  // Last time we checked activity_logs
 	tools             map[string]*registeredTool  // tool name -> registered tool
+	progressCallback  func(map[string]interface{}) // optional per-request progress callback for tool progress events
+}
+
+// SetProgressCallback sets a per-request callback for tools to report progress during execution.
+func (s *AICompanionService) SetProgressCallback(fn func(map[string]interface{})) {
+	s.progressCallback = fn
+}
+
+// ReportProgress calls the progress callback if set. Tools call this to report incremental progress.
+func (s *AICompanionService) ReportProgress(data map[string]interface{}) {
+	if s.progressCallback != nil {
+		s.progressCallback(data)
+	}
 }
 
 // CompanionEvent represents an event the AI detected

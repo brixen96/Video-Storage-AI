@@ -654,6 +654,49 @@
 .btn-pin-message:hover { color: rgba(255, 215, 0, 0.8); }
 .btn-pin-message.active { opacity: 1 !important; color: rgba(255, 215, 0, 1); }
 
+/* Tool Progress Bar */
+.tool-progress-bar {
+	padding: 0.6rem 1rem;
+	background: rgba(0, 217, 255, 0.05);
+	border-top: 1px solid rgba(0, 217, 255, 0.15);
+}
+.tool-progress-bar .progress-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.8rem;
+	color: rgba(255, 255, 255, 0.85);
+	margin-bottom: 0.4rem;
+}
+.tool-progress-bar .progress-header svg { color: var(--color-accent, #00d9ff); }
+.tool-progress-bar .progress-pct {
+	margin-left: auto;
+	font-weight: 600;
+	color: var(--color-accent, #00d9ff);
+}
+.tool-progress-bar .progress-track {
+	height: 4px;
+	background: rgba(255, 255, 255, 0.08);
+	border-radius: 2px;
+	overflow: hidden;
+	margin-bottom: 0.3rem;
+}
+.tool-progress-bar .progress-fill {
+	height: 100%;
+	background: linear-gradient(90deg, var(--color-accent, #00d9ff), var(--color-accent-alt, #7c3aed));
+	border-radius: 2px;
+	transition: width 0.3s ease;
+}
+.tool-progress-bar .progress-details {
+	display: flex;
+	gap: 0.75rem;
+	font-size: 0.7rem;
+}
+.tool-progress-bar .text-success { color: #4ade80; }
+.tool-progress-bar .text-danger { color: #f87171; }
+.tool-progress-bar .text-warning { color: #fbbf24; }
+.tool-progress-bar .text-muted { color: rgba(255, 255, 255, 0.4); margin-left: auto; }
+
 /* Chat Input */
 .chat-input-container {
 	padding: 1rem;

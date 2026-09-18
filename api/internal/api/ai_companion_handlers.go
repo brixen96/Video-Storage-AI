@@ -65,6 +65,14 @@ func aiCompanionChatStream(c *gin.Context) {
 	source := "llm"
 	var videoCards []map[string]interface{}
 
+	// Set up progress callback so tools can report incremental progress via SSE
+	aiCompanionService.SetProgressCallback(func(data map[string]interface{}) {
+		evt, _ := json.Marshal(data)
+		fmt.Fprintf(c.Writer, "event: tool_progress\ndata: %s\n\n", string(evt))
+		flusher.Flush()
+	})
+	defer aiCompanionService.SetProgressCallback(nil)
+
 	err := aiCompanionService.ChatLLMStream(request.Message, request.History, func(chunk string) bool {
 		select {
 		case <-clientGone:
