@@ -148,8 +148,8 @@
 							</div>
 							<!-- Thumbnail -->
 							<div class="video-thumbnail">
-								<img v-if="item.thumbnail_url" :src="item.thumbnail_url" :alt="item.title" referrerpolicy="no-referrer" @error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'" />
-								<div v-else class="no-thumbnail">
+								<img v-if="item.thumbnail_url && !sexuriaImgErrors[item.id]" :src="item.thumbnail_url" :alt="item.title" referrerpolicy="no-referrer" @error="sexuriaImgErrors[item.id] = true" />
+								<div v-if="!item.thumbnail_url || sexuriaImgErrors[item.id]" class="no-thumbnail">
 									<font-awesome-icon :icon="['fas', 'file-video']" size="3x" />
 								</div>
 							</div>
@@ -570,7 +570,7 @@
 
 <script setup>
 /* eslint-disable no-unused-vars */
-import { ref, shallowRef, computed, onMounted, onBeforeUnmount, watch, getCurrentInstance } from 'vue'
+import { ref, reactive, shallowRef, computed, onMounted, onBeforeUnmount, watch, getCurrentInstance } from 'vue'
 import { scrapersAPI } from '@/services/api'
 import { useScraperJobPolling } from '@/composables/useScraperJobPolling'
 import { useVideoSelection }    from '@/composables/useVideoSelection'
@@ -621,6 +621,7 @@ const sexuriaItemSort        = ref('newest')
 const sexuriaItemPage        = ref(1)
 const sexuriaTotalCount      = ref(0)
 const sexuriaTotalPages      = ref(1)
+const sexuriaImgErrors       = reactive({})
 
 const selectAllSexuriaItems = () => _selectAllSexuria(sexuriaItems.value)
 

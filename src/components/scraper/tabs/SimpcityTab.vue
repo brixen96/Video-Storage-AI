@@ -207,7 +207,7 @@
 				</EmptyState>
 				<!-- Threads Grid View -->
 				<div v-else-if="viewMode === 'grid'" class="threads-grid">
-					<div v-for="thread in threads" :key="thread.id" class="thread-card" :class="{ selected: isThreadSelected(thread.id), watched: thread.is_watched }" @click="openThread(thread)">
+					<div v-for="thread in threads" :key="thread.id" class="thread-card" :class="{ selected: isThreadSelected(thread.id), watched: thread.is_watched }" :data-thread-id="thread.id" @click="openThread(thread)">
 						<div class="thread-actions-overlay">
 							<button class="watch-btn" :class="{ active: thread.is_watched }" @click.stop="toggleThreadWatch(thread)" :title="thread.is_watched ? 'Stop watching' : 'Watch for updates'">
 								<font-awesome-icon :icon="['fas', thread.is_watched ? 'bell' : 'bell-slash']" />
@@ -219,10 +219,10 @@
 								<input type="checkbox" :checked="isThreadSelected(thread.id)" @click.stop />
 							</div>
 						</div>
-						<div v-if="thread.metadata?.thumbnail_url || thread.metadata?.thumbnail_urls?.length" class="thread-thumbnail">
+						<div v-if="(thread.metadata?.thumbnail_url || thread.metadata?.thumbnail_urls?.length) && !threadImgErrors[thread.id]" class="thread-thumbnail">
 							<img :src="thread.metadata.thumbnail_url" :data-fallback-urls="JSON.stringify(thread.metadata.thumbnail_urls || [])" alt="Thread thumbnail" @error="handleThumbnailError" />
 						</div>
-						<div v-else class="thread-thumbnail placeholder">
+						<div v-if="!thread.metadata?.thumbnail_url && !thread.metadata?.thumbnail_urls?.length || threadImgErrors[thread.id]" class="thread-thumbnail placeholder">
 							<font-awesome-icon :icon="['fas', 'image']" size="3x" />
 						</div>
 						<!-- Verification Progress Bar -->
@@ -696,7 +696,7 @@
 </template>
 
 <script setup>
-import { ref, shallowRef, watch, onMounted, onBeforeUnmount, computed, getCurrentInstance } from 'vue'
+import { ref, reactive, shallowRef, watch, onMounted, onBeforeUnmount, computed, getCurrentInstance } from 'vue'
 import { useFormatters } from '@/composables/useFormatters'
 import { useOpenURL } from '@/composables/useOpenURL'
 import { useScraperSidebar } from '@/composables/useScraperSidebar'
@@ -768,6 +768,7 @@ const loginHelperInstructions = ref([])
 const selectedThread = ref(null)
 const selectedThreadIds = ref(new Set())
 const selectionMode = ref(false)
+const threadImgErrors = reactive({})
 const bulkOperationInProgress = ref(false)
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -1110,10 +1111,11 @@ const handleThumbnailError = (event) => {
 	if (currentIndex < fallbackURLs.length - 1) {
 		img.src = fallbackURLs[currentIndex + 1]
 	} else {
-		img.style.display = 'none'
-		const placeholder = img.parentElement.nextElementSibling
-		if (placeholder && placeholder.classList.contains('placeholder')) {
-			placeholder.style.display = 'flex'
+		// All fallbacks exhausted — find thread ID and mark error
+		const card = img.closest('.thread-card')
+		if (card) {
+			const threadId = card.dataset.threadId
+			if (threadId) threadImgErrors[threadId] = true
 		}
 	}
 }

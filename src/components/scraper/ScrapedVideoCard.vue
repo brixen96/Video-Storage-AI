@@ -7,14 +7,14 @@
 
 		<!-- Thumbnail with animated frame preview on hover -->
 		<div class="video-thumbnail" @mouseenter="startPreview" @mouseleave="stopPreview">
-			<img v-if="video.thumbnail_url && !isHovering" :src="proxiedThumbnailUrl" :alt="video.title" @error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'" />
+			<img v-if="video.thumbnail_url && !imgError && !isHovering" :src="proxiedThumbnailUrl" :alt="video.title" @error="imgError = true" />
 			<!-- Prefer frame animation when frames are available -->
-			<img v-else-if="video.thumbnail_url && isHovering && proxiedThumbFrames.length > 1" :src="thumbnailSrc" :alt="video.title" @error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'" />
+			<img v-else-if="video.thumbnail_url && !imgError && isHovering && proxiedThumbFrames.length > 1" :src="thumbnailSrc" :alt="video.title" @error="imgError = true" />
 			<!-- Fall back to video preview only when no frames available -->
 			<video v-else-if="isHovering && previewUrl && !previewError" :src="previewUrl" class="video-preview-overlay" autoplay muted loop playsinline @error="onPreviewError" />
 			<!-- Final fallback: static thumbnail while hovering with no preview -->
-			<img v-else-if="video.thumbnail_url && isHovering" :src="proxiedThumbnailUrl" :alt="video.title" @error="$event.target.src = 'https://via.placeholder.com/320x180?text=No+Thumbnail'" />
-			<div v-if="!video.thumbnail_url" class="no-thumbnail">
+			<img v-else-if="video.thumbnail_url && !imgError && isHovering" :src="proxiedThumbnailUrl" :alt="video.title" @error="imgError = true" />
+			<div v-if="!video.thumbnail_url || imgError" class="no-thumbnail">
 				<font-awesome-icon :icon="['fas', 'video']" size="3x" />
 			</div>
 			<span v-if="video.duration" class="duration-badge">
@@ -163,6 +163,7 @@ const proxiedThumbFrames = computed(() => thumbFrames.value.map((f) => getProxie
 const isHovering = ref(false)
 const frameIdx = ref(0)
 const previewError = ref(false)
+const imgError = ref(false)
 let previewTimer = null
 
 const thumbnailSrc = computed(() => {
