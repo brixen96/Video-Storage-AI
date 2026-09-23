@@ -57,7 +57,24 @@
 						</div>
 					</div>
 
-					<!-- Performers in DB toggle -->
+<!-- Hide Broken Thumbnails toggle -->
+				<div class="sfp-section">
+					<div
+						class="sfp-toggle-row"
+						:class="{ active: hideBrokenThumbnails }"
+						@click="hideBrokenThumbnails = !hideBrokenThumbnails"
+					>
+						<div class="sfp-toggle-icon">
+							<font-awesome-icon :icon="['fas', 'eye-slash']" />
+						</div>
+						<span class="sfp-toggle-label">Hide Broken Thumbnails</span>
+						<div class="sfp-toggle-switch" :class="{ on: hideBrokenThumbnails }">
+							<div class="sfp-toggle-knob"></div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Performers in DB toggle -->
 					<div class="sfp-section">
 						<div
 							class="sfp-toggle-row"
@@ -159,7 +176,7 @@
 					</div>
 				</div>
 				<!-- Bulk Action Toolbar -->
-				<div v-if="threads.length > 0" class="bulk-actions-toolbar mb-4">
+				<div v-if="displayedThreads.length > 0" class="bulk-actions-toolbar mb-4">
 					<div class="d-flex justify-content-between align-items-center">
 						<div class="d-flex gap-2 align-items-center">
 							<button class="btn btn-sm" :class="selectionMode ? 'btn-primary' : 'btn-outline-primary'" @click="toggleSelectionMode">
@@ -197,7 +214,7 @@
 				<!-- Loading State -->
 				<LoadingState v-if="loading" show-text loading-text="Loading scraped threads..." />
 				<!-- Empty State -->
-				<EmptyState v-else-if="threads.length === 0 && !loading" :icon="['fas', 'inbox']" icon-size="4x" title="No Threads Found" message="Start scraping to collect thread data">
+				<EmptyState v-else-if="displayedThreads.length === 0 && !loading" :icon="['fas', 'inbox']" icon-size="4x" :title="hideBrokenThumbnails && threads.length > 0 ? 'All Thumbnails Broken' : 'No Threads Found'" :message="hideBrokenThumbnails && threads.length > 0 ? 'Try disabling Hide Broken Thumbnails filter' : 'Start scraping to collect thread data'">
 					<template #actions>
 						<button class="btn btn-primary mt-3" @click="showScrapeModal = true">
 							<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
@@ -207,7 +224,7 @@
 				</EmptyState>
 				<!-- Threads Grid View -->
 				<div v-else-if="viewMode === 'grid'" class="threads-grid">
-					<div v-for="thread in threads" :key="thread.id" class="thread-card" :class="{ selected: isThreadSelected(thread.id), watched: thread.is_watched }" :data-thread-id="thread.id" @click="openThread(thread)">
+					<div v-for="thread in displayedThreads" :key="thread.id" class="thread-card" :class="{ selected: isThreadSelected(thread.id), watched: thread.is_watched }" :data-thread-id="thread.id" @click="openThread(thread)">
 						<div class="thread-actions-overlay">
 							<button class="watch-btn" :class="{ active: thread.is_watched }" @click.stop="toggleThreadWatch(thread)" :title="thread.is_watched ? 'Stop watching' : 'Watch for updates'">
 								<font-awesome-icon :icon="['fas', thread.is_watched ? 'bell' : 'bell-slash']" />
@@ -278,7 +295,7 @@
 				</div>
 				<!-- Threads List View -->
 				<div v-else-if="viewMode === 'list'" class="threads-list">
-					<div v-for="thread in threads" :key="thread.id" class="thread-list-item" :class="{ watched: thread.is_watched }" @click="openThread(thread)">
+					<div v-for="thread in displayedThreads" :key="thread.id" class="thread-list-item" :class="{ watched: thread.is_watched }" @click="openThread(thread)">
 						<div class="thread-list-content">
 							<h5 class="thread-title">
 								<font-awesome-icon v-if="thread.is_watched" :icon="['fas', 'bell']" class="watched-indicator me-2" />
@@ -769,6 +786,7 @@ const selectedThread = ref(null)
 const selectedThreadIds = ref(new Set())
 const selectionMode = ref(false)
 const threadImgErrors = reactive({})
+const hideBrokenThumbnails = ref(false)
 const bulkOperationInProgress = ref(false)
 
 // ── Computed ──────────────────────────────────────────────────────────────────
@@ -784,9 +802,15 @@ const visiblePages = computed(() => {
 
 const selectedCount = computed(() => selectedThreadIds.value.size)
 
+// Filter out threads with broken thumbnails when hideBrokenThumbnails is enabled
+const displayedThreads = computed(() => {
+	if (!hideBrokenThumbnails.value) return threads.value
+	return threads.value.filter((thread) => !threadImgErrors[thread.id])
+})
+
 const allSelectedOnPage = computed(() => {
-	if (threads.value.length === 0) return false
-	return threads.value.every((thread) => selectedThreadIds.value.has(thread.id))
+	if (displayedThreads.value.length === 0) return false
+	return displayedThreads.value.every((thread) => selectedThreadIds.value.has(thread.id))
 })
 
 const activeFilterCount = computed(() => {
@@ -797,6 +821,7 @@ const activeFilterCount = computed(() => {
 	if (filterDownloads.value) n++
 	if (filterAuthor.value) n++
 	if (filterCategory.value) n++
+	if (hideBrokenThumbnails.value) n++
 	return n
 })
 
@@ -807,6 +832,7 @@ const clearAllFilters = () => {
 	filterDownloads.value = ''
 	filterAuthor.value = ''
 	filterCategory.value = ''
+	hideBrokenThumbnails.value = false
 	currentPage.value = 1
 	loadThreads()
 }
@@ -1139,7 +1165,7 @@ const toggleThreadSelection = (threadId, event) => {
 }
 
 const selectAllThreads = () => {
-	threads.value.forEach((thread) => selectedThreadIds.value.add(thread.id))
+	displayedThreads.value.forEach((thread) => selectedThreadIds.value.add(thread.id))
 	selectedThreadIds.value = new Set(selectedThreadIds.value)
 }
 

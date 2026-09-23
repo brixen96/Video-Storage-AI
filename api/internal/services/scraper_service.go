@@ -852,6 +852,11 @@ func (s *ScraperService) extractThreadID(threadURL string) (string, error) {
 
 // ScrapeThreadComplete scrapes a thread and all its posts in one operation
 func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID ...int) error {
+	return s.ScrapeThreadCompleteForce(threadURL, false, parentActivityID...)
+}
+
+// ScrapeThreadCompleteForce scrapes a thread with optional force flag to bypass smart caching
+func (s *ScraperService) ScrapeThreadCompleteForce(threadURL string, force bool, parentActivityID ...int) error {
 	// Track scrape start time for duration calculation
 	scrapeStartTime := time.Now()
 
@@ -890,12 +895,15 @@ func (s *ScraperService) ScrapeThreadComplete(threadURL string, parentActivityID
 		return err
 	}
 
-	// Check if thread needs re-scraping (smart caching)
-	log.Printf("Thread scraped: %q, reply_count=%d. Checking if rescrape needed...", thread.Title, thread.ReplyCount)
+	// Check if thread needs re-scraping (smart caching) — skip cache check when forced
+	log.Printf("Thread scraped: %q, reply_count=%d. Checking if rescrape needed (force=%v)...", thread.Title, thread.ReplyCount, force)
+	if force {
+		log.Printf("Force rescrape requested — bypassing cache check")
+	}
 	shouldRescrape, existingThread, err := s.ShouldRescrapeThread(threadURL, thread.ReplyCount)
 	if err != nil {
 		log.Printf("Warning: Failed to check cache status: %v. Proceeding with scrape.", err)
-	} else if !shouldRescrape && existingThread != nil {
+	} else if !force && !shouldRescrape && existingThread != nil {
 		// Thread exists and has no new posts - skip scraping
 		log.Printf("Thread already up-to-date: %d posts, %d downloads (last scraped %v ago). Skipping.",
 			existingThread.PostCount, existingThread.DownloadCount, time.Since(existingThread.LastScrapedAt).Round(time.Minute))

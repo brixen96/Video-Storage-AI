@@ -264,9 +264,9 @@ func rescrapeThread(c *gin.Context) {
 		return
 	}
 
-	// Start rescraping in the background
+	// Start rescraping in the background (force=true to bypass smart caching)
 	go func() {
-		if err := svc.ScrapeThreadComplete(thread.URL); err != nil {
+		if err := svc.ScrapeThreadCompleteForce(thread.URL, true); err != nil {
 			log.Printf("Error rescraping thread: %v", err)
 		}
 	}()
