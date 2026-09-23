@@ -210,27 +210,26 @@ const filterHasImages = ref('')
 const filterKeyword = ref('')
 const sortBy = ref('date')
 
-// BBC-related keyword patterns (comprehensive list)
+// BBC-related keyword patterns (more specific to avoid false positives)
 const bbcKeywords = [
-	'bbc', 'interracial', 'black', 'ebony', 'bbc queen', 'bbc slut',
-	'black cock', 'big black', 'interracial sex', 'bbc anal', 'bbc blowjob',
-	'mandingo', 'blackzilla', 'monster black', 'bbc compilation',
-	'interracial couple', 'black men', 'white girl black'
+	'bbc', 'bbc queen', 'bbc slut', 'bbc anal', 'bbc blowjob', 'bbc compilation',
+	'bbc king', 'big black cock', 'big black dick',
+	'interracial sex', 'interracial anal', 'interracial gangbang',
+	'blackzilla', 'monster black',
+	'mandingo'
 ]
 
 // Common BBC performer names (well-known in the genre)
 const bbcPerformerNames = [
-	'mandingo', 'blackzilla', 'jon Jon', 'skinny', 'mrPete',
-	'charles dera', 'sir pierrick', 'marco banderas', 'mr wood',
-	'big d', 'bbc king', 'black daddy', 'bbc master'
+	'mandingo', 'blackzilla', 'mr wood', 'bbc master'
 ]
 
 // Combined pattern for BBC filter (keywords + performer names)
+// Uses word boundaries to avoid partial matches like "blackboard"
 const bbcPattern = computed(() => {
 	const allTerms = [...bbcKeywords, ...bbcPerformerNames]
-	// Escape special regex chars and create word boundary pattern
 	const escaped = allTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-	return new RegExp(`(${escaped.join('|')})`, 'i')
+	return new RegExp(`\\b(${escaped.join('|')})\\b`, 'i')
 })
 
 // Computed
@@ -918,10 +917,10 @@ watch(
 }
 
 .keyword-toggle-btn.active {
-	background: rgba(239, 68, 68, 0.2);
-	border-color: rgba(239, 68, 68, 0.5);
-	color: #f87171;
-	box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+	background: rgba(34, 197, 94, 0.2);
+	border-color: rgba(34, 197, 94, 0.5);
+	color: #4ade80;
+	box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
 }
 
 /* Link Stats Bar */
