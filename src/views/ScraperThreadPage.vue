@@ -258,11 +258,12 @@ const filteredPosts = computed(() => {
 		})
 	}
 
-	// Keyword filter (BBC)
+	// Keyword filter (BBC) - check both plain_text AND raw HTML content (links have text in HTML)
 	if (filterKeyword.value === 'bbc') {
 		filtered = filtered.filter((post) => {
 			const text = post.plain_text || ''
-			return bbcPattern.value.test(text)
+			const html = post.content || ''
+			return bbcPattern.value.test(text) || bbcPattern.value.test(html)
 		})
 	}
 

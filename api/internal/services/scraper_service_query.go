@@ -545,8 +545,8 @@ func (s *ScraperService) SearchThreads(query string, limit, offset int, sortBy, 
 // GetPostsByThreadID retrieves all posts for a thread
 func (s *ScraperService) GetPostsByThreadID(threadID int64) ([]*models.ScrapedPost, error) {
 	rows, err := s.db.Query(`
-		SELECT id, thread_id, external_id, author, content, posted_at,
-			   metadata, created_at
+		SELECT id, thread_id, external_id, author, content, plain_text, posted_at,
+		       metadata, created_at
 		FROM scraped_posts
 		WHERE thread_id = ?
 		ORDER BY posted_at ASC
@@ -561,7 +561,7 @@ func (s *ScraperService) GetPostsByThreadID(threadID int64) ([]*models.ScrapedPo
 		post := &models.ScrapedPost{}
 		err := rows.Scan(
 			&post.ID, &post.ThreadID, &post.ExternalID, &post.Author,
-			&post.Content, &post.PostedAt, &post.Metadata, &post.CreatedAt,
+			&post.Content, &post.PlainText, &post.PostedAt, &post.Metadata, &post.CreatedAt,
 		)
 		if err != nil {
 			continue
