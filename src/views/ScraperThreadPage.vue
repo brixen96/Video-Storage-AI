@@ -47,6 +47,15 @@
 			<div class="filters-bar">
 				<SearchBox v-model="searchQuery" placeholder="Search posts, links, or content..." />
 				<div class="filter-group">
+					<button
+						class="keyword-toggle-btn"
+						:class="{ active: filterKeyword === 'bbc' }"
+						@click="filterKeyword = filterKeyword === 'bbc' ? '' : 'bbc'"
+						title="Show only posts containing BBC"
+					>
+						<font-awesome-icon :icon="['fas', 'filter']" class="me-1" />
+						BBC
+					</button>
 					<select v-model="filterProvider" class="filter-select">
 						<option value="">All Providers</option>
 						<option value="gofile">Gofile</option>
@@ -130,7 +139,7 @@
 			<!-- Empty State -->
 			<div v-else-if="filteredPosts.length === 0" class="empty-state">
 				<font-awesome-icon :icon="['fas', 'inbox']" size="3x" />
-				<p v-if="searchQuery || filterProvider || filterHasImages">No posts match your filters</p>
+				<p v-if="searchQuery || filterProvider || filterHasImages || filterKeyword">No posts match your filters</p>
 				<p v-else>No posts found</p>
 			</div>
 
@@ -198,7 +207,13 @@ const exportFormat = ref('txt')
 const searchQuery = ref('')
 const filterProvider = ref('')
 const filterHasImages = ref('')
+const filterKeyword = ref('')
 const sortBy = ref('date')
+
+// Keyword patterns for quick filters
+const keywordPatterns = {
+	bbc: /\bbc\b/i,
+}
 
 // Computed
 const filteredDownloadLinks = computed(() => {
@@ -214,14 +229,23 @@ const filteredDownloadLinks = computed(() => {
 const filteredPosts = computed(() => {
 	let filtered = posts.value
 
-	// Search filter
+	// Search filter - use plain_text for accurate text matching
 	if (searchQuery.value) {
 		const query = searchQuery.value.toLowerCase()
 		filtered = filtered.filter((post) => {
-			const contentMatch = post.content?.toLowerCase().includes(query)
+			const textMatch = post.plain_text?.toLowerCase().includes(query)
 			const authorMatch = post.author?.toLowerCase().includes(query)
 			const linksMatch = getPostLinks(post.id).some((link) => link.url.toLowerCase().includes(query) || link.provider.toLowerCase().includes(query))
-			return contentMatch || authorMatch || linksMatch
+			return textMatch || authorMatch || linksMatch
+		})
+	}
+
+	// Keyword filter (e.g., BBC)
+	if (filterKeyword.value && keywordPatterns[filterKeyword.value]) {
+		const pattern = keywordPatterns[filterKeyword.value]
+		filtered = filtered.filter((post) => {
+			const text = post.plain_text || ''
+			return pattern.test(text)
 		})
 	}
 
@@ -602,6 +626,7 @@ watch(
 			searchQuery.value = ''
 			filterProvider.value = ''
 			filterHasImages.value = ''
+			filterKeyword.value = ''
 			sortBy.value = 'date'
 
 			// Load new thread
@@ -851,6 +876,34 @@ watch(
 .filter-select option {
 	background: #1a1a2e;
 	color: #fff;
+}
+
+/* Keyword Toggle Button */
+.keyword-toggle-btn {
+	padding: 0.75rem 1rem;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 12px;
+	color: rgba(255, 255, 255, 0.7);
+	font-size: 0.9rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.keyword-toggle-btn:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(255, 255, 255, 0.2);
+	color: #fff;
+}
+
+.keyword-toggle-btn.active {
+	background: rgba(239, 68, 68, 0.2);
+	border-color: rgba(239, 68, 68, 0.5);
+	color: #f87171;
+	box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
 }
 
 /* Link Stats Bar */
