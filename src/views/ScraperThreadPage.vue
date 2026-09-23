@@ -51,7 +51,7 @@
 						class="keyword-toggle-btn"
 						:class="{ active: filterKeyword === 'bbc' }"
 						@click="filterKeyword = filterKeyword === 'bbc' ? '' : 'bbc'"
-						title="Show only posts containing BBC"
+						title="Filter posts: BBC, Interracial, Black, Ebony + BBC performers"
 					>
 						<font-awesome-icon :icon="['fas', 'filter']" class="me-1" />
 						BBC
@@ -210,10 +210,28 @@ const filterHasImages = ref('')
 const filterKeyword = ref('')
 const sortBy = ref('date')
 
-// Keyword patterns for quick filters
-const keywordPatterns = {
-	bbc: /\bbc\b/i,
-}
+// BBC-related keyword patterns (comprehensive list)
+const bbcKeywords = [
+	'bbc', 'interracial', 'black', 'ebony', 'bbc queen', 'bbc slut',
+	'black cock', 'big black', 'interracial sex', 'bbc anal', 'bbc blowjob',
+	'mandingo', 'blackzilla', 'monster black', 'bbc compilation',
+	'interracial couple', 'black men', 'white girl black'
+]
+
+// Common BBC performer names (well-known in the genre)
+const bbcPerformerNames = [
+	'mandingo', 'blackzilla', 'jon Jon', 'skinny', 'mrPete',
+	'charles dera', 'sir pierrick', 'marco banderas', 'mr wood',
+	'big d', 'bbc king', 'black daddy', 'bbc master'
+]
+
+// Combined pattern for BBC filter (keywords + performer names)
+const bbcPattern = computed(() => {
+	const allTerms = [...bbcKeywords, ...bbcPerformerNames]
+	// Escape special regex chars and create word boundary pattern
+	const escaped = allTerms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+	return new RegExp(`(${escaped.join('|')})`, 'i')
+})
 
 // Computed
 const filteredDownloadLinks = computed(() => {
@@ -240,12 +258,11 @@ const filteredPosts = computed(() => {
 		})
 	}
 
-	// Keyword filter (e.g., BBC)
-	if (filterKeyword.value && keywordPatterns[filterKeyword.value]) {
-		const pattern = keywordPatterns[filterKeyword.value]
+	// Keyword filter (BBC)
+	if (filterKeyword.value === 'bbc') {
 		filtered = filtered.filter((post) => {
 			const text = post.plain_text || ''
-			return pattern.test(text)
+			return bbcPattern.value.test(text)
 		})
 	}
 
