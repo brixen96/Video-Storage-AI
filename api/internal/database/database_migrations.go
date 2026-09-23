@@ -957,6 +957,22 @@ func runMigrations() error {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_plans_status ON companion_plans(status)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_plans_library ON companion_plans(library_id)`)
 
+	// Migration 58: Fix Simpcity domain from .is to .cr
+	log.Println("Migration 58: Fixing Simpcity URLs from .is to .cr...")
+	// Fix forum URLs in auto-update configs (JSON field)
+	if _, err := DB.Exec(`UPDATE scraper_auto_update_configs SET config_json = REPLACE(config_json, 'simpcity.is', 'simpcity.cr') WHERE scraper_type = 'simpcity' AND config_json LIKE '%simpcity.is%'`); err != nil {
+		log.Printf("Migration 58 (configs): %v", err)
+	}
+	// Fix thread URLs in scraped_threads
+	if _, err := DB.Exec(`UPDATE scraped_threads SET url = REPLACE(url, 'simpcity.is', 'simpcity.cr') WHERE source = 'simpcity' AND url LIKE '%simpcity.is%'`); err != nil {
+		log.Printf("Migration 58 (threads): %v", err)
+	}
+	// Fix download links that reference simpcity.is
+	if _, err := DB.Exec(`UPDATE scraped_download_links SET url = REPLACE(url, 'simpcity.is', 'simpcity.cr') WHERE provider = 'simpcity' AND url LIKE '%simpcity.is%'`); err != nil {
+		log.Printf("Migration 58 (links): %v", err)
+	}
+	log.Println("Migration 58: Simpcity URLs fixed")
+
 	return nil
 }
 

@@ -16,6 +16,57 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
+// domainMigrations maps old domains to their current replacements.
+// When a scraper encounters a URL with an old domain, it automatically redirects.
+var domainMigrations = map[string]string{
+	"simpcity.is":  "simpcity.cr",
+	"simpcity.su":  "simpcity.cr",
+}
+
+// migrateURL applies domain migrations to a URL, returning the updated URL.
+// If the domain was changed, it also persists the fix to the database.
+func migrateURL(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if newDomain, ok := domainMigrations[parsed.Host]; ok {
+		oldHost := parsed.Host
+		parsed.Host = newDomain
+		fixed := parsed.String()
+		log.Printf("🔄 Auto-migrating URL domain: %s → %s", oldHost, newDomain)
+		// Persist fix to database in background
+		go persistDomainFix(oldHost, newDomain)
+		return fixed
+	}
+	return rawURL
+}
+
+// persistDomainFix updates all URLs in the database when a domain migration is detected.
+func persistDomainFix(oldDomain, newDomain string) {
+	db := database.DB
+	if db == nil {
+		return
+	}
+	tables := []struct {
+		name   string
+		urlCol string
+	}{
+		{"scraped_threads", "url"},
+		{"scraped_posts", "source_url"},
+		{"scraped_download_links", "url"},
+	}
+	for _, t := range tables {
+		query := fmt.Sprintf("UPDATE %s SET %s = REPLACE(%s, ?, ?) WHERE %s LIKE ?",
+			t.name, t.urlCol, t.urlCol, t.urlCol)
+		db.Exec(query, oldDomain, newDomain, "%"+oldDomain+"%")
+	}
+	// Also fix auto-update configs
+	db.Exec(`UPDATE scraper_auto_update_configs SET config_json = REPLACE(config_json, ?, ?) WHERE config_json LIKE ?`,
+		oldDomain, newDomain, "%"+oldDomain+"%")
+	log.Printf("✅ Persisted domain fix: %s → %s across all tables", oldDomain, newDomain)
+}
+
 // ScraperService handles web scraping operations
 type ScraperService struct {
 	db                  *sql.DB
@@ -60,6 +111,9 @@ func (s *ScraperService) ScrapeThread(threadURL string) (*models.ScrapedThread, 
 	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
 	cleanURL = strings.TrimSuffix(cleanURL, "/latest")
 	cleanURL = strings.TrimSuffix(cleanURL, "/")
+
+	// Auto-migrate broken domains (e.g. simpcity.is → simpcity.cr)
+	cleanURL = migrateURL(cleanURL)
 
 	log.Printf("Scraping thread: %s", cleanURL)
 
@@ -268,6 +322,9 @@ func (s *ScraperService) ScrapePosts(threadURL string, threadID int64, activityI
 	cleanURL = strings.TrimSuffix(cleanURL, "/unread")
 	cleanURL = strings.TrimSuffix(cleanURL, "/latest")
 	cleanURL = strings.TrimSuffix(cleanURL, "/")
+
+	// Auto-migrate broken domains (e.g. simpcity.is → simpcity.cr)
+	cleanURL = migrateURL(cleanURL)
 
 	log.Printf("Scraping posts from thread: %s", cleanURL)
 

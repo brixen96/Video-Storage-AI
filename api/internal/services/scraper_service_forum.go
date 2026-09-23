@@ -39,6 +39,9 @@ type ScrapeCheckpoint struct {
 
 // ScrapeForumCategory scrapes all threads from a forum category (with pagination)
 func (s *ScraperService) ScrapeForumCategory(forumURL string, activityID ...int) ([]ForumThreadInfo, error) {
+	// Auto-migrate broken domains (e.g. simpcity.is → simpcity.cr)
+	forumURL = migrateURL(forumURL)
+
 	log.Printf("Starting forum category scrape: %s", forumURL)
 
 	var allThreads []ForumThreadInfo

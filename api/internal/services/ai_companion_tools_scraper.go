@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -141,5 +142,135 @@ func (s *AICompanionService) registerScraperTools() {
 			return map[string]interface{}{"error": "page1_url is required"}, nil
 		}
 		return s.fetchSiteInfo(page1URL, page2URL)
+	})
+
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "fix_scraped_urls",
+			Description: "Find and fix broken/old URLs in scraped data. Replaces deprecated domains (e.g. simpcity.is → simpcity.cr) across threads, posts, and download links. Use when a scraper reports fetch failures due to domain changes.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"old_domain":  map[string]interface{}{"type": "string", "description": "The old/broken domain to replace (e.g. 'simpcity.is')"},
+					"new_domain":  map[string]interface{}{"type": "string", "description": "The new domain to use (e.g. 'simpcity.cr')"},
+					"dry_run":     map[string]interface{}{"type": "boolean", "description": "If true, only count affected rows without changing them (default: true)"},
+					"source":      map[string]interface{}{"type": "string", "description": "Filter by source (e.g. 'simpcity'). Leave empty for all sources."},
+				},
+				"required": []string{"old_domain", "new_domain"},
+			},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		oldDomain, _ := args["old_domain"].(string)
+		newDomain, _ := args["new_domain"].(string)
+		dryRun, _ := args["dry_run"].(bool)
+		source, _ := args["source"].(string)
+
+		if oldDomain == "" || newDomain == "" {
+			return map[string]interface{}{"error": "old_domain and new_domain are required"}, nil
+		}
+		// Default to dry run for safety
+		if !args["dry_run"].(bool) && args["dry_run"] == nil {
+			dryRun = true
+		}
+
+		type fixResult struct {
+			Table       string `json:"table"`
+			Affected    int    `json:"affected"`
+			SampleURLs  []string `json:"sample_urls,omitempty"`
+		}
+		var fixes []fixResult
+		tables := []struct {
+			name   string
+			urlCol string
+			srcCol string
+		}{
+			{"scraped_threads", "url", "source"},
+			{"scraped_posts", "source_url", "source"},
+			{"scraped_download_links", "url", "provider"},
+		}
+
+		for _, t := range tables {
+			// Count affected rows
+			countQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s LIKE ?",
+				t.name, t.urlCol)
+			countArgs := []interface{}{"%" + oldDomain + "%"}
+			if source != "" && t.srcCol != "" {
+				countQuery += fmt.Sprintf(" AND %s = ?", t.srcCol)
+				countArgs = append(countArgs, source)
+			}
+			var count int
+			s.db.QueryRow(countQuery, countArgs...).Scan(&count)
+
+			fix := fixResult{Table: t.name, Affected: count}
+
+			// Get sample URLs
+			if count > 0 {
+				sampleQuery := fmt.Sprintf("SELECT %s FROM %s WHERE %s LIKE ? LIMIT 3",
+					t.urlCol, t.name, t.urlCol)
+				sampleArgs := []interface{}{"%" + oldDomain + "%"}
+				rows, err := s.db.Query(sampleQuery, sampleArgs...)
+				if err == nil {
+					defer rows.Close()
+					for rows.Next() {
+						var u string
+						if rows.Scan(&u) == nil {
+							fix.SampleURLs = append(fix.SampleURLs, u)
+						}
+					}
+				}
+			}
+
+			// Apply fix if not dry run
+			if !dryRun && count > 0 {
+				updateQuery := fmt.Sprintf("UPDATE %s SET %s = REPLACE(%s, ?, ?)",
+					t.name, t.urlCol, t.urlCol)
+				updateArgs := []interface{}{oldDomain, newDomain}
+				if source != "" && t.srcCol != "" {
+					updateQuery += fmt.Sprintf(" WHERE %s LIKE ? AND %s = ?", t.urlCol, t.srcCol)
+					updateArgs = append(updateArgs, "%"+oldDomain+"%", source)
+				} else {
+					updateQuery += fmt.Sprintf(" WHERE %s LIKE ?", t.urlCol)
+					updateArgs = append(updateArgs, "%"+oldDomain+"%")
+				}
+				s.db.Exec(updateQuery, updateArgs...)
+			}
+
+			fixes = append(fixes, fix)
+		}
+
+		// Also fix auto-update configs
+		var configCount int
+		configQuery := "SELECT COUNT(*) FROM scraper_auto_update_configs WHERE config_json LIKE ?"
+		configArgs := []interface{}{"%" + oldDomain + "%"}
+		if source != "" {
+			configQuery += " AND scraper_type = ?"
+			configArgs = append(configArgs, source)
+		}
+		s.db.QueryRow(configQuery, configArgs...).Scan(&configCount)
+
+		if !dryRun && configCount > 0 {
+			configUpdate := "UPDATE scraper_auto_update_configs SET config_json = REPLACE(config_json, ?, ?) WHERE config_json LIKE ?"
+			configUpdateArgs := []interface{}{oldDomain, newDomain, "%" + oldDomain + "%"}
+			if source != "" {
+				configUpdate += " AND scraper_type = ?"
+				configUpdateArgs = append(configUpdateArgs, source)
+			}
+			s.db.Exec(configUpdate, configUpdateArgs...)
+		}
+
+		fixes = append(fixes, fixResult{Table: "scraper_auto_update_configs (config_json)", Affected: configCount})
+
+		totalAffected := 0
+		for _, f := range fixes {
+			totalAffected += f.Affected
+		}
+
+		return map[string]interface{}{
+			"action":         map[bool]string{true: "preview", false: "applied"}[dryRun],
+			"old_domain":     oldDomain,
+			"new_domain":     newDomain,
+			"total_affected": totalAffected,
+			"tables":         fixes,
+		}, nil
 	})
 }
