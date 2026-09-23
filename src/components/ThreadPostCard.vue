@@ -10,9 +10,9 @@
 				</div>
 			</div>
 			<div class="post-meta">
-				<span v-if="postImages.length > 0" class="meta-badge">
+				<span v-if="visibleImages.length > 0" class="meta-badge">
 					<font-awesome-icon :icon="['fas', 'image']" />
-					{{ postImages.length }}
+					{{ visibleImages.length }}
 				</span>
 				<span v-if="links.length > 0" class="meta-badge">
 					<font-awesome-icon :icon="['fas', 'download']" />
@@ -29,12 +29,12 @@
 		<div v-if="post.content" class="post-content" v-html="sanitizeHTML(post.content)"></div>
 
 		<!-- Images and Links Combined -->
-		<div v-if="postImages.length > 0 || links.length > 0" class="post-media">
+		<div v-if="visibleImages.length > 0 || links.length > 0" class="post-media">
 			<!-- Image Gallery -->
-			<div v-if="postImages.length > 0" class="media-grid">
-				<div v-for="(image, idx) in postImages" :key="idx" class="media-item">
+			<div v-if="visibleImages.length > 0" class="media-grid">
+				<div v-for="(image, idx) in visibleImages" :key="idx" class="media-item">
 					<div class="image-wrapper" @click="openImage(image.url)">
-						<img :src="image.thumbnail_url || image.url" :alt="`Image ${idx + 1}`" />
+						<img :src="image.thumbnail_url || image.url" :alt="`Image ${idx + 1}`" @error="onImageError(idx)" />
 						<div class="image-overlay">
 							<font-awesome-icon :icon="['fas', 'search-plus']" />
 						</div>
@@ -86,7 +86,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import DOMPurify from 'dompurify'
 import { openInFirefox } from '@/services/api'
 
@@ -97,6 +97,17 @@ const props = defineProps({
 defineEmits(['mark-downloaded', 'mark-failed', 'reset-status'])
 
 const postImages = computed(() => props.post.metadata?.attachments || [])
+
+// Track broken images by index - hidden by default once error is detected
+const brokenImages = ref(new Set())
+
+const visibleImages = computed(() =>
+	postImages.value.filter((_, idx) => !brokenImages.value.has(idx))
+)
+
+const onImageError = (idx) => {
+	brokenImages.value.add(idx)
+}
 
 const hasVerifiedLinks = computed(() =>
 	props.links.some((l) => l.status === 'active' || l.status === 'dead' || l.status === 'expired')
@@ -290,6 +301,17 @@ const openImage = (url) => openInFirefox(url)
 
 .post-content :deep(a:hover) {
 	text-decoration: underline;
+}
+
+/* Hide broken images in HTML content - they take up blank space otherwise */
+.post-content :deep(img) {
+	max-width: 100%;
+	border-radius: 8px;
+}
+
+.post-content :deep(img[src=""]),
+.post-content :deep(img:not([src])) {
+	display: none;
 }
 
 .post-media {
