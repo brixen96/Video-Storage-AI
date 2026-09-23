@@ -213,7 +213,7 @@ const sortBy = ref('date')
 // BBC-related keyword patterns (more specific to avoid false positives)
 const bbcKeywords = [
 	'bbc', 'bbc queen', 'bbc slut', 'bbc anal', 'bbc blowjob', 'bbc compilation',
-	'bbc king', 'big black cock', 'big black dick',
+	'bbc king', 'big black cock', 'big black dick', 'black cock', 'black dick',
 	'interracial sex', 'interracial anal', 'interracial gangbang',
 	'blackzilla', 'monster black',
 	'mandingo'
@@ -245,6 +245,14 @@ const filteredDownloadLinks = computed(() => {
 
 const filteredPosts = computed(() => {
 	let filtered = posts.value
+
+	// Hide posts where ALL links are dead/expired by default
+	filtered = filtered.filter((post) => {
+		const postLinks = getPostLinks(post.id)
+		if (postLinks.length === 0) return true // No links = keep (might have text/images)
+		const hasActiveLink = postLinks.some((link) => link.status !== 'dead' && link.status !== 'expired')
+		return hasActiveLink
+	})
 
 	// Search filter - use plain_text for accurate text matching
 	if (searchQuery.value) {
