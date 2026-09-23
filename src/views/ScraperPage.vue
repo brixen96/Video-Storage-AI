@@ -55,13 +55,7 @@
 				<button v-for="tab in scraperTabs" :key="tab.id" class="scraper-tab" :class="{ active: activeTab === `tab-${tab.id}` }" :style="{ borderColor: tab.color }" @click="selectTab(tab.id)">
 					<font-awesome-icon :icon="['fas', tab.icon]" class="me-2" />
 					{{ tab.name }}
-					<button class="btn-close-tab" @click.stop="confirmDeleteTab(tab)" title="Delete tab">
-						<font-awesome-icon :icon="['fas', 'times']" />
-					</button>
-				</button>
 
-				<!-- Add New Tab Button -->
-				<button class="scraper-tab add-tab" @click="showAddTabModal = true">
 					<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
 					Add Tab
 				</button>
@@ -265,6 +259,10 @@
 										<button class="btn btn-outline-secondary btn-sm w-100" @click="editScraperTab(tab)">
 											<font-awesome-icon :icon="['fas', 'edit']" class="me-2" />
 											Edit Tab
+										</button>
+										<button class="btn btn-outline-danger btn-sm w-100" @click="confirmDeleteTab(tab)">
+											<font-awesome-icon :icon="['fas', 'trash-alt']" class="me-2" />
+											Delete Tab
 										</button>
 										<button class="btn btn-outline-danger btn-sm w-100" @click="clearCustomTabVideos(tab)">
 											<font-awesome-icon :icon="['fas', 'trash']" class="me-2" />
