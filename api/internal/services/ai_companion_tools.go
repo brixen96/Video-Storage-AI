@@ -39,6 +39,7 @@ func (s *AICompanionService) buildToolRegistry() {
 	s.registerBatchMoveByPatternTool()
 	s.registerUniversalScraperTools()
 	s.registerTaskTools()
+	s.registerAgencyTools()
 }
 
 // getLMToolDefinitions returns all registered tool definitions, sorted by name

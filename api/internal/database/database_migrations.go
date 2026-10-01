@@ -1110,6 +1110,23 @@ func runMigrations() error {
 	}
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_evaluations_created ON companion_evaluations(created_at DESC)`)
 
+	// Migration 67: Companion autonomy modes + supervisor action proposals
+	var hasAutonomyMode int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ai_config') WHERE name = 'autonomy_mode'`).Scan(&hasAutonomyMode)
+	if hasAutonomyMode == 0 {
+		DB.Exec(`ALTER TABLE ai_config ADD COLUMN autonomy_mode TEXT DEFAULT 'assist'`)
+		log.Println("Migration 67: Added autonomy_mode column to ai_config")
+	}
+	for _, col := range []string{"proposed_tool", "proposed_args", "proposal_status"} {
+		var n int
+		DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('companion_evaluations') WHERE name = ?`, col).Scan(&n)
+		if n == 0 {
+			DB.Exec(fmt.Sprintf(`ALTER TABLE companion_evaluations ADD COLUMN %s TEXT`, col))
+		}
+	}
+	DB.Exec(`UPDATE companion_evaluations SET proposal_status = 'none' WHERE proposal_status IS NULL OR proposal_status = ''`)
+	log.Println("Migration 67: Added proposal columns to companion_evaluations")
+
 	return nil
 }
 

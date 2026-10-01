@@ -37,10 +37,15 @@ export default {
 		// Companion Supervisor evaluations → toasts (full write-up lives in Monitor tab)
 		this.wsUnsubCompanion = websocketService.on('companion_event', (evt) => {
 			if (evt?.type !== 'supervisor_evaluation') return
-			if (evt.data?.verdict === 'WARNING') {
-				this.$refs.toast.warning('⚠️ Companion: ' + evt.message, evt.data?.detail || '', 10000)
-			} else if (evt.data?.verdict === 'TIP') {
-				this.$refs.toast.info('💡 Companion tip: ' + evt.message, evt.data?.detail || '', 8000)
+			const d = evt.data || {}
+			if (d.proposed_tool && d.proposal_status === 'pending') {
+				this.$refs.toast.info('🤖 Companion proposal: ' + d.proposed_tool, 'Review and approve it in the Monitor tab → Companion Observations', 10000)
+			} else if (d.proposal_status === 'auto_executed') {
+				this.$refs.toast.success('🤖 Companion auto-ran: ' + d.proposed_tool, evt.message || '', 9000)
+			} else if (d.verdict === 'WARNING') {
+				this.$refs.toast.warning('⚠️ Companion: ' + evt.message, d.detail || '', 10000)
+			} else if (d.verdict === 'TIP') {
+				this.$refs.toast.info('💡 Companion tip: ' + evt.message, d.detail || '', 8000)
 			}
 		})
 	},

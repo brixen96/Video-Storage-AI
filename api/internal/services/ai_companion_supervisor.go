@@ -40,6 +40,19 @@ const (
 	supervisorBatchLimit = 30               // max actions considered per evaluation
 )
 
+// supervisorProposalTools — the only tools the supervisor may propose (and the
+// only ones autopilot may auto-execute). All are additive/idempotent operations
+// on scraped data or read-only scans. Destructive tools (delete/move/mutate)
+// are intentionally excluded — those stay behind explicit chat commands.
+var supervisorProposalTools = map[string]bool{
+	"rescrape_thread":        true,
+	"start_scraper_job":      true,
+	"scan_library":           true,
+	"enhance_thread":         true,
+	"validate_thread_images": true,
+	"batch_enhance_threads":  true,
+}
+
 // supervisorAction is a recorded UI action used in evaluation batches.
 type supervisorAction struct {
 	ActionType string    `json:"action_type"`
@@ -148,6 +161,10 @@ func (s *AICompanionService) evaluateRecentActions(since, now time.Time) {
 	if !config.Enabled {
 		return
 	}
+	mode := config.AutonomyMode
+	if !IsValidAutonomyMode(mode) {
+		mode = "assist"
+	}
 
 	// Build compact action list
 	var actionLines strings.Builder
@@ -165,6 +182,17 @@ Rules:
 - [OK] = nothing notable. [TIP] = a suggestion or improvement. [WARNING] = something risky, wrong, or wasteful.
 - Be honest and blunt. Do not invent problems to seem useful. If the workflow is fine, say [OK].
 - Brix is the developer — technical language is fine. Never be condescending.`
+
+	if mode != "assist" {
+		systemPrompt += fmt.Sprintf(`
+
+## Action proposals (mode: %s)
+You may propose ONE concrete action that would help Brix, based on the actions you just observed. Output a THIRD line in exactly one of these forms:
+ACTION: tool_name {"arg": "value"}
+ACTION: none
+Allowed tools: rescrape_thread(thread_id), start_scraper_job(tab_id, url), scan_library(library_id), enhance_thread(thread_id), validate_thread_images(thread_id), batch_enhance_threads(thread_ids)
+Only propose when the observed actions clearly call for it — otherwise output ACTION: none. Never propose destructive operations.`, mode)
+	}
 
 	userMessage := "Recent actions by Brix in the app UI:\n" + actionLines.String() + "\nEvaluate."
 
@@ -215,11 +243,43 @@ Rules:
 
 	verdict, summary, detail := parseSupervisorVerdict(result.Choices[0].Message.Content)
 
+	// Parse optional ACTION proposal line (copilot/autopilot modes)
+	proposedTool, proposedArgs, proposalStatus := "", map[string]interface{}{}, "none"
+	if mode != "assist" {
+		tool, toolArgs := parseSupervisorAction(result.Choices[0].Message.Content)
+		if tool != "" && supervisorProposalTools[tool] {
+			proposedTool = tool
+			proposedArgs = toolArgs
+			proposalStatus = "pending"
+			if mode == "autopilot" {
+				// Autopilot: execute safe additive actions automatically
+				execResult, execErr := s.ExecuteTool(tool, toolArgs)
+				if execErr != nil {
+					proposalStatus = "failed"
+					detail = strings.TrimSpace(detail + "\n\n🤖 Auto-exec failed for " + tool + ": " + execErr.Error())
+					log.Printf("[Supervisor] Autopilot exec failed for %s: %v", tool, execErr)
+				} else {
+					proposalStatus = "auto_executed"
+					detail = strings.TrimSpace(detail + "\n\n🤖 Auto-executed " + tool + ".")
+					if b, mErr := json.Marshal(execResult); mErr == nil {
+						log.Printf("[Supervisor] Autopilot executed %s: %s", tool, truncate(string(b), 200))
+					}
+				}
+			}
+		}
+	}
+	proposedArgsJSON := ""
+	if proposedTool != "" {
+		if b, mErr := json.Marshal(proposedArgs); mErr == nil {
+			proposedArgsJSON = string(b)
+		}
+	}
+
 	actionsJSON, _ := json.Marshal(batch)
 	_, err = s.db.Exec(
-		`INSERT INTO companion_evaluations (verdict, summary, detail, actions_json, model, latency_ms, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		verdict, summary, detail, string(actionsJSON), config.ModelName, latencyMs, time.Now(),
+		`INSERT INTO companion_evaluations (verdict, summary, detail, actions_json, model, latency_ms, proposed_tool, proposed_args, proposal_status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		verdict, summary, detail, string(actionsJSON), config.ModelName, latencyMs, proposedTool, proposedArgsJSON, proposalStatus, time.Now(),
 	)
 	if err != nil {
 		log.Printf("[Supervisor] Failed to store evaluation: %v", err)
@@ -238,17 +298,24 @@ Rules:
 
 	log.Printf("[Supervisor] Evaluated %d action(s): [%s] %s", len(batch), verdict, summary)
 
-	// Broadcast notable evaluations (Toast + Monitor delivery)
-	if verdict != "OK" {
+	// Broadcast notable evaluations and proposals (Toast + Monitor delivery)
+	if verdict != "OK" || proposalStatus != "none" {
 		severity := "info"
 		if verdict == "WARNING" {
 			severity = "warning"
 		}
+		message := summary
+		if proposalStatus == "pending" {
+			message = "Proposal: " + proposedTool + " — " + summary
+		} else if proposalStatus == "auto_executed" {
+			message = "Auto-ran " + proposedTool + ": " + summary
+		}
 		s.emitEvent(CompanionEvent{
 			Type: "supervisor_evaluation", Source: "supervisor",
-			Message: summary, Severity: severity,
+			Message: message, Severity: severity,
 			Data: map[string]interface{}{
 				"kind": "supervisor_evaluation", "verdict": verdict, "detail": detail,
+				"proposed_tool": proposedTool, "proposal_status": proposalStatus,
 			},
 		})
 	}
@@ -279,13 +346,46 @@ func parseSupervisorVerdict(content string) (verdict, summary, detail string) {
 	return
 }
 
+// parseSupervisorAction extracts the ACTION: line from the LLM response.
+// Returns an empty tool when absent, malformed, or "none".
+func parseSupervisorAction(content string) (string, map[string]interface{}) {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToUpper(line), "ACTION:") {
+			continue
+		}
+		rest := strings.TrimSpace(line[len("ACTION:"):])
+		if rest == "" || strings.EqualFold(rest, "none") {
+			return "", nil
+		}
+		parts := strings.SplitN(rest, " ", 2)
+		tool := strings.TrimSpace(parts[0])
+		if tool == "" {
+			return "", nil
+		}
+		args := map[string]interface{}{}
+		if len(parts) == 2 {
+			raw := strings.TrimSpace(parts[1])
+			if raw != "" {
+				if err := json.Unmarshal([]byte(raw), &args); err != nil {
+					log.Printf("[Supervisor] Ignoring proposal with malformed args for %s: %v", tool, err)
+					return "", nil
+				}
+			}
+		}
+		return tool, args
+	}
+	return "", nil
+}
+
 // GetEvaluations returns recent supervisor evaluations for the Monitor tab.
 func (s *AICompanionService) GetEvaluations(limit int) ([]map[string]interface{}, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
 	rows, err := s.db.Query(
-		`SELECT id, verdict, summary, COALESCE(detail,''), COALESCE(actions_json,''), COALESCE(model,''), latency_ms, created_at
+		`SELECT id, verdict, summary, COALESCE(detail,''), COALESCE(actions_json,''), COALESCE(model,''), latency_ms,
+		        COALESCE(proposed_tool,''), COALESCE(proposed_args,''), COALESCE(proposal_status,'none'), created_at
 		 FROM companion_evaluations ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -296,10 +396,12 @@ func (s *AICompanionService) GetEvaluations(limit int) ([]map[string]interface{}
 	for rows.Next() {
 		var id, latencyMs int64
 		var verdict, summary, detail, actionsJSON, model, createdAt string
-		if rows.Scan(&id, &verdict, &summary, &detail, &actionsJSON, &model, &latencyMs, &createdAt) == nil {
+		var proposedTool, proposedArgs, proposalStatus string
+		if rows.Scan(&id, &verdict, &summary, &detail, &actionsJSON, &model, &latencyMs, &proposedTool, &proposedArgs, &proposalStatus, &createdAt) == nil {
 			item := map[string]interface{}{
 				"id": id, "verdict": verdict, "summary": summary, "detail": detail,
 				"model": model, "latency_ms": latencyMs, "created_at": createdAt,
+				"proposed_tool": proposedTool, "proposed_args": proposedArgs, "proposal_status": proposalStatus,
 			}
 			if actionsJSON != "" {
 				var actions []map[string]interface{}
@@ -311,4 +413,67 @@ func (s *AICompanionService) GetEvaluations(limit int) ([]map[string]interface{}
 		}
 	}
 	return results, nil
+}
+
+// ExecuteProposal runs a pending supervisor proposal after user approval.
+// The tool must be in the proposal whitelist (defense in depth).
+func (s *AICompanionService) ExecuteProposal(id int64) (map[string]interface{}, error) {
+	var tool, argsJSON, status, detail string
+	err := s.db.QueryRow(
+		`SELECT COALESCE(proposed_tool,''), COALESCE(proposed_args,''), COALESCE(proposal_status,'none'), COALESCE(detail,'')
+		 FROM companion_evaluations WHERE id = ?`, id).Scan(&tool, &argsJSON, &status, &detail)
+	if err != nil {
+		return nil, fmt.Errorf("evaluation not found")
+	}
+	if status != "pending" {
+		return nil, fmt.Errorf("proposal is not pending (current status: %s)", status)
+	}
+	if tool == "" || !supervisorProposalTools[tool] {
+		return nil, fmt.Errorf("tool not allowed: %s", tool)
+	}
+	args := map[string]interface{}{}
+	if argsJSON != "" {
+		_ = json.Unmarshal([]byte(argsJSON), &args)
+	}
+
+	result, execErr := s.ExecuteTool(tool, args)
+	resultSummary := ""
+	if execErr != nil {
+		resultSummary = "error: " + execErr.Error()
+	} else if b, mErr := json.Marshal(result); mErr == nil {
+		resultSummary = truncate(string(b), 300)
+	}
+	newStatus := "approved"
+	if execErr != nil {
+		newStatus = "failed"
+	}
+	newDetail := strings.TrimSpace(detail + "\n\n✅ Executed " + tool + ": " + resultSummary)
+	s.db.Exec(`UPDATE companion_evaluations SET proposal_status = ?, detail = ? WHERE id = ?`, newStatus, newDetail, id)
+
+	log.Printf("[Supervisor] Proposal %d executed by user: %s (status=%s)", id, tool, newStatus)
+	s.emitEvent(CompanionEvent{
+		Type: "supervisor_evaluation", Source: "supervisor",
+		Message: "Executed proposal: " + tool, Severity: "info",
+		Data: map[string]interface{}{
+			"kind": "supervisor_proposal_executed", "proposed_tool": tool, "proposal_status": newStatus,
+		},
+	})
+	return map[string]interface{}{"executed": execErr == nil, "tool": tool, "result": result}, nil
+}
+
+// RejectProposal marks a pending supervisor proposal as rejected.
+func (s *AICompanionService) RejectProposal(id int64) (map[string]interface{}, error) {
+	var status, tool string
+	err := s.db.QueryRow(
+		`SELECT COALESCE(proposal_status,'none'), COALESCE(proposed_tool,'')
+		 FROM companion_evaluations WHERE id = ?`, id).Scan(&status, &tool)
+	if err != nil {
+		return nil, fmt.Errorf("evaluation not found")
+	}
+	if status != "pending" {
+		return nil, fmt.Errorf("proposal is not pending (current status: %s)", status)
+	}
+	s.db.Exec(`UPDATE companion_evaluations SET proposal_status = 'rejected' WHERE id = ?`, id)
+	log.Printf("[Supervisor] Proposal %d rejected by user: %s", id, tool)
+	return map[string]interface{}{"rejected": true, "tool": tool}, nil
 }

@@ -242,6 +242,8 @@ export const aiAPI = {
 	// Companion Supervisor
 	trackActions: (actions) => api.post('/ai/companion/actions', { actions }),
 	getCompanionEvaluations: (limit = 20) => api.get('/ai/companion/evaluations', { params: { limit } }),
+	approveProposal: (id) => api.post(`/ai/companion/proposals/${id}/approve`),
+	rejectProposal: (id) => api.post(`/ai/companion/proposals/${id}/reject`),
 
 	// Memory management
 	saveMemory: (data) => api.post('/ai/memories', data),

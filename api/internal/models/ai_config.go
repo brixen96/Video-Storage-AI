@@ -11,6 +11,7 @@ type AIConfig struct {
 	Temperature     float64   `json:"temperature"`
 	MaxTokens       int       `json:"maxTokens"`
 	ReasoningEffort string    `json:"reasoningEffort"` // none, low, medium, high
+	AutonomyMode    string    `json:"autonomyMode"`    // assist, copilot, autopilot
 	Enabled         bool      `json:"enabled"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`

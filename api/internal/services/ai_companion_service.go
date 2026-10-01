@@ -349,10 +349,11 @@ func (s *AICompanionService) GetAIConfig() models.AIConfig {
 		Temperature:     0.7,
 		MaxTokens:       8192,
 		ReasoningEffort: "medium",
+		AutonomyMode:    "assist",
 		Enabled:         true,
 	}
-	if err := s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), enabled FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.Enabled,
+	if err := s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), COALESCE(autonomy_mode, 'assist'), enabled FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.AutonomyMode, &config.Enabled,
 	); err != nil {
 		log.Printf("[AI] Failed to read ai_config, using defaults: %v", err)
 	}
@@ -365,7 +366,19 @@ func (s *AICompanionService) GetAIConfig() models.AIConfig {
 	if !IsValidReasoningEffort(config.ReasoningEffort) {
 		config.ReasoningEffort = "medium"
 	}
+	if !IsValidAutonomyMode(config.AutonomyMode) {
+		config.AutonomyMode = "assist"
+	}
 	return config
+}
+
+// IsValidAutonomyMode returns true when mode is one of assist/copilot/autopilot.
+func IsValidAutonomyMode(mode string) bool {
+	switch mode {
+	case "assist", "copilot", "autopilot":
+		return true
+	}
+	return false
 }
 
 // IsValidReasoningEffort returns true when effort is one of none/low/medium/high.

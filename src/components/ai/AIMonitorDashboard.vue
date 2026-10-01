@@ -161,6 +161,29 @@
 					<div v-if="ev.actions && ev.actions.length" class="eval-actions">
 						<span v-for="(a, i) in ev.actions" :key="i" class="eval-action-chip" :title="a.summary">{{ a.summary }}</span>
 					</div>
+					<div v-if="ev.proposed_tool && ev.proposal_status === 'pending'" class="proposal-box">
+						<div class="proposal-title">
+							<font-awesome-icon :icon="['fas', 'robot']" class="me-1" />
+							Proposal: <code>{{ ev.proposed_tool }}</code>
+						</div>
+						<pre v-if="ev.proposed_args" class="proposal-args">{{ ev.proposed_args }}</pre>
+						<div class="proposal-actions">
+							<button class="btn btn-sm btn-success" @click="approveProposal(ev)" :disabled="actingOn !== null">
+								<font-awesome-icon :icon="['fas', 'check']" class="me-1" />
+								Approve &amp; Run
+							</button>
+							<button class="btn btn-sm btn-outline-secondary" @click="rejectProposal(ev)" :disabled="actingOn !== null">Reject</button>
+						</div>
+					</div>
+					<div v-else-if="ev.proposal_status === 'auto_executed'" class="proposal-box auto">
+						🤖 Auto-executed: <code>{{ ev.proposed_tool }}</code>
+					</div>
+					<div v-else-if="ev.proposal_status === 'approved'" class="proposal-box auto">
+						✅ Approved &amp; executed: <code>{{ ev.proposed_tool }}</code>
+					</div>
+					<div v-else-if="ev.proposal_status === 'rejected'" class="proposal-box rejected">
+						❌ Rejected: <code>{{ ev.proposed_tool }}</code>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -209,6 +232,37 @@ const loading = ref(false)
 const metrics = ref({})
 const toolStats = ref([])
 const evaluations = ref([])
+const actingOn = ref(null)
+
+async function approveProposal(ev) {
+	if (actingOn.value) return
+	actingOn.value = ev.id
+	try {
+		const res = await fetch(`${API_ORIGIN}/api/v1/ai/companion/proposals/${ev.id}/approve`, { method: 'POST' })
+		const data = await res.json()
+		if (!data.success) console.error('Approve failed:', data.message)
+	} catch (err) {
+		console.error('Approve failed:', err)
+	} finally {
+		actingOn.value = null
+		refreshData()
+	}
+}
+
+async function rejectProposal(ev) {
+	if (actingOn.value) return
+	actingOn.value = ev.id
+	try {
+		const res = await fetch(`${API_ORIGIN}/api/v1/ai/companion/proposals/${ev.id}/reject`, { method: 'POST' })
+		const data = await res.json()
+		if (!data.success) console.error('Reject failed:', data.message)
+	} catch (err) {
+		console.error('Reject failed:', err)
+	} finally {
+		actingOn.value = null
+		refreshData()
+	}
+}
 
 const tokenPercentages = computed(() => {
 	const total = metrics.value.total_tokens_used || 1
@@ -369,6 +423,49 @@ onMounted(refreshData)
 	border-radius: 10px;
 	padding: 0.15rem 0.55rem;
 	color: rgba(255, 255, 255, 0.6);
+}
+
+/* Supervisor proposals */
+.proposal-box {
+	margin-top: 0.5rem;
+	background: rgba(0, 217, 255, 0.06);
+	border: 1px solid rgba(0, 217, 255, 0.25);
+	border-radius: 8px;
+	padding: 0.55rem 0.75rem;
+	font-size: 0.82rem;
+}
+
+.proposal-box.auto {
+	border-color: rgba(40, 167, 69, 0.35);
+	background: rgba(40, 167, 69, 0.06);
+}
+
+.proposal-box.rejected {
+	border-color: rgba(255, 255, 255, 0.15);
+	background: rgba(0, 0, 0, 0.2);
+	opacity: 0.7;
+}
+
+.proposal-box code {
+	color: #00d9ff;
+}
+
+.proposal-args {
+	font-size: 0.7rem;
+	background: rgba(0, 0, 0, 0.3);
+	border-radius: 4px;
+	padding: 0.35rem 0.5rem;
+	margin: 0.35rem 0;
+	white-space: pre-wrap;
+	word-break: break-all;
+	max-height: 90px;
+	overflow-y: auto;
+}
+
+.proposal-actions {
+	display: flex;
+	gap: 0.5rem;
+	margin-top: 0.45rem;
 }
 
 .btn-refresh {

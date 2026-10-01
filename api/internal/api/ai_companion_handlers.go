@@ -267,6 +267,46 @@ func getCompanionEvaluations(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": evals, "count": len(evals)})
 }
 
+// approveProposal executes a supervisor-proposed action after user approval
+func approveProposal(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	var id int64
+	fmt.Sscanf(c.Param("id"), "%d", &id)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid proposal id", ""))
+		return
+	}
+	result, err := aiCompanionService.ExecuteProposal(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Cannot execute proposal", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// rejectProposal marks a supervisor proposal as rejected
+func rejectProposal(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	var id int64
+	fmt.Sscanf(c.Param("id"), "%d", &id)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid proposal id", ""))
+		return
+	}
+	result, err := aiCompanionService.RejectProposal(id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Cannot reject proposal", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // aiCompanionChat handles chat messages to the AI Companion
 func aiCompanionChat(c *gin.Context) {
 	if aiCompanionService == nil {
@@ -514,8 +554,8 @@ func deleteAIMemory(c *gin.Context) {
 func getAIConfig(c *gin.Context) {
 	db := database.GetDB()
 	var config models.AIConfig
-	err := db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
+	err := db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), COALESCE(autonomy_mode, 'assist'), enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.AutonomyMode, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
 	)
 	if err != nil {
 		config = models.AIConfig{
@@ -526,6 +566,7 @@ func getAIConfig(c *gin.Context) {
 			Temperature:     0.7,
 			MaxTokens:       8192,
 			ReasoningEffort: "medium",
+			AutonomyMode:    "assist",
 			Enabled:         true,
 			CreatedAt:       time.Now(),
 			UpdatedAt:       time.Now(),
@@ -536,6 +577,9 @@ func getAIConfig(c *gin.Context) {
 	}
 	if !services.IsValidReasoningEffort(config.ReasoningEffort) {
 		config.ReasoningEffort = "medium"
+	}
+	if !services.IsValidAutonomyMode(config.AutonomyMode) {
+		config.AutonomyMode = "assist"
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -557,11 +601,14 @@ func updateAIConfig(c *gin.Context) {
 	if !services.IsValidReasoningEffort(config.ReasoningEffort) {
 		config.ReasoningEffort = "medium"
 	}
+	if !services.IsValidAutonomyMode(config.AutonomyMode) {
+		config.AutonomyMode = "assist"
+	}
 
 	db := database.GetDB()
 	_, err := db.Exec(`
-		INSERT INTO ai_config (id, api_url, api_key, model_name, temperature, max_tokens, reasoning_effort, enabled, updated_at)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO ai_config (id, api_url, api_key, model_name, temperature, max_tokens, reasoning_effort, autonomy_mode, enabled, updated_at)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			api_url = excluded.api_url,
 			api_key = excluded.api_key,
@@ -569,9 +616,10 @@ func updateAIConfig(c *gin.Context) {
 			temperature = excluded.temperature,
 			max_tokens = excluded.max_tokens,
 			reasoning_effort = excluded.reasoning_effort,
+			autonomy_mode = excluded.autonomy_mode,
 			enabled = excluded.enabled,
 			updated_at = excluded.updated_at`,
-		config.APIURL, config.APIKey, config.ModelName, config.Temperature, config.MaxTokens, config.ReasoningEffort, config.Enabled, time.Now(),
+		config.APIURL, config.APIKey, config.ModelName, config.Temperature, config.MaxTokens, config.ReasoningEffort, config.AutonomyMode, config.Enabled, time.Now(),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(

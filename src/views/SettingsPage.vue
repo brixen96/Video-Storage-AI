@@ -441,6 +441,17 @@
 									<small class="text-muted">Controls OpenRouter reasoning tokens. Higher = smarter but slower and costs more tokens.</small>
 								</div>
 							</div>
+							<div class="row g-3 mb-3">
+								<div class="col-md-3">
+									<label class="form-label text-muted small">Companion Autonomy</label>
+									<select v-model="aiConfig.autonomyMode" class="form-select bg-dark text-white border-secondary">
+										<option value="assist">Assist (comments only)</option>
+										<option value="copilot">Co-pilot (proposes actions)</option>
+										<option value="autopilot">Autopilot (runs safe actions)</option>
+									</select>
+									<small class="text-muted">How much the Companion Supervisor acts on its own. Destructive actions always require confirmation.</small>
+								</div>
+							</div>
 							<div class="d-flex gap-2">
 								<button class="btn btn-outline-info btn-sm" @click="testAIConnection" :disabled="aiTestingConnection">
 									<font-awesome-icon :icon="['fas', aiTestingConnection ? 'spinner' : 'plug']" :spin="aiTestingConnection" class="me-1" />
@@ -769,6 +780,7 @@ export default {
 				temperature: 0.7,
 				maxTokens: 8192,
 				reasoningEffort: 'medium',
+				autonomyMode: 'assist',
 				enabled: true,
 			},
 			aiConfigStatus: {
@@ -940,6 +952,7 @@ export default {
 					temperature: data.temperature ?? 0.7,
 					maxTokens: data.maxTokens || 8192,
 					reasoningEffort: data.reasoningEffort || 'medium',
+					autonomyMode: data.autonomyMode || 'assist',
 					enabled: data.enabled !== false,
 				}
 			} catch (error) {

@@ -239,6 +239,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/chat/reset", resetChat)                // Reset chat + memories to defaults
 			ai.POST("/companion/actions", recordUserAction)  // Record UI actions for supervisor observation
 			ai.GET("/companion/evaluations", getCompanionEvaluations) // Supervisor evaluations for Monitor tab
+			ai.POST("/companion/proposals/:id/approve", approveProposal) // Execute an approved supervisor proposal
+			ai.POST("/companion/proposals/:id/reject", rejectProposal)   // Reject a supervisor proposal
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

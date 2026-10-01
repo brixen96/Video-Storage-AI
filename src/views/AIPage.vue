@@ -304,6 +304,15 @@
 									</button>
 								</div>
 
+								<div class="inspector-section-title mt-3">Autonomy Mode</div>
+								<p class="inspector-hint">How much the Companion Supervisor acts on its own. Assist = comments only. Co-pilot = proposes actions for approval. Autopilot = runs safe actions automatically — destructive ones always ask.</p>
+								<div class="effort-grid">
+									<button v-for="opt in autonomyOptions" :key="opt.value" class="effort-btn" :class="{ active: (aiConfig?.autonomyMode || 'assist') === opt.value }" @click="setAutonomy(opt.value)" :disabled="savingEffort">
+										<font-awesome-icon :icon="['fas', opt.icon]" class="me-1" />
+										{{ opt.label }}
+									</button>
+								</div>
+
 								<div class="inspector-section-title mt-3">Model</div>
 								<div class="config-details">
 									<div class="config-item">
@@ -768,6 +777,26 @@ const setEffort = async (effort) => {
 		await aiAPI.updateConfig({ ...aiConfig.value })
 	} catch {
 		aiConfig.value.reasoningEffort = prev
+	} finally {
+		savingEffort.value = false
+	}
+}
+
+const autonomyOptions = [
+	{ value: 'assist', label: 'Assist', icon: 'eye' },
+	{ value: 'copilot', label: 'Co-pilot', icon: 'lightbulb' },
+	{ value: 'autopilot', label: 'Autopilot', icon: 'robot' },
+]
+
+const setAutonomy = async (mode) => {
+	if (!aiConfig.value || savingEffort.value) return
+	const prev = aiConfig.value.autonomyMode
+	aiConfig.value.autonomyMode = mode
+	savingEffort.value = true
+	try {
+		await aiAPI.updateConfig({ ...aiConfig.value })
+	} catch {
+		aiConfig.value.autonomyMode = prev
 	} finally {
 		savingEffort.value = false
 	}
