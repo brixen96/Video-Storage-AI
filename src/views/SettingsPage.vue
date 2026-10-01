@@ -424,7 +424,7 @@
 								</div>
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Max Tokens</label>
-									<input v-model.number="aiConfig.maxTokens" type="number" class="form-control bg-dark text-white border-secondary" min="100" max="8192" />
+									<input v-model.number="aiConfig.maxTokens" type="number" class="form-control bg-dark text-white border-secondary" min="100" max="32768" />
 								</div>
 								<div class="col-md-4">
 									<label class="form-label text-muted small">Temperature ({{ aiConfig.temperature }})</label>
@@ -756,7 +756,7 @@ export default {
 				apiKey: '',
 				modelName: 'mistralai/mistral-nemo',
 				temperature: 0.7,
-				maxTokens: 2000,
+				maxTokens: 8192,
 				enabled: true,
 			},
 			aiConfigStatus: {
@@ -924,7 +924,7 @@ export default {
 					apiKey: data.apiKey || '',
 					modelName: data.modelName || 'mistralai/mistral-nemo',
 					temperature: data.temperature ?? 0.7,
-					maxTokens: data.maxTokens || 2000,
+					maxTokens: data.maxTokens || 8192,
 					enabled: data.enabled !== false,
 				}
 			} catch (error) {

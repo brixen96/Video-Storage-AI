@@ -1,13 +1,19 @@
 /**
  * useChatHistory — message state, persistence, and computed derivations.
+ * Uses module-level singletons so all callers share the same state.
  */
 import { ref, computed } from 'vue'
 import { aiAPI } from '@/services/api'
 
+// ── Singleton state (shared across floating widget + AI page) ──────
+const chatHistory = ref([])
+const showSearch = ref(false)
+const searchQuery = ref('')
+const sentHistory = ref(JSON.parse(localStorage.getItem('ai_companion_prompt_history') || '[]'))
+const historyIndex = ref(-1)
+const savedDraft = ref('')
+
 export function useChatHistory() {
-	const chatHistory = ref([])
-	const showSearch = ref(false)
-	const searchQuery = ref('')
 
 	// --- Computed derivations ---
 
@@ -94,8 +100,7 @@ export function useChatHistory() {
 					role: m.role,
 					content: m.content,
 					timestamp: new Date(m.created_at),
-					source: m.role !== 'user' ? m.source : undefined,
-				}))
+					source: m.role !== 'user' ? m.source : undefined,				toolSteps: m.tool_steps ? JSON.parse(m.tool_steps) : undefined,				}))
 				localStorage.removeItem('ai_chat_history')
 				return
 			}
@@ -122,10 +127,6 @@ export function useChatHistory() {
 	}
 
 	// Prompt history — terminal-style ArrowUp/Down cycling
-	const sentHistory = ref(JSON.parse(localStorage.getItem('ai_companion_prompt_history') || '[]'))
-	const historyIndex = ref(-1)
-	const savedDraft = ref('')
-
 	const pushPromptHistory = (text) => {
 		sentHistory.value.push(text)
 		if (sentHistory.value.length > 50) sentHistory.value.shift()

@@ -116,7 +116,7 @@ func (s *AICompanionService) registerFilesystemTools() {
 
 	s.registerTool(lmToolDefinition{
 		Type: "function", Function: lmToolFunction{
-			Name:        "rename_folder",
+			Name:        "rename_folder_fs",
 			Description: "Rename a folder on disk and update all video file_path records in the database that fall under that folder. ALWAYS confirm with the user before calling — this affects all videos inside the folder.",
 			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
 				"library_name": map[string]interface{}{"type": "string", "description": "Library name or partial name"},

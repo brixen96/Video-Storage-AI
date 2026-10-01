@@ -20,12 +20,28 @@
 					</button>
 				</li>
 				<li class="nav-item">
+					<button class="nav-link" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">
+						<font-awesome-icon :icon="['fas', 'comments']" class="me-2" />
+						Chat
+					</button>
+				</li>
+				<li class="nav-item">
+					<button class="nav-link" :class="{ active: activeTab === 'tasks' }" @click="activeTab = 'tasks'">
+						<font-awesome-icon :icon="['fas', 'clipboard-list']" class="me-2" />
+						Tasks
+					</button>
+				</li>
+				<li class="nav-item">
 					<button class="nav-link" :class="{ active: activeTab === 'tools' }" @click="activeTab = 'tools'">
 						<font-awesome-icon :icon="['fas', 'tools']" class="me-2" />
 						Analysis Tools
 					</button>
-				</li>
-			</ul>
+				</li>			<li class="nav-item">
+				<button class="nav-link" :class="{ active: activeTab === 'monitor' }" @click="activeTab = 'monitor'">
+					<font-awesome-icon :icon="['fas', 'chart-line']" class="me-2" />
+					Monitor
+				</button>
+			</li>			</ul>
 
 			<!-- Companion Tab -->
 			<div v-if="activeTab === 'companion'" class="companion-tab">
@@ -129,8 +145,11 @@
 						</div>
 					</div>
 				</div>
+			</div>
 
-				<!-- Inline Chat Section -->
+			<!-- Chat Tab -->
+			<div v-if="activeTab === 'chat'" class="chat-tab">
+				<!-- Chat Section -->
 				<div class="chat-section">
 					<div class="chat-section-header">
 						<h3>
@@ -138,7 +157,7 @@
 							Chat with AI Companion
 						</h3>
 						<div class="d-flex gap-2">
-							<button class="btn btn-sm btn-outline-danger" @click="clearChat" :disabled="chatMessages.length === 0">
+							<button class="btn btn-sm btn-outline-danger" @click="clearChat" :disabled="chatHistory.length === 0">
 								<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />
 								Clear
 							</button>
@@ -146,21 +165,22 @@
 					</div>
 					<div class="chat-container">
 						<div ref="chatMessagesRef" class="chat-messages">
-							<div v-if="chatMessages.length === 0" class="empty-chat">
+							<div v-if="chatHistory.length === 0" class="empty-chat">
 								<font-awesome-icon :icon="['fas', 'robot']" size="3x" class="mb-3" />
 								<p>Start a conversation with the AI Companion</p>
 								<p class="text-muted small">Ask about your library, get suggestions, or manage tasks</p>
 							</div>
-							<div v-for="(msg, idx) in chatMessages" :key="idx" class="chat-message" :class="msg.role">
+							<div v-for="(msg, idx) in chatHistory" :key="idx" class="chat-message" :class="msg.role">
 								<div class="message-avatar">
 									<font-awesome-icon :icon="['fas', msg.role === 'user' ? 'user' : 'robot']" />
 								</div>
 								<div class="message-content">
-									<div class="message-text" v-html="formatMessage(msg.content)"></div>
-									<div class="message-time">{{ msg.time }}</div>
+									<template v-if="msg.role === 'user'">{{ msg.content }}</template>
+									<MarkdownMessage v-else :content="msg.content" />
+									<div class="message-time">{{ formatTime() }}</div>
 								</div>
 							</div>
-							<div v-if="isSending" class="chat-message assistant">
+							<div v-if="isStreaming" class="chat-message assistant">
 								<div class="message-avatar">
 									<font-awesome-icon :icon="['fas', 'robot']" />
 								</div>
@@ -191,15 +211,23 @@
 									class="form-control"
 									placeholder="Type a message..."
 									@keyup.enter="sendMessage"
-									:disabled="isSending"
+									:disabled="isStreaming"
 								/>
-								<button class="btn btn-primary" @click="sendMessage" :disabled="!chatInput.trim() || isSending">
-									<font-awesome-icon :icon="['fas', isSending ? 'spinner' : 'paper-plane']" :spin="isSending" />
+								<button v-if="isStreaming" class="btn btn-danger" @click="stopStreaming" title="Stop generating">
+									<font-awesome-icon :icon="['fas', 'stop']" />
+								</button>
+								<button v-else class="btn btn-primary" @click="sendMessage" :disabled="!chatInput.trim() || isStreaming">
+									<font-awesome-icon :icon="['fas', 'paper-plane']" />
 								</button>
 							</div>
 						</div>
 					</div>
 				</div>
+			</div>
+
+			<!-- Tasks Tab -->
+			<div v-if="activeTab === 'tasks'" class="tasks-tab">
+				<TaskBoard />
 			</div>
 
 			<!-- Analysis Tools Tab -->
@@ -288,6 +316,11 @@
 					</div>
 				</div>
 			</div>
+
+			<!-- Monitor Tab -->
+			<div v-if="activeTab === 'monitor'">
+				<AIMonitorDashboard />
+			</div>
 		</div>
 	</div>
 </template>
@@ -307,6 +340,16 @@ import AIDetectDuplicates from '@/components/ai/AIDetectDuplicates.vue'
 import AISuggestNaming from '@/components/ai/AISuggestNaming.vue'
 import AILibraryAnalytics from '@/components/ai/AILibraryAnalytics.vue'
 import AIAnalyzeThumbnails from '@/components/ai/AIAnalyzeThumbnails.vue'
+import AIMonitorDashboard from '@/components/ai/AIMonitorDashboard.vue'
+import MarkdownMessage from '@/components/MarkdownMessage.vue'
+import TaskBoard from '@/components/TaskBoard.vue'
+
+// Shared composables — same state as the floating widget
+import { useChatHistory } from '@/composables/ai/useChatHistory'
+import { useChatStreaming } from '@/composables/ai/useChatStreaming'
+
+const { chatHistory, pushMessage, clearHistory, loadHistory } = useChatHistory()
+const { isStreaming, streamMessage, stopStreaming } = useChatStreaming()
 
 // Tab state
 const activeTab = ref('companion')
@@ -318,10 +361,8 @@ const aiConfig = ref(null)
 const testingConnection = ref(false)
 const connectionTestResult = ref(null)
 
-// Chat state
+// Chat state (local UI helpers only — messages live in chatHistory)
 const chatInput = ref('')
-const chatMessages = ref([])
-const isSending = ref(false)
 const chatMessagesRef = ref(null)
 
 // Analysis tools refs
@@ -428,17 +469,6 @@ const formatTime = () => {
 	return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-const formatMessage = (text) => {
-	if (!text) return ''
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/\n/g, '<br>')
-		.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-		.replace(/`(.*?)`/g, '<code>$1</code>')
-}
-
 const scrollToBottom = async () => {
 	await nextTick()
 	if (chatMessagesRef.value) {
@@ -448,23 +478,61 @@ const scrollToBottom = async () => {
 
 const sendMessage = async () => {
 	const text = chatInput.value.trim()
-	if (!text || isSending.value) return
+	if (!text || isStreaming.value) return
 
-	chatMessages.value.push({ role: 'user', content: text, time: formatTime() })
 	chatInput.value = ''
-	isSending.value = true
+
+	// Push user message
+	pushMessage({ role: 'user', content: text, timestamp: new Date() })
+	await nextTick()
 	scrollToBottom()
 
-	try {
-		const res = await aiAPI.chat({ message: text })
-		const reply = res?.data?.response || res?.response || res?.data?.message || 'No response received.'
-		chatMessages.value.push({ role: 'assistant', content: reply, time: formatTime() })
-	} catch {
-			chatMessages.value.push({ role: 'assistant', content: 'Sorry, I encountered an error. Please check your OpenRouter connection.', time: formatTime() })
-	} finally {
-		isSending.value = false
-		scrollToBottom()
-	}
+	// Prepare history for context
+	const historyPayload = chatHistory.value
+		.filter((m) => m.role === 'user' || m.role === 'assistant')
+		.slice(-10)
+		.map((m) => ({ role: m.role, content: m.content }))
+
+	// Create placeholder for streaming response
+	const msgIndex = chatHistory.value.length
+	pushMessage({
+		role: 'assistant', content: '', timestamp: new Date(),
+		source: 'llm', streaming: true,
+	})
+	await nextTick()
+	scrollToBottom()
+
+	// Stream the response
+	streamMessage(text, historyPayload, {
+		onTextChunk: (chunk) => {
+			chatHistory.value[msgIndex].content += chunk
+		},
+		scrollFn: async () => { await nextTick(); scrollToBottom() },
+		onDone: (toolSteps) => {
+			chatHistory.value[msgIndex].streaming = false
+			if (toolSteps.length > 0) chatHistory.value[msgIndex].toolSteps = toolSteps
+		},
+		onError: (error) => {
+			if (error.name === 'AbortError') {
+				const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+				if (lastMsg?.streaming) {
+					lastMsg.streaming = false
+					if (lastMsg.content.length === 0) chatHistory.value.splice(-1, 1)
+				}
+				return
+			}
+			const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+			if (lastMsg?.streaming) lastMsg.streaming = false
+			if (lastMsg?.content && lastMsg.content.length > 0) {
+				lastMsg.content += '\n\n⚠️ *Stream interrupted*'
+			} else {
+				pushMessage({
+					role: 'assistant', content: 'Sorry, I encountered an error. Please check your OpenRouter connection.',
+					timestamp: new Date(), source: 'error',
+				})
+			}
+		},
+	})
 }
 
 const sendQuickMessage = (text) => {
@@ -472,12 +540,21 @@ const sendQuickMessage = (text) => {
 	sendMessage()
 }
 
-const clearChat = () => {
-	chatMessages.value = []
+const clearChat = async () => {
+	await clearHistory()
 }
 
-onMounted(() => {
+// Reload chat history when switching to chat tab
+import { watch } from 'vue'
+watch(activeTab, (newTab) => {
+	if (newTab === 'chat') {
+		loadHistory()
+	}
+})
+
+onMounted(async () => {
 	loadCompanionData()
+	await loadHistory()
 })
 </script>
 

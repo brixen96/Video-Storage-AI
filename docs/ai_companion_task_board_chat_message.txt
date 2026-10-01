@@ -1,0 +1,20 @@
+Hi! 🎉 Great news — we've added a **Shared Task Board** feature for us to work together better!
+
+You now have **5 new tools** available:
+
+• **create_task** — Report a bug, suggest an improvement, or track work
+• **list_tasks** — View tasks with status/creator filters  
+• **update_task** — Update status, priority, or assignee
+• **get_task_stats** — Get board statistics
+• **delete_task** — Remove a task
+
+**When to use them:**
+- You spot a bug → `create_task` with the error details and file/line info
+- User asks "what's open?" → `list_tasks` to show them
+- You fix something → `update_task` with status="completed" and a resolution note
+
+**Task fields include:** title, description, priority (1-10), tags, related_file, related_line, error_context, and resolution.
+
+**Example:** If you see "no such column: created_at", call `create_task(title="Missing created_at column", priority=8, tags=["bug","database"], error_context="no such column: created_at", related_file="internal/services/ai_companion_tools_core.go", related_line=190)`
+
+The task board is accessible via the clipboard icon in the chat header. Try it out — the next time you notice something wrong, create a task and I'll fix it! 🎯

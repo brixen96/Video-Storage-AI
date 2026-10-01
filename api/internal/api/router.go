@@ -245,6 +245,20 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.GET("/config", getAIConfig)                   // Get AI config
 			ai.PUT("/config", updateAIConfig)                // Update AI config
 			ai.POST("/test-connection", testAIConnection)    // Test OpenRouter connection
+
+			// Task Board endpoints
+			ai.GET("/tasks", getCompanionTasks)              // List tasks
+			ai.POST("/tasks", createCompanionTask)           // Create a task
+			ai.GET("/tasks/stats", getCompanionTaskStats)    // Get task statistics
+			ai.GET("/tasks/:id", getCompanionTask)           // Get single task
+			ai.PUT("/tasks/:id", updateCompanionTask)        // Update task
+			ai.DELETE("/tasks/:id", deleteCompanionTask)     // Delete task
+
+			// AI Monitor endpoints
+			ai.GET("/monitor/dashboard", getAIDashboard)     // Get monitoring dashboard metrics
+			ai.GET("/monitor/calls", getAICallHistory)       // Get API call history
+			ai.GET("/monitor/tools", getAIToolStats)         // Get tool usage statistics
+			ai.GET("/monitor/costs", getAICostSummary)       // Get cost breakdown by day/model
 		}
 
 		// Scraper endpoints
@@ -287,6 +301,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			// Link export endpoints
 			scraper.GET("/threads/:id/export-links", exportThreadLinks)    // Export links from a thread (formats: txt, json, csv)
 			scraper.GET("/links/export-all", exportAllThreadsLinks)        // Export links from all threads
+
+			// Thread enhancement endpoints (AI-powered)
+			scraper.POST("/threads/:id/enhance", enhanceThread)                    // Enhance thread with AI
+			scraper.GET("/threads/:id/enhancement-status", getThreadEnhancementStatus) // Get enhancement status
 
 			// Video scraper endpoints
 			scraper.GET("/extract-video-url", extractVideoURLHandler)      // Extract direct video URL from a page

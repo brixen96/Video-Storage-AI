@@ -106,6 +106,7 @@
 							AI
 						</router-link>
 					</li>
+
 					<li class="nav-item">
 						<router-link to="/analyzer" class="nav-link" active-class="active">
 							<font-awesome-icon :icon="['fas', 'chart-bar']" class="me-1" />

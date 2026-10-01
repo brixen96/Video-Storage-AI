@@ -55,9 +55,6 @@
 				<button v-for="tab in scraperTabs" :key="tab.id" class="scraper-tab" :class="{ active: activeTab === `tab-${tab.id}` }" :style="{ borderColor: tab.color }" @click="selectTab(tab.id)">
 					<font-awesome-icon :icon="['fas', tab.icon]" class="me-2" />
 					{{ tab.name }}
-
-					<font-awesome-icon :icon="['fas', 'plus']" class="me-2" />
-					Add Tab
 				</button>
 			</div>
 

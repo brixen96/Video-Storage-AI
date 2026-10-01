@@ -1870,3 +1870,11 @@
 	transform: translateY(-1px);
 	box-shadow: 0 2px 8px rgba(var(--color-accent-rgb), 0.2);
 }
+/* Task Board Panel */
+.task-board-panel {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: rgba(0, 0, 0, 0.2);
+}

@@ -37,6 +37,8 @@ func (s *AICompanionService) buildToolRegistry() {
 	s.registerRenameFolderTool()
 	s.registerMoveFolderContentsTool()
 	s.registerBatchMoveByPatternTool()
+	s.registerUniversalScraperTools()
+	s.registerTaskTools()
 }
 
 // getLMToolDefinitions returns all registered tool definitions, sorted by name

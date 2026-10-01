@@ -186,6 +186,8 @@ import {
 	faVideoSlash,
 	faUserSlash,
 	faHeartPulse,
+	faClipboardList,
+	faClipboardCheck,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -384,7 +386,9 @@ library.add(
 	faMinusCircle,
 	faVideoSlash,
 	faUserSlash,
-	faHeartPulse
+	faHeartPulse,
+	faClipboardList,
+	faClipboardCheck,
 )
 
 export default FontAwesomeIcon

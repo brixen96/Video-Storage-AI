@@ -248,48 +248,18 @@ export const aiAPI = {
 	// Companion status
 	getStatus: () => api.get('/ai/status'),
 
+	// Task Board
+	getTasks: (params) => api.get('/ai/tasks', { params }),
+	getTask: (id) => api.get(`/ai/tasks/${id}`),
+	createTask: (data) => api.post('/ai/tasks', data),
+	updateTask: (id, data) => api.put(`/ai/tasks/${id}`, data),
+	deleteTask: (id) => api.delete(`/ai/tasks/${id}`),
+	getTaskStats: () => api.get('/ai/tasks/stats'),
+
 	// AI config (OpenRouter)
 	getConfig: () => api.get('/ai/config'),
 	updateConfig: (data) => api.put('/ai/config', data),
 	testConnection: () => api.post('/ai/test-connection'),
-}
-
-// OpenRouter AI Companion API
-const openRouterAPI = axios.create({
-	baseURL: 'http://localhost:1234/v1',
-	headers: {
-		'Content-Type': 'application/json',
-	},
-	timeout: 1200000, // 2 minutes for tool calling iterations
-})
-
-export const aiCompanionAPI = {
-	chat: async (messages, options = {}) => {
-		try {
-			const requestBody = {
-				messages,
-				temperature: options.temperature || 0.7,
-				max_tokens: options.max_tokens || 2000,
-				stream: false,
-			}
-
-			// Add tools if provided
-			if (options.tools) {
-				requestBody.tools = options.tools
-			}
-
-			// Add tool_choice if provided
-			if (options.tool_choice) {
-				requestBody.tool_choice = options.tool_choice
-			}
-
-			const response = await openRouterAPI.post('/chat/completions', requestBody)
-			return response.data
-		} catch (error) {
-			console.error('OpenRouter API Error:', error)
-			throw error
-		}
-	},
 }
 
 // Dashboard API
@@ -563,6 +533,15 @@ export const getAssetURL = (path) => {
 	// Pass through external URLs as-is
 	if (path.startsWith('http://') || path.startsWith('https://')) {
 		return path
+	}
+	// Handle file:// URLs by stripping the protocol and converting to relative path
+	if (path.startsWith('file://')) {
+		// Remove file:/// prefix (keep the path after it)
+		let localPath = path.replace(/^file:\/\/\/?/, '')
+		// On Windows, file:///C:/... becomes C:/...
+		// Convert to relative path if possible
+		const relativePath = localPath.split('api\\assets\\')[1] || localPath.split('api/assets/')[1] || localPath
+		return `${API_ORIGIN}/assets/${relativePath.replace(/\\/g, '/')}`
 	}
 	// Handle absolute paths on Windows
 	if (path.includes(':\\')) {

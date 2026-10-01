@@ -3,6 +3,7 @@ package websocket
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -40,7 +41,10 @@ func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
 		if err := c.conn.Close(); err != nil {
-			log.Printf("Error closing WebSocket connection: %v", err)
+			// Suppress benign "use of closed network connection" errors
+			if !strings.Contains(err.Error(), "use of closed network connection") && !strings.Contains(err.Error(), "broken pipe") {
+				log.Printf("Error closing WebSocket connection: %v", err)
+			}
 		}
 	}()
 
@@ -70,7 +74,9 @@ func (c *Client) writePump() {
 	defer func() {
 		ticker.Stop()
 		if err := c.conn.Close(); err != nil {
-			log.Printf("Error closing WebSocket connection: %v", err)
+			if !strings.Contains(err.Error(), "use of closed network connection") && !strings.Contains(err.Error(), "broken pipe") {
+				log.Printf("Error closing WebSocket connection: %v", err)
+			}
 		}
 	}()
 

@@ -16,6 +16,18 @@ import (
 
 var aiCompanionService *services.AICompanionService
 
+// truncateErr returns a short, user-friendly error string.
+func truncateErr(err error) string {
+	if err == nil {
+		return "unknown error"
+	}
+	s := err.Error()
+	if len(s) > 120 {
+		s = s[:120] + "..."
+	}
+	return s
+}
+
 // InitAICompanion initializes the global AI Companion service
 func InitAICompanion() *services.AICompanionService {
 	if aiCompanionService == nil {
@@ -64,6 +76,27 @@ func aiCompanionChatStream(c *gin.Context) {
 	var fullResponse strings.Builder
 	source := "llm"
 	var videoCards []map[string]interface{}
+	var toolSteps []string
+
+	// SSE keepalive: send a comment every 15s to prevent connection drops
+	// during long LLM processing or tool execution.
+	keepAliveDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepAliveDone:
+				return
+			case <-clientGone:
+				return
+			case <-ticker.C:
+				fmt.Fprintf(c.Writer, ": keepalive\n\n")
+				flusher.Flush()
+			}
+		}
+	}()
+	defer close(keepAliveDone)
 
 	// Set up progress callback so tools can report incremental progress via SSE
 	aiCompanionService.SetProgressCallback(func(data map[string]interface{}) {
@@ -87,6 +120,7 @@ func aiCompanionChatStream(c *gin.Context) {
 	}, func(cards []map[string]interface{}) {
 		videoCards = cards
 	}, func(toolName string) {
+		toolSteps = append(toolSteps, toolName)
 		evt, _ := json.Marshal(map[string]string{"tool": toolName})
 		fmt.Fprintf(c.Writer, "event: tool_call\ndata: %s\n\n", string(evt))
 		flusher.Flush()
@@ -102,7 +136,11 @@ func aiCompanionChatStream(c *gin.Context) {
 		source = "rule-based"
 		response, rbErr := aiCompanionService.Chat(request.Message, request.History)
 		if rbErr != nil {
-			response = "Sorry, I’m currently unavailable."
+			log.Printf("[AI] Rule-based fallback also failed: %v", rbErr)
+			response = "Sorry, I'm currently unavailable."
+		} else {
+			// Prepend a notice so the user knows the LLM wasn't used
+			response = fmt.Sprintf("⚠️ *LLM unavailable (%s). Using rule-based responses.*\n\n%s", truncateErr(err), response)
 		}
 		fullResponse.WriteString(response)
 		chunkJSON, _ := json.Marshal(response)
@@ -112,8 +150,14 @@ func aiCompanionChatStream(c *gin.Context) {
 
 	// Persist the exchange to the database
 	if fullResponse.Len() > 0 {
+		log.Printf("[AI] Persisting response: source=%s len=%d tools=%d", source, fullResponse.Len(), len(toolSteps))
 		aiCompanionService.SaveChatMessage("user", request.Message, "user")
-		aiCompanionService.SaveChatMessage("assistant", fullResponse.String(), source)
+		toolStepsJSON := ""
+		if len(toolSteps) > 0 {
+			b, _ := json.Marshal(toolSteps)
+			toolStepsJSON = string(b)
+		}
+		aiCompanionService.SaveChatMessageWithTools("assistant", fullResponse.String(), source, toolStepsJSON)
 	}
 
 	// Send video cards event before [DONE] so frontend can render inline cards
@@ -196,6 +240,7 @@ func aiCompanionChat(c *gin.Context) {
 			))
 			return
 		}
+		response = fmt.Sprintf("⚠️ *LLM unavailable (%s). Using rule-based responses.*\n\n%s", truncateErr(err), response)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -415,13 +460,13 @@ func getAIConfig(c *gin.Context) {
 			APIKey:      "",
 			ModelName:   "mistralai/mistral-nemo",
 			Temperature: 0.7,
-			MaxTokens:   2000,
+				MaxTokens:   8192,
 			Enabled:     true,
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		}
 	}
-	if config.APIURL == "" || config.APIURL == "http://localhost:1234" {
+	if config.APIURL == "" {
 		config.APIURL = "https://openrouter.ai/api"
 	}
 

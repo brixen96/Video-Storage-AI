@@ -31,6 +31,9 @@
 						<button class="btn-header-action" :class="{ active: showMemoryPanel }" @click="toggleMemoryPanel" title="AI Memory">
 							<font-awesome-icon :icon="['fas', 'brain']" />
 						</button>
+						<button class="btn-header-action" :class="{ active: showTaskBoard }" @click="showTaskBoard = !showTaskBoard; if (showTaskBoard) showMemoryPanel = false" title="Task Board">
+							<font-awesome-icon :icon="['fas', 'clipboard-list']" />
+						</button>
 						<button class="btn-header-action" @click="exportChat" title="Export Chat">
 							<font-awesome-icon :icon="['fas', 'download']" />
 						</button>
@@ -173,8 +176,13 @@
 					</div>
 				</div>
 
+				<!-- Task Board Panel -->
+				<div v-if="showTaskBoard" class="task-board-panel">
+					<TaskBoard />
+				</div>
+
 				<!-- Chat Messages -->
-				<div v-if="!showMemoryPanel" class="chat-messages" ref="chatMessages">
+				<div v-if="!showMemoryPanel && !showTaskBoard" class="chat-messages" ref="chatMessages">
 					<!-- Suggested Prompts (shown when empty) -->
 					<div v-if="chatHistory.length === 0 && !isCompanionThinking" class="suggested-prompts">
 						<!-- Entity context card -->
@@ -556,7 +564,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, getCurrentInstance } from 'vue'
-import { aiCompanionAPI } from '@/services/api'
+import { aiAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
 import MarkdownMessage from './MarkdownMessage.vue'
 
@@ -568,6 +576,7 @@ import { useChatUI } from '@/composables/ai/useChatUI'
 import { useEntityContext } from '@/composables/ai/useEntityContext'
 import { useVideoCards } from '@/composables/ai/useVideoCards'
 import { useVoiceInput } from '@/composables/ai/useVoiceInput'
+import TaskBoard from './TaskBoard.vue'
 
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
@@ -658,6 +667,7 @@ const toggleVoiceInput = () => {
 const isCompanionThinking = ref(false)
 const editingMessage = ref(null)
 const editingContent = ref('')
+const showTaskBoard = ref(false)
 
 // ── Suggested prompts (context-aware per page) ──
 const suggestedPrompts = computed(() => {
@@ -688,7 +698,7 @@ const closeChat = () => { isOpen.value = false }
 
 const checkCompanionConnection = async () => {
 	try {
-		await aiCompanionAPI.chat([{ role: 'user', content: 'Hi' }], { max_tokens: 5 })
+		await aiAPI.testConnection()
 		companionConnected.value = true
 	} catch {
 		companionConnected.value = true // Still connected — fallback available

@@ -343,12 +343,14 @@ func (s *AICompanionService) GetAIConfig() models.AIConfig {
 		APIURL:      "https://openrouter.ai/api",
 		ModelName:   "deepseek/deepseek-v4-flash",
 		Temperature: 0.7,
-		MaxTokens:   2000,
+		MaxTokens:   8192,
 		Enabled:     true,
 	}
-	s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
+	if err := s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
 		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
-	)
+	); err != nil {
+		log.Printf("[AI] Failed to read ai_config, using defaults: %v", err)
+	}
 	if config.APIURL == "" {
 		config.APIURL = "https://openrouter.ai/api"
 	}
@@ -578,11 +580,54 @@ When the user approves a plan or asks to "execute", "apply", or "run" improvemen
 
 ALWAYS use planning mode first. Present the plan to the user for approval before executing. When in doubt, use dry_run=true to simulate first.
 
+## CRITICAL: Tool Usage Rules
+- When the user asks you to CREATE, ADD, SCRAPE, or MANAGE something, you MUST call the appropriate tool immediately. Do NOT just describe what you would do — actually DO it via tool calls.
+- When the user asks to "add a scraper", "create a tab", "scrape a URL" — call the tool directly in your FIRST response. Do not explain what you will do first.
+- If a user gives you a URL and asks to scrape it, call scrape_url or analyze_page RIGHT AWAY.
+- If a user asks to create a scraper tab, call create_scraper_tab RIGHT AWAY with the name and URL they provided.
+- NEVER respond with just text when a tool call is needed. The user expects you to TAKE ACTION, not describe it.
+
 ## Efficiency Rules
 - NEVER call scan_library_structure for each library individually. Use get_all_libraries first to list them, then plan_structure_improvements on each one.
 - When analyzing multiple libraries, call plan_structure_improvements with focus="structure" — it is faster than scan_library_structure.
 - Keep tool calls minimal. If get_all_libraries gives you enough info, don't scan deeper.
 - If the user asks for a quick overview, call get_all_libraries first. Only go deeper if they ask.
+
+## AI-Powered Web Scraping
+You have universal scraping tools that work on ANY website without pre-configuration:
+
+### scrape_url(url, content_type, site_label)
+- Fetches any URL, analyzes HTML structure with the LLM, extracts video metadata, and saves to the database
+- Works on single video pages AND listing/category pages
+- Use analyze_page first to understand a site's structure, then scrape_url to extract content
+- Use site_label to give the source a friendly name (e.g. "fapzoo", "custom-site")
+- Results go to the scraped_videos table and appear in the Scraper page
+
+### create_scraper_tab(name, base_url, page_url_template, page_starts_at, ...)
+- Creates a new scraper tab in the Scraper page with optional pagination config
+- Use when the user wants to add a new website to scrape regularly
+- If the user provides page 1 and page 2 URLs, derive the pagination pattern and pass page_url_template with {page} placeholder (e.g. "https://example.com/videocat/p{page}/")
+- Replaces the old "Add Tab" UI button — do it conversationally
+- Do NOT call suggest_scraper_config first — just create the tab directly in your FIRST tool call
+
+### analyze_page(url)
+- Lightweight page analysis: returns HTML structure, links, images, video embeds
+- Use before scrape_url to understand a site, or when the user asks "what's on this page?"
+
+### Existing Scraper Tools (use these too!)
+- get_scraper_status — overview of all scrapers and recent activity
+- search_scraped_content — search across all scraped data
+- suggest_scraper_config — analyze a site for pagination patterns
+- fix_scraped_urls — repair broken/old domains
+- enhance_thread / batch_enhance_threads — AI thread cleanup
+- validate_thread_images — verify thread images with vision AI
+
+### Scraping Workflow
+When the user asks to scrape a site:
+1. If it's a known site (PornHub, LuxureTV, etc.), use the dedicated fixed scraper via the Scraper page
+2. If it's a NEW or unknown site, use analyze_page then scrape_url to extract content
+3. If they want ongoing scraping, create_scraper_tab to set up a tab, then use the job system
+4. For forum threads, use enhance_thread to clean and extract metadata
 
 ` + appContext
 
@@ -601,25 +646,38 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 	// Add current user message
 	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
 
+	// ── Intent pre-detection: force tool calls for obvious requests ──
+	lowerMsg := strings.ToLower(message)
+	if strings.Contains(lowerMsg, "scraper") && (strings.Contains(lowerMsg, "new") || strings.Contains(lowerMsg, "create") || strings.Contains(lowerMsg, "add") || strings.Contains(lowerMsg, "make")) {
+		messages = append(messages, map[string]interface{}{
+			"role":    "system",
+			"content": "The user wants to create a new scraper tab. You MUST call the create_scraper_tab tool immediately with the name and URL(s) they provided. Do NOT explain what you will do — just call the tool.",
+		})
+	} else if strings.Contains(lowerMsg, "scrape") && strings.Contains(lowerMsg, "http") {
+		messages = append(messages, map[string]interface{}{
+			"role":    "system",
+			"content": "The user wants to scrape a URL. You MUST call the scrape_url tool immediately with the URL they provided. Do NOT explain — just call the tool.",
+		})
+	}
+
 	tools := s.getLMToolDefinitions()
 
-	// Tool calling loop (max 5 iterations)
-	for iteration := 0; iteration < 5; iteration++ {
+	// Tool calling loop (max 10 iterations)
+	for iteration := 0; iteration < 10; iteration++ {
+		// Limit tools to avoid exceeding OpenRouter's payload size limit
+		toolDefs := tools
+		if len(toolDefs) > 40 {
+			toolDefs = toolDefs[:40]
+		}
+
 		reqBody := map[string]interface{}{
-			"model":              config.ModelName,
-			"messages":           messages,
-			"tools":              tools,
-			"tool_choice":        "auto",
-			"temperature":        config.Temperature,
-			"max_tokens":         config.MaxTokens,
-			"stream":             false,
-			"parallel_tool_calls": false,
-			"include_reasoning":  true,
-			"reasoning": map[string]interface{}{
-				"enabled": true,
-				"effort":  "high",
-			},
-			"reasoning_effort":   "high",
+			"model":       config.ModelName,
+			"messages":    messages,
+			"tools":       toolDefs,
+			"tool_choice": "auto",
+			"temperature": config.Temperature,
+			"max_tokens":  config.MaxTokens,
+			"stream":      false,
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -628,6 +686,25 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 		}
 
 		respBody, statusCode, err := doLLMRequest(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
+		
+		// Monitor the LLM call
+		monitorService := NewAIMonitorService()
+		monitorService.MonitorCall(&LLMCallResult{
+			InteractionID: fmt.Sprintf("chat-%d", time.Now().UnixNano()),
+			Model:         config.ModelName,
+			StatusCode:    statusCode,
+			RequestBytes:  len(bodyBytes),
+			ResponseBytes: len(respBody),
+			LatencyMs:     int(time.Since(startTime).Milliseconds()),
+			Success:       err == nil && statusCode == http.StatusOK,
+			Error: func() string {
+				if err != nil {
+					return err.Error()
+				}
+				return ""
+			}(),
+		})
+
 		if err != nil {
 			log.Printf("[AI] AI provider request failed after retries: %v", err)
 			return "", fmt.Errorf("AI provider request failed: %w", err)
@@ -690,8 +767,22 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 			}
 
 			log.Printf("[AI] Tool call: %s(%v)", tc.Function.Name, toolArgs)
+			toolStartTime := time.Now()
 
 			toolResult, err := s.ExecuteTool(tc.Function.Name, toolArgs)
+			toolLatencyMs := int(time.Since(toolStartTime).Milliseconds())
+
+			// Monitor tool execution
+			monitorService := NewAIMonitorService()
+			monitorService.MonitorTool(
+				fmt.Sprintf("chat-%d", time.Now().UnixNano()),
+				tc.Function.Name,
+				toolArgs,
+				toolResult,
+				err,
+				toolLatencyMs,
+			)
+
 			if err != nil {
 				toolResult = map[string]interface{}{"error": err.Error()}
 			}
@@ -760,76 +851,7 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 	}
 
 	appContext := s.GetFullContext()
-	systemPrompt := "You are the AI Companion for a Video Storage application, powered by " + config.ModelName + ` via OpenRouter. You have direct access to the app's database and systems through tool calls.
-
-You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health.
-
-When the user asks about data (videos, performers, stats, etc.), use the appropriate tool to get real-time data rather than guessing.
-When the user asks about app status (running tasks, errors, scrapers, JDownloader), use the relevant status tools.
-You can save and recall memories to remember user preferences.
-You can help organize videos and libraries: use review_library_structure to inspect a library's folder layout, scan_library_structure to understand how Backup is organized, and analyze_library_structure to identify the dominant folder pattern. Use suggest_video_placement to find the best matching subfolder for a video, and move_video_to_library to actually move it. Always confirm with the user before moving files.
-Use OpenRouter reasoning and thinking tokens to plan library structure improvements and folder placement decisions before you answer.
-You can find duplicate files: use find_duplicate_videos to detect videos stored multiple times across libraries (same filename, same title, or same performers with similar duration).
-You can find orphaned DB entries: use find_orphaned_videos to check which DB records have no file on disk, then delete_video_records to clean them up (DB only, never touches disk). ALWAYS confirm with the user before calling delete_video_records.
-You can profile a performer: use get_performer_stats to get total videos, watch time, rating breakdown, top tags/studios, library distribution, and recent additions for any performer.
-You can interact with the library: suggest_tags_for_video (recommends tags based on performer history), apply_tags_to_video (add tags by name, creates new ones if needed), set_video_rating (rate 0-5 stars), toggle_video_favorite (mark/unmark as favorite). For Edited↔Backup pairing: get_video_link_stats (coverage overview), get_unlinked_videos (find unmatched videos in a library).
-You can generate a library health report: get_library_health returns a health score (0-100), grade (A-D), untagged %, unrated %, videos with no performers, and a per-library breakdown. Use when the user asks 'how's my library?' or 'library overview'.
-For bulk tagging: call find_untagged_videos to get a list of IDs, then call bulk_apply_tags(video_ids) to auto-tag all of them in one shot using performer history. Tell the user how many videos will be affected and confirm before calling bulk_apply_tags. Use suggest_tags_for_video + apply_tags_to_video only for individual videos.
-
-## Memory & Architecture
-Your memory (save_memory/recall_memories tools) is stored in the local SQLite database on this PC — NOT on OpenRouter or any cloud. OpenRouter is stateless and handles inference only; it has zero persistent state between requests. All persistence (memories, chat history, library data) lives entirely in the app's local database.
-
-## Path-Based Auto-Linking (Maid Duty)
-You have the auto_link_by_path tool. It scans video file paths, matches folder names against the real performers/tags/studios in the DB, and applies links automatically. It is completely safe (only adds, never removes). Run it proactively when:
-- A library scan just completed and new videos were added
-- The user asks about unlinked or untagged videos
-- The health report shows high % of videos with no performers
-Always run dry_run=true first and report what would be applied, then run for real.
-
-## Saving Memories
-When the user says "remember", "note", "don't forget", or asks you to keep track of something, ALWAYS call save_memory immediately as your first action — before responding with anything else. Never skip this. Confirm with a single short sentence after saving.
-
-## Library Improvement Planning (Dual-Mode)
-You have a powerful planning system for library organization. You operate in two modes:
-
-### 📋 PLANNING MODE (read-only, reasoning-heavy)
-When the user asks to "analyze", "review", "improve", "optimize", or "fix" their library structure:
-1. Call plan_structure_improvements with the library name and focus area
-2. This reads the entire library structure, finds issues, and builds a concrete improvement plan
-3. Review the plan with get_plan and present a summary to the user
-4. Use OpenRouter reasoning to think through the best improvements before presenting
-5. NO files are moved or changed in this mode — it's purely analytical
-
-### 🚀 EXECUTION MODE (writes, safety-checked)
-When the user approves a plan or asks to "execute", "apply", or "run" improvements:
-1. Call execute_plan with the plan ID and dry_run: false
-2. Each action is safety-checked before execution
-3. Report progress back to the user after each batch
-4. All changes are logged and reversible
-
-### Tool Usage Pattern
-- plan_structure_improvements(library_name, focus) → builds improvement plan (READ-ONLY)
-- list_plans(status) → shows all saved plans
-- get_plan(plan_id) → reviews full plan details
-- execute_plan(plan_id, dry_run) → runs or simulates the plan
-- delete_plan(plan_id) → removes a draft plan
-
-ALWAYS use planning mode first. Present the plan to the user for approval before executing. When in doubt, use dry_run=true to simulate first.
-
-## Efficiency Rules
-- NEVER call scan_library_structure for each library individually. Use get_all_libraries first to list them, then plan_structure_improvements on each one.
-- When analyzing multiple libraries, call plan_structure_improvements with focus="structure" — it is faster than scan_library_structure.
-- Keep tool calls minimal. If get_all_libraries gives you enough info, don't scan deeper.
-- If the user asks for a quick overview, call get_all_libraries first. Only go deeper if they ask.
-
-## Response Style
-- Be concise. Short bullet points over long paragraphs.
-- NEVER use markdown tables — the chat UI does not render them. Use bullet lists instead.
-- Never pad responses with disclaimers, caveats, or repetition.
-- If a tool gives you the answer, present the result directly — don't narrate what you're doing.
-- When listing videos or large result sets, show at most 5 items then summarise the rest ("...and X more").
-
-` + appContext
+	systemPrompt := "You are the AI Companion for Video Storage. You have database access via tools.\n\nWhen users ask about data, use the appropriate tool to get real-time data.\nWhen users ask to create, add, or scrape something, call the tool IMMEDIATELY — do NOT just describe what you would do.\nFor library organization: use plan_structure_improvements first (read-only), present the plan, then execute_plan after approval.\nFor scraping: use create_scraper_tab or scrape_url tools directly. Do NOT call suggest_scraper_config first.\nAlways confirm before moving files or deleting records.\nBe concise. Use bullet points, not tables. Show at most 5 items then summarize.\n\n" + appContext
 
 	messages := []map[string]interface{}{{"role": "system", "content": systemPrompt}}
 	for _, h := range history {
@@ -839,7 +861,24 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 	}
 	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
 
+	// ── Intent pre-detection: force tool calls for obvious requests ──
+	lowerMsg := strings.ToLower(message)
+	if strings.Contains(lowerMsg, "scraper") && (strings.Contains(lowerMsg, "new") || strings.Contains(lowerMsg, "create") || strings.Contains(lowerMsg, "add") || strings.Contains(lowerMsg, "make")) {
+		messages = append(messages, map[string]interface{}{
+			"role":    "system",
+			"content": "The user wants to create a new scraper tab. You MUST call the create_scraper_tab tool immediately with the name and URL(s) they provided. Do NOT explain what you will do — just call the tool.",
+		})
+		log.Printf("[AI] Detected scraper creation intent, injecting tool directive")
+	} else if strings.Contains(lowerMsg, "scrape") && strings.Contains(lowerMsg, "http") {
+		messages = append(messages, map[string]interface{}{
+			"role":    "system",
+			"content": "The user wants to scrape a URL. You MUST call the scrape_url tool immediately with the URL they provided. Do NOT explain — just call the tool.",
+		})
+		log.Printf("[AI] Detected scrape URL intent, injecting tool directive")
+	}
+
 	tools := s.getLMToolDefinitions()
+	log.Printf("[AI] ChatLLMStream: %d tools registered, model=%s", len(tools), config.ModelName)
 
 	// Accumulate video card data across all tool iterations
 	var collectedCards []map[string]interface{}
@@ -848,6 +887,7 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 	totalPromptTokens := 0
 	totalCompletionTokens := 0
 	totalReasoningTokens := 0
+	startTime := time.Now()
 
 	type accToolCall struct {
 		id       string
@@ -855,22 +895,22 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 		argsJSON strings.Builder
 	}
 
-	for iteration := 0; iteration < 5; iteration++ {
+	for iteration := 0; iteration < 10; iteration++ {
+		// Limit tools to avoid exceeding OpenRouter's payload size limit
+		toolDefs := tools
+		if len(toolDefs) > 40 {
+			toolDefs = toolDefs[:40]
+			log.Printf("[AI] Truncated tools from %d to %d to fit payload limits", len(tools), len(toolDefs))
+		}
+
 		reqBody := map[string]interface{}{
-			"model":              config.ModelName,
-			"messages":           messages,
-			"tools":              tools,
-			"tool_choice":        "auto",
-			"temperature":        config.Temperature,
-			"max_tokens":         config.MaxTokens,
-			"stream":             true,
-			"parallel_tool_calls": false,
-			"include_reasoning":  true,
-			"reasoning": map[string]interface{}{
-				"enabled": true,
-				"effort":  "high",
-			},
-			"reasoning_effort":   "high",
+			"model":       config.ModelName,
+			"messages":    messages,
+			"tools":       toolDefs,
+			"tool_choice": "auto",
+			"temperature": config.Temperature,
+			"max_tokens":  config.MaxTokens,
+			"stream":      true,
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -878,10 +918,12 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
+		log.Printf("[AI] OpenRouter request: model=%s tools=%d body_size=%d bytes", config.ModelName, len(toolDefs), len(bodyBytes))
+
 		resp, err := openLLMStream(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
 		if err != nil {
 			log.Printf("[AI] Stream open failed after retries: %v", err)
-			return fmt.Errorf("AI provider stream failed: %w", err)
+			return fmt.Errorf("AI stream failed: %w", err)
 		}
 
 		var accContent strings.Builder
@@ -972,19 +1014,45 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 		}
 		resp.Close()
 
+		log.Printf("[AI] Stream iteration %d complete: hasToolCalls=%v accCalls=%d accContentLen=%d", iteration+1, hasToolCalls, len(accCalls), accContent.Len())
+		if hasToolCalls {
+			for i, tc := range accCalls {
+				log.Printf("[AI]   tool call[%d]: id=%s name=%s argsLen=%d", i, tc.id, tc.name, tc.argsJSON.Len())
+			}
+		}
+
 		// Emit accumulated token usage after each LLM call
 		if onTokenUsage != nil && totalPromptTokens > 0 {
-			onTokenUsage(map[string]interface{}{
+			usage := map[string]interface{}{
 				"prompt_tokens":     totalPromptTokens,
 				"completion_tokens": totalCompletionTokens,
 				"reasoning_tokens":  totalReasoningTokens,
 				"total_tokens":      totalPromptTokens + totalCompletionTokens,
-			})
+			}
+			log.Printf("[AI] Token usage: prompt=%d completion=%d reasoning=%d total=%d", totalPromptTokens, totalCompletionTokens, totalReasoningTokens, totalPromptTokens+totalCompletionTokens)
+			onTokenUsage(usage)
 		}
+
+		// Monitor the streaming LLM call
+		monitorService := NewAIMonitorService()
+		monitorService.MonitorCall(&LLMCallResult{
+			InteractionID:    fmt.Sprintf("stream-%d", time.Now().UnixNano()),
+			Model:            config.ModelName,
+			StatusCode:       200,
+			PromptTokens:     totalPromptTokens,
+			CompletionTokens: totalCompletionTokens,
+			ReasoningTokens:  totalReasoningTokens,
+			RequestBytes:     len(bodyBytes),
+			ResponseBytes:    0, // Streaming doesn't have a single response size
+			LatencyMs:        int(time.Since(startTime).Milliseconds()),
+			Success:          true,
+		})
 
 		if err := scanner.Err(); err != nil {
 			return fmt.Errorf("stream read error: %w", err)
 		}
+
+		log.Printf("[AI] Stream iteration %d: hasToolCalls=%v accCalls=%d accContent=%d", iteration+1, hasToolCalls, len(accCalls), accContent.Len())
 
 		if !hasToolCalls {
 			// Final answer already streamed; ensure non-empty
@@ -1020,7 +1088,10 @@ ALWAYS use planning mode first. Present the plan to the user for approval before
 			}
 			toolResult, err := s.ExecuteTool(tc.name, toolArgs)
 			if err != nil {
+				log.Printf("[AI] Stream tool ERROR: %s -> %v", tc.name, err)
 				toolResult = map[string]interface{}{"error": err.Error()}
+			} else {
+				log.Printf("[AI] Stream tool OK: %s -> result keys: %v", tc.name, toolResult)
 			}
 			// Collect video cards for inline rendering
 			if cards := extractVideoCards(tc.name, toolResult); len(cards) > 0 {
@@ -1074,9 +1145,14 @@ func (s *AICompanionService) SubscribeToEvents() (<-chan CompanionEvent, func())
 
 // SaveChatMessage persists a chat message to the database
 func (s *AICompanionService) SaveChatMessage(role, content, source string) {
+	s.SaveChatMessageWithTools(role, content, source, "")
+}
+
+// SaveChatMessageWithTools persists a chat message with optional tool steps JSON
+func (s *AICompanionService) SaveChatMessageWithTools(role, content, source, toolStepsJSON string) {
 	_, _ = s.db.Exec(
-		`INSERT INTO ai_chat_messages (role, content, source, created_at) VALUES (?, ?, ?, ?)`,
-		role, content, source, time.Now(),
+		`INSERT INTO ai_chat_messages (role, content, source, tool_steps, created_at) VALUES (?, ?, ?, ?, ?)`,
+		role, content, source, toolStepsJSON, time.Now(),
 	)
 	// Prune: keep only the 500 most recent messages
 	_, _ = s.db.Exec(`DELETE FROM ai_chat_messages WHERE id NOT IN (
@@ -1087,7 +1163,7 @@ func (s *AICompanionService) SaveChatMessage(role, content, source string) {
 // GetChatHistory returns the most recent N messages, oldest-first
 func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}, error) {
 	rows, err := s.db.Query(
-		`SELECT id, role, content, source, created_at FROM ai_chat_messages
+		`SELECT id, role, content, COALESCE(source, ''), COALESCE(tool_steps, ''), created_at FROM ai_chat_messages
 		 ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -1096,12 +1172,16 @@ func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}
 	var results []map[string]interface{}
 	for rows.Next() {
 		var id int64
-		var role, content, source, createdAt string
-		if rows.Scan(&id, &role, &content, &source, &createdAt) == nil {
-			results = append(results, map[string]interface{}{
+		var role, content, source, toolSteps, createdAt string
+		if rows.Scan(&id, &role, &content, &source, &toolSteps, &createdAt) == nil {
+			msg := map[string]interface{}{
 				"id": id, "role": role, "content": content,
 				"source": source, "created_at": createdAt,
-			})
+			}
+			if toolSteps != "" {
+				msg["tool_steps"] = toolSteps
+			}
+			results = append(results, msg)
 		}
 	}
 	// Reverse to oldest-first order

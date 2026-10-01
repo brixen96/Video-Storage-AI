@@ -137,10 +137,15 @@ func openLLMStream(url, apiKey string, body []byte) (io.ReadCloser, error) {
 			return resp.Body, nil
 		}
 
-		resp.Body.Close()
+			// Read error response body for debugging
+		var errBody []byte
+		if resp.Body != nil {
+			errBody, _ = io.ReadAll(io.LimitReader(resp.Body, 2048))
+			resp.Body.Close()
+		}
 		if isRetryableStatus(resp.StatusCode) {
-			lastErr = fmt.Errorf("HTTP %d on stream open", resp.StatusCode)
-			log.Printf("[AI] Stream retryable error %d (attempt %d/%d)", resp.StatusCode, attempt+1, maxRetries+1)
+			lastErr = fmt.Errorf("HTTP %d on stream open: %s", resp.StatusCode, string(errBody))
+			log.Printf("[AI] Stream retryable error %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, maxRetries+1, truncate(string(errBody), 300))
 			if resp.StatusCode == 429 {
 				if ra := parseRetryAfter(resp); ra > 0 {
 					time.Sleep(ra)
@@ -149,7 +154,8 @@ func openLLMStream(url, apiKey string, body []byte) (io.ReadCloser, error) {
 			continue
 		}
 
-		return nil, fmt.Errorf("HTTP %d on stream open", resp.StatusCode)
+		log.Printf("[AI] Stream HTTP %d response: %s", resp.StatusCode, truncate(string(errBody), 500))
+		return nil, fmt.Errorf("HTTP %d on stream open: %s", resp.StatusCode, truncate(string(errBody), 200))
 	}
 
 	return nil, fmt.Errorf("all %d stream retries exhausted: %w", maxRetries+1, lastErr)

@@ -30,6 +30,9 @@
 						<button class="btn-icon btn-success" @click="createPerformer" :disabled="loading || creatingPerformer" title="Create Performer">
 							<font-awesome-icon :icon="['fas', creatingPerformer ? 'spinner' : 'user-plus']" :spin="creatingPerformer" />
 						</button>
+						<button class="btn-icon btn-ai" @click="enhanceThread" :disabled="loading || enhancing" title="AI Enhance Thread">
+							<font-awesome-icon :icon="['fas', enhancing ? 'spinner' : 'magic']" :spin="enhancing" />
+						</button>
 						<button class="btn-icon" @click="rescrapeThread" :disabled="loading" title="Rescrape">
 							<font-awesome-icon :icon="['fas', 'sync']" :spin="loading" />
 						</button>
@@ -157,6 +160,88 @@
 			</div>
 		</div>
 
+		<!-- AI Enhancement Modal -->
+		<div v-if="showEnhanceModal" class="modal-overlay" @click.self="showEnhanceModal = false">
+			<div class="modal-content enhance-modal">
+				<div class="modal-header">
+					<h3>
+						<font-awesome-icon :icon="['fas', 'magic']" class="me-2" />
+						AI Thread Enhancement
+					</h3>
+					<button class="btn-close" @click="showEnhanceModal = false">
+						<font-awesome-icon :icon="['fas', 'times']" />
+					</button>
+				</div>
+				<div class="modal-body">
+					<p class="mb-4">Enhance this thread with AI-powered analysis and cleanup:</p>
+					
+					<div class="enhance-options">
+						<label class="enhance-option">
+							<input type="checkbox" v-model="enhanceOptions.clean_content" />
+							<div class="option-content">
+								<font-awesome-icon :icon="['fas', 'broom']" />
+								<div>
+									<strong>Clean Content</strong>
+									<small>Remove forum boilerplate, signatures, and clutter</small>
+								</div>
+							</div>
+						</label>
+						
+						<label class="enhance-option">
+							<input type="checkbox" v-model="enhanceOptions.extract_performers" />
+							<div class="option-content">
+								<font-awesome-icon :icon="['fas', 'user']" />
+								<div>
+									<strong>Extract Performers</strong>
+									<small>Find and extract performer names from posts</small>
+								</div>
+							</div>
+						</label>
+						
+						<label class="enhance-option">
+							<input type="checkbox" v-model="enhanceOptions.extract_tags" />
+							<div class="option-content">
+								<font-awesome-icon :icon="['fas', 'tags']" />
+								<div>
+									<strong>Extract Tags</strong>
+									<small>Identify content categories and tags</small>
+								</div>
+							</div>
+						</label>
+						
+						<label class="enhance-option">
+							<input type="checkbox" v-model="enhanceOptions.generate_summary" />
+							<div class="option-content">
+								<font-awesome-icon :icon="['fas', 'file-alt']" />
+								<div>
+									<strong>Generate Summary</strong>
+									<small>Create a summary of the thread content</small>
+								</div>
+							</div>
+						</label>
+						
+						<label class="enhance-option">
+							<input type="checkbox" v-model="enhanceOptions.validate_images" />
+							<div class="option-content">
+								<font-awesome-icon :icon="['fas', 'image']" />
+								<div>
+									<strong>Validate Images</strong>
+									<small>Check image quality and detect broken images using AI vision</small>
+								</div>
+							</div>
+						</label>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button class="btn btn-secondary" @click="showEnhanceModal = false">Cancel</button>
+					<button class="btn btn-ai" @click="startEnhancement" :disabled="!enhanceOptions.clean_content && !enhanceOptions.extract_performers && !enhanceOptions.extract_tags && !enhanceOptions.generate_summary && !enhanceOptions.validate_images">
+						<font-awesome-icon :icon="['fas', 'magic']" class="me-2" />
+						Start Enhancement
+					</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- Send to JDownloader Modal -->
 		<ThreadJDModal
 			v-if="showJDModal"
@@ -199,6 +284,17 @@ const showJDModal = ref(false)
 
 // Performer creation state
 const creatingPerformer = ref(false)
+
+// AI Enhancement state
+const enhancing = ref(false)
+const showEnhanceModal = ref(false)
+const enhanceOptions = ref({
+	clean_content: true,
+	extract_performers: true,
+	extract_tags: true,
+	generate_summary: true,
+	validate_images: false
+})
 
 // Export state
 const exportFormat = ref('txt')
@@ -369,6 +465,67 @@ const exportLinks = async () => {
 		console.error('Error exporting links:', error)
 		toast.error('Failed to export links: ' + error.message)
 	}
+}
+
+// AI Enhancement functions
+const enhanceThread = async () => {
+	showEnhanceModal.value = true
+}
+
+const startEnhancement = async () => {
+	enhancing.value = true
+	showEnhanceModal.value = false
+	
+	try {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/enhance`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(enhanceOptions.value)
+		})
+		const data = await response.json()
+		
+		if (data.success) {
+			toast.success('AI Enhancement started! Check the activity panel for progress.')
+			// Poll for completion
+			pollEnhancementStatus()
+		} else {
+			toast.error(data.message || 'Failed to start enhancement')
+			enhancing.value = false
+		}
+	} catch (error) {
+		console.error('Error starting enhancement:', error)
+		toast.error('Failed to start enhancement: ' + error.message)
+		enhancing.value = false
+	}
+}
+
+const pollEnhancementStatus = async () => {
+	const checkStatus = async () => {
+		try {
+			const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/enhancement-status`)
+			const data = await response.json()
+			
+			if (data.success && data.data?.jobs?.length > 0) {
+				const latestJob = data.data.jobs[0]
+				if (latestJob.status === 'completed' || latestJob.status === 'failed') {
+					enhancing.value = false
+					if (latestJob.status === 'completed') {
+						toast.success('Thread enhancement completed!')
+						loadThread() // Reload thread data
+					} else {
+						toast.error('Thread enhancement failed: ' + latestJob.message)
+					}
+					return
+				}
+			}
+			// Continue polling
+			setTimeout(checkStatus, 2000)
+		} catch (error) {
+			console.error('Error checking enhancement status:', error)
+			enhancing.value = false
+		}
+	}
+	checkStatus()
 }
 
 // Download tracking functions
@@ -1086,6 +1243,190 @@ watch(
 
 .stat-downloaded svg {
 	color: #51cf66;
+}
+
+/* AI Enhancement Button */
+.btn-ai {
+	background: linear-gradient(135deg, #9f7aea 0%, #805ad5 100%) !important;
+	border-color: rgba(159, 122, 234, 0.5) !important;
+}
+
+.btn-ai:hover:not(:disabled) {
+	box-shadow: 0 4px 12px rgba(159, 122, 234, 0.4) !important;
+	transform: translateY(-2px);
+}
+
+/* Enhancement Modal */
+.modal-overlay {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background: rgba(0, 0, 0, 0.7);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1000;
+	backdrop-filter: blur(4px);
+}
+
+.modal-content {
+	background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 16px;
+	width: 90%;
+	max-width: 500px;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 1.5rem;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h3 {
+	margin: 0;
+	font-size: 1.25rem;
+	font-weight: 600;
+	color: #fff;
+	display: flex;
+	align-items: center;
+}
+
+.modal-header h3 svg {
+	color: #9f7aea;
+}
+
+.btn-close {
+	background: none;
+	border: none;
+	color: rgba(255, 255, 255, 0.5);
+	cursor: pointer;
+	padding: 0.5rem;
+	border-radius: 8px;
+	transition: all 0.2s;
+}
+
+.btn-close:hover {
+	background: rgba(255, 255, 255, 0.1);
+	color: #fff;
+}
+
+.modal-body {
+	padding: 1.5rem;
+}
+
+.modal-body p {
+	color: rgba(255, 255, 255, 0.7);
+	margin: 0;
+}
+
+.enhance-options {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+
+.enhance-option {
+	display: flex;
+	align-items: center;
+	padding: 1rem;
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 12px;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.enhance-option:hover {
+	background: rgba(255, 255, 255, 0.08);
+	border-color: rgba(159, 122, 234, 0.3);
+}
+
+.enhance-option:has(input:checked) {
+	background: rgba(159, 122, 234, 0.1);
+	border-color: rgba(159, 122, 234, 0.5);
+}
+
+.enhance-option input {
+	margin-right: 1rem;
+	width: 18px;
+	height: 18px;
+	accent-color: #9f7aea;
+}
+
+.option-content {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	flex: 1;
+}
+
+.option-content svg {
+	color: #9f7aea;
+	font-size: 1.25rem;
+	width: 24px;
+	text-align: center;
+}
+
+.option-content strong {
+	display: block;
+	color: #fff;
+	font-size: 0.95rem;
+	margin-bottom: 0.25rem;
+}
+
+.option-content small {
+	color: rgba(255, 255, 255, 0.5);
+	font-size: 0.8rem;
+}
+
+.modal-footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 1rem;
+	padding: 1.5rem;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.btn {
+	padding: 0.75rem 1.5rem;
+	border-radius: 10px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	border: none;
+}
+
+.btn-secondary {
+	background: rgba(255, 255, 255, 0.1);
+	color: rgba(255, 255, 255, 0.7);
+}
+
+.btn-secondary:hover {
+	background: rgba(255, 255, 255, 0.15);
+	color: #fff;
+}
+
+.btn-ai {
+	background: linear-gradient(135deg, #9f7aea 0%, #805ad5 100%);
+	color: #fff;
+	display: flex;
+	align-items: center;
+}
+
+.btn-ai:hover:not(:disabled) {
+	box-shadow: 0 4px 12px rgba(159, 122, 234, 0.4);
+	transform: translateY(-2px);
+}
+
+.btn-ai:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 @media (max-width: 768px) {
