@@ -42,6 +42,13 @@ export default {
 				this.$refs.toast.info('🤖 Companion proposal: ' + d.proposed_tool, 'Review and approve it in the Monitor tab → Companion Observations', 10000)
 			} else if (d.proposal_status === 'auto_executed') {
 				this.$refs.toast.success('🤖 Companion auto-ran: ' + d.proposed_tool, evt.message || '', 9000)
+			} else if (d.kind === 'supervisor_initiative') {
+				const taskNote = d.tasks_created > 0 ? ` — ${d.tasks_created} task(s) added to the board` : ''
+				if (d.verdict === 'WARNING') {
+					this.$refs.toast.warning('🤖 Initiative: ' + evt.message, (d.detail || '') + taskNote, 12000)
+				} else {
+					this.$refs.toast.info('🤖 Initiative: ' + evt.message, (d.detail || '') + taskNote, 10000)
+				}
 			} else if (d.verdict === 'WARNING') {
 				this.$refs.toast.warning('⚠️ Companion: ' + evt.message, d.detail || '', 10000)
 			} else if (d.verdict === 'TIP') {

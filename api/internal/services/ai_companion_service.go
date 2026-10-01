@@ -124,6 +124,7 @@ func (s *AICompanionService) Start() error {
 	go s.MonitorConsoleLogsForErrors()
 	go s.runPeriodicHealthCheck()
 	go s.observeAndEvaluate()
+	go s.runInitiativePass()
 
 	// Fire daily briefing after a short delay (gives app time to fully start)
 	go func() {

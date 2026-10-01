@@ -6,6 +6,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/brixen96/video-storage-ai/internal/models"
 )
 
 // ── Companion Supervisor (Phases 1+2: eyes + brain, read-only observer) ──
@@ -82,11 +84,12 @@ func (s *AICompanionService) RecordUserAction(actionType, summary, detailsJSON s
 }
 
 // observeAndEvaluate is the supervisor brain: watches recorded UI actions and
-// periodically runs a lean LLM evaluation over recent batches.
+// system outcomes, then periodically runs a lean LLM evaluation over batches.
 func (s *AICompanionService) observeAndEvaluate() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	cursor := time.Now()
+	activityCursor := time.Now()
 
 	log.Println("[Supervisor] Observation loop started (lean mode, 60s cadence)")
 	for {
@@ -95,9 +98,48 @@ func (s *AICompanionService) observeAndEvaluate() {
 			return
 		case <-ticker.C:
 			now := time.Now()
+			s.recordSystemOutcomes(activityCursor, now)
+			activityCursor = now
 			s.evaluateRecentActions(cursor, now)
 			cursor = now
 		}
+	}
+}
+
+// supervisorInterestingTaskKeywords — background task types worth observing.
+var supervisorInterestingTaskKeywords = []string{"scrape", "scan", "enhance", "health", "link"}
+
+// recordSystemOutcomes converts finished background tasks (scrapes, scans,
+// enhancements, ...) into companion_actions so the supervisor evaluates
+// OUTCOMES, not just UI actions.
+func (s *AICompanionService) recordSystemOutcomes(since, now time.Time) {
+	rows, err := s.db.Query(
+		`SELECT task_type, status, message FROM activity_logs
+		 WHERE completed_at > ? AND completed_at <= ? AND status IN ('completed', 'failed')
+		 ORDER BY completed_at ASC LIMIT 15`, since, now)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var taskType, status, message string
+		if rows.Scan(&taskType, &status, &message) != nil {
+			continue
+		}
+		lower := strings.ToLower(taskType)
+		interesting := false
+		for _, kw := range supervisorInterestingTaskKeywords {
+			if strings.Contains(lower, kw) {
+				interesting = true
+				break
+			}
+		}
+		if !interesting {
+			continue
+		}
+		details, _ := json.Marshal(map[string]string{"source": "activity_logs", "task_type": taskType, "status": status})
+		summary := fmt.Sprintf("Background %s %s: %s", taskType, status, message)
+		s.RecordUserAction("system_"+lower, summary, string(details))
 	}
 }
 
@@ -123,7 +165,7 @@ func (s *AICompanionService) evaluateRecentActions(since, now time.Time) {
 		if rows.Scan(&a.ActionType, &a.Summary, &createdAt) != nil {
 			continue
 		}
-		if !supervisorActionAllowlist[a.ActionType] {
+		if !supervisorActionAllowlist[a.ActionType] && !strings.HasPrefix(a.ActionType, "system_") {
 			continue
 		}
 		if evaluatedTypes[a.ActionType] {
@@ -191,10 +233,15 @@ You may propose ONE concrete action that would help Brix, based on the actions y
 ACTION: tool_name {"arg": "value"}
 ACTION: none
 Allowed tools: rescrape_thread(thread_id), start_scraper_job(tab_id, url), scan_library(library_id), enhance_thread(thread_id), validate_thread_images(thread_id), batch_enhance_threads(thread_ids)
-Only propose when the observed actions clearly call for it — otherwise output ACTION: none. Never propose destructive operations.`, mode)
+Only propose when the observed actions clearly call for it — otherwise output ACTION: none. Never propose destructive operations.
+
+## Flagging work for Brix
+You may ALSO flag work that needs Brix's attention or falls outside your allowed tools. Output zero or more TASK lines, each exactly:
+TASK: priority(high|medium|low) | title | short description
+Rules: only concrete, actionable work; never duplicates; if nothing needs flagging, output no TASK lines.`, mode)
 	}
 
-	userMessage := "Recent actions by Brix in the app UI:\n" + actionLines.String() + "\nEvaluate."
+	userMessage := "Recent activity (Brix's UI actions and background system outcomes):\n" + actionLines.String() + "\nEvaluate."
 
 	reqBody := map[string]interface{}{
 		"model": config.ModelName,
@@ -275,6 +322,15 @@ Only propose when the observed actions clearly call for it — otherwise output 
 		}
 	}
 
+	// Create Task Board items from TASK lines (initiative)
+	createdTasks := 0
+	if mode != "assist" {
+		createdTasks = s.createSupervisorTasks(parseSupervisorTasks(result.Choices[0].Message.Content), verdict, summary)
+		if createdTasks > 0 {
+			detail = strings.TrimSpace(detail + fmt.Sprintf("\n\n📋 %d task(s) created on the Task Board.", createdTasks))
+		}
+	}
+
 	actionsJSON, _ := json.Marshal(batch)
 	_, err = s.db.Exec(
 		`INSERT INTO companion_evaluations (verdict, summary, detail, actions_json, model, latency_ms, proposed_tool, proposed_args, proposal_status, created_at)
@@ -298,8 +354,8 @@ Only propose when the observed actions clearly call for it — otherwise output 
 
 	log.Printf("[Supervisor] Evaluated %d action(s): [%s] %s", len(batch), verdict, summary)
 
-	// Broadcast notable evaluations and proposals (Toast + Monitor delivery)
-	if verdict != "OK" || proposalStatus != "none" {
+	// Broadcast notable evaluations, proposals, and created tasks
+	if verdict != "OK" || proposalStatus != "none" || createdTasks > 0 {
 		severity := "info"
 		if verdict == "WARNING" {
 			severity = "warning"
@@ -310,12 +366,16 @@ Only propose when the observed actions clearly call for it — otherwise output 
 		} else if proposalStatus == "auto_executed" {
 			message = "Auto-ran " + proposedTool + ": " + summary
 		}
+		if createdTasks > 0 {
+			message = fmt.Sprintf("%s (+%d task(s) for you)", message, createdTasks)
+		}
 		s.emitEvent(CompanionEvent{
 			Type: "supervisor_evaluation", Source: "supervisor",
 			Message: message, Severity: severity,
 			Data: map[string]interface{}{
 				"kind": "supervisor_evaluation", "verdict": verdict, "detail": detail,
 				"proposed_tool": proposedTool, "proposal_status": proposalStatus,
+				"tasks_created": createdTasks,
 			},
 		})
 	}
@@ -376,6 +436,272 @@ func parseSupervisorAction(content string) (string, map[string]interface{}) {
 		return tool, args
 	}
 	return "", nil
+}
+
+// supervisorTask is a parsed TASK line from a supervisor LLM response.
+type supervisorTask struct {
+	priority    string
+	title       string
+	description string
+}
+
+// parseSupervisorTasks extracts TASK: priority | title | description lines.
+// Tolerates malformed lines; caps at 3 tasks per response.
+func parseSupervisorTasks(content string) []supervisorTask {
+	var tasks []supervisorTask
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(strings.ToUpper(line), "TASK:") {
+			continue
+		}
+		rest := strings.TrimSpace(line[len("TASK:"):])
+		parts := strings.Split(rest, "|")
+		if len(parts) < 2 {
+			continue
+		}
+		priority := strings.ToLower(strings.TrimSpace(parts[0]))
+		title := strings.TrimSpace(parts[1])
+		description := ""
+		if len(parts) > 2 {
+			description = strings.TrimSpace(strings.Join(parts[2:], "|"))
+		}
+		if title == "" {
+			continue
+		}
+		if priority != "high" && priority != "low" {
+			priority = "medium"
+		}
+		tasks = append(tasks, supervisorTask{priority: priority, title: title, description: description})
+		if len(tasks) >= 3 {
+			break
+		}
+	}
+	return tasks
+}
+
+// createSupervisorTasks persists TASK lines as Shared Task Board items.
+// Returns the number of tasks created.
+func (s *AICompanionService) createSupervisorTasks(tasks []supervisorTask, verdict, summary string) int {
+	if len(tasks) == 0 {
+		return 0
+	}
+	taskSvc := NewCompanionTaskService(s.db)
+	created := 0
+	for _, t := range tasks {
+		priority := models.PriorityMedium
+		switch t.priority {
+		case "high":
+			priority = models.PriorityHigh
+		case "low":
+			priority = models.PriorityLow
+		}
+		description := t.description
+		if description == "" {
+			description = summary
+		}
+		description += fmt.Sprintf("\n\n_Flagged by Companion Supervisor [%s]: %s_", verdict, summary)
+		task := &models.CompanionTask{
+			Title:       t.title,
+			Description: description,
+			Status:      models.CompanionTaskStatusOpen,
+			Priority:    priority,
+			CreatedBy:   "companion",
+			AssignedTo:  "brix",
+			Tags:        []string{"supervisor"},
+		}
+		if err := taskSvc.CreateTask(task); err != nil {
+			log.Printf("[Supervisor] Failed to create task %q: %v", t.title, err)
+			continue
+		}
+		created++
+		log.Printf("[Supervisor] Created task #%d: %s (priority=%s)", task.ID, t.title, t.priority)
+	}
+	return created
+}
+
+// ── Periodic initiative pass ──
+
+const supervisorInitiativeInterval = 6 * time.Hour
+
+// runInitiativePass is the supervisor's proactive sweep: every 6 hours it
+// reviews recent activity + evaluations with an LLM, stores an analytical
+// report for the Monitor tab, and flags follow-up work as Task Board items.
+func (s *AICompanionService) runInitiativePass() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	// Small startup delay so the app settles before the first pass
+	select {
+	case <-s.ctx.Done():
+		return
+	case <-time.After(2 * time.Minute):
+	}
+
+	log.Println("[Supervisor] Initiative pass loop started (every 6h)")
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			var lastStr string
+			s.db.QueryRow(`SELECT value FROM memories WHERE key = 'last_initiative_pass'`).Scan(&lastStr)
+			if lastStr != "" {
+				if t, err := time.Parse(time.RFC3339, lastStr); err == nil && time.Since(t) < supervisorInitiativeInterval {
+					continue
+				}
+			}
+			s.runInitiativePassOnce()
+		}
+	}
+}
+
+// runInitiativePassOnce executes a single initiative pass.
+func (s *AICompanionService) runInitiativePassOnce() {
+	config := s.GetAIConfig()
+	if !config.Enabled || !IsValidAutonomyMode(config.AutonomyMode) || config.AutonomyMode == "assist" {
+		return
+	}
+	now := time.Now()
+	since := now.Add(-6 * time.Hour)
+
+	// Gather context: recent actions, evaluations, failures, errors
+	var actionCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM companion_actions WHERE created_at > ?`, since).Scan(&actionCount)
+
+	var recentActions strings.Builder
+	if actionRows, err := s.db.Query(`SELECT summary FROM companion_actions WHERE created_at > ? ORDER BY created_at DESC LIMIT 15`, since); err == nil {
+		for actionRows.Next() {
+			var sum string
+			if actionRows.Scan(&sum) == nil {
+				fmt.Fprintf(&recentActions, "- %s\n", sum)
+			}
+		}
+		actionRows.Close()
+	}
+
+	var evalSummary strings.Builder
+	evalCount := 0
+	if evalRows, err := s.db.Query(`SELECT verdict, summary FROM companion_evaluations WHERE created_at > ? ORDER BY created_at DESC LIMIT 10`, since); err == nil {
+		for evalRows.Next() {
+			var v, sum string
+			if evalRows.Scan(&v, &sum) == nil {
+				fmt.Fprintf(&evalSummary, "- [%s] %s\n", v, sum)
+				evalCount++
+			}
+		}
+		evalRows.Close()
+	}
+
+	var failedTasks int
+	s.db.QueryRow(`SELECT COUNT(*) FROM activity_logs WHERE status = 'failed' AND completed_at > ?`, since).Scan(&failedTasks)
+	var errorCount int
+	s.db.QueryRow(`SELECT COUNT(*) FROM console_logs WHERE level = 'error' AND created_at > datetime('now', '-6 hours')`).Scan(&errorCount)
+	var openTasks int
+	s.db.QueryRow(`SELECT COUNT(*) FROM companion_tasks WHERE status = 'open'`).Scan(&openTasks)
+
+	systemPrompt := `You are the AI Companion supervisor of Video Storage AI running a periodic initiative pass. You review what happened in the app over the last hours and give Brix (the owner/developer) a short analytical overview.
+
+Respond in EXACTLY three parts:
+Line 1: a verdict tag — [OK], [TIP], or [WARNING] — followed by one short sentence summarizing the period.
+Line 2: one optional insight sentence, or just —.
+Then zero or more TASK lines, each exactly:
+TASK: priority(high|medium|low) | title | short description
+Use tasks only for concrete follow-up work that Brix should see on the Task Board. If the period was uneventful, output [OK] and no tasks.`
+
+	userMessage := fmt.Sprintf(`Period summary (last 6h):
+Background/system actions: %d
+Recent actions:
+%s
+Recent evaluations (%d):
+%s
+Failed background tasks: %d | Console errors: %d | Open tasks on board: %d
+
+Run your initiative pass.`, actionCount, recentActions.String(), evalCount, evalSummary.String(), failedTasks, errorCount, openTasks)
+
+	reqBody := map[string]interface{}{
+		"model": config.ModelName,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userMessage},
+		},
+		"max_tokens":  300,
+		"temperature": 0.3,
+		"stream":      false,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return
+	}
+
+	start := time.Now()
+	respBody, statusCode, err := doLLMRequest(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
+	latencyMs := int(time.Since(start).Milliseconds())
+
+	monitorService := NewAIMonitorService()
+	monitorService.MonitorCall(&LLMCallResult{
+		InteractionID: fmt.Sprintf("initiative-%d", time.Now().UnixNano()),
+		Model:         config.ModelName,
+		StatusCode:    statusCode,
+		RequestBytes:  len(bodyBytes),
+		ResponseBytes: len(respBody),
+		LatencyMs:     latencyMs,
+		Success:       err == nil && statusCode == 200,
+	})
+	s.db.Exec(`INSERT OR REPLACE INTO memories (key, value, category, importance, created_at, updated_at)
+		VALUES ('last_initiative_pass', ?, 'system', 1, datetime('now'), datetime('now'))`, time.Now().Format(time.RFC3339))
+	if err != nil || statusCode != 200 {
+		log.Printf("[Supervisor] Initiative pass LLM call failed: status=%d err=%v", statusCode, err)
+		return
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil || len(result.Choices) == 0 {
+		return
+	}
+	content := result.Choices[0].Message.Content
+	verdict, summary, detail := parseSupervisorVerdict(content)
+	createdTasks := s.createSupervisorTasks(parseSupervisorTasks(content), verdict, summary)
+	if createdTasks > 0 {
+		detail = strings.TrimSpace(detail + fmt.Sprintf("\n\n📋 %d task(s) created on the Task Board.", createdTasks))
+	}
+
+	_, err = s.db.Exec(
+		`INSERT INTO companion_evaluations (verdict, summary, detail, actions_json, model, latency_ms, proposed_tool, proposed_args, proposal_status, created_at)
+		 VALUES (?, ?, ?, '', ?, ?, '', '', 'none', ?)`,
+		verdict, "Initiative pass: "+summary, detail, "supervisor-initiative", latencyMs, time.Now(),
+	)
+	if err != nil {
+		log.Printf("[Supervisor] Failed to store initiative report: %v", err)
+	}
+	_, _ = s.db.Exec(`DELETE FROM companion_evaluations WHERE id NOT IN (
+		SELECT id FROM companion_evaluations ORDER BY created_at DESC LIMIT 500
+	)`)
+
+	log.Printf("[Supervisor] Initiative pass complete: [%s] %s (tasks=%d)", verdict, summary, createdTasks)
+	if verdict != "OK" || createdTasks > 0 {
+		severity := "info"
+		if verdict == "WARNING" {
+			severity = "warning"
+		}
+		message := "Initiative pass: " + summary
+		if createdTasks > 0 {
+			message = fmt.Sprintf("%s (+%d task(s) for you)", message, createdTasks)
+		}
+		s.emitEvent(CompanionEvent{
+			Type: "supervisor_evaluation", Source: "supervisor",
+			Message: message, Severity: severity,
+			Data: map[string]interface{}{
+				"kind": "supervisor_initiative", "verdict": verdict, "detail": detail,
+				"tasks_created": createdTasks, "proposed_tool": "", "proposal_status": "none",
+			},
+		})
+	}
 }
 
 // GetEvaluations returns recent supervisor evaluations for the Monitor tab.
