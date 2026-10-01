@@ -218,6 +218,55 @@ func resetChat(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Companion reset to defaults", "data": summary})
 }
 
+// recordUserAction records UI actions for the Companion Supervisor to observe
+func recordUserAction(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	var request struct {
+		Actions []struct {
+			Type    string `json:"type"`
+			Summary string `json:"summary"`
+			Details string `json:"details"`
+		} `json:"actions"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || len(request.Actions) == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", "non-empty actions array required"))
+		return
+	}
+	if len(request.Actions) > 20 {
+		request.Actions = request.Actions[:20]
+	}
+	recorded := 0
+	for _, a := range request.Actions {
+		if a.Type == "" || a.Summary == "" {
+			continue
+		}
+		aiCompanionService.RecordUserAction(a.Type, a.Summary, a.Details)
+		recorded++
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "recorded": recorded})
+}
+
+// getCompanionEvaluations returns recent supervisor evaluations for the Monitor tab
+func getCompanionEvaluations(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	limit := 20
+	if l := c.Query("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+	evals, err := aiCompanionService.GetEvaluations(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get evaluations", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": evals, "count": len(evals)})
+}
+
 // aiCompanionChat handles chat messages to the AI Companion
 func aiCompanionChat(c *gin.Context) {
 	if aiCompanionService == nil {

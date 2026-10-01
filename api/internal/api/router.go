@@ -237,6 +237,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.GET("/chat/history", getChatHistory)          // Get persistent chat history
 			ai.DELETE("/chat/history", clearChatHistory)     // Clear chat history
 			ai.POST("/chat/reset", resetChat)                // Reset chat + memories to defaults
+			ai.POST("/companion/actions", recordUserAction)  // Record UI actions for supervisor observation
+			ai.GET("/companion/evaluations", getCompanionEvaluations) // Supervisor evaluations for Monitor tab
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

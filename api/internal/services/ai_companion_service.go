@@ -123,6 +123,7 @@ func (s *AICompanionService) Start() error {
 	go s.monitorActivityLogs()
 	go s.MonitorConsoleLogsForErrors()
 	go s.runPeriodicHealthCheck()
+	go s.observeAndEvaluate()
 
 	// Fire daily briefing after a short delay (gives app time to fully start)
 	go func() {

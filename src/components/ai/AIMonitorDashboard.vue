@@ -144,6 +144,27 @@
 			</div>
 		</div>
 
+		<!-- Companion Observations -->
+		<div class="panel">
+			<h3>Companion Observations</h3>
+			<div v-if="evaluations.length === 0" class="empty-state">
+				No evaluations yet — the supervisor watches big actions (scrapes, file ops, settings) and comments only when something is notable.
+			</div>
+			<div v-else class="evaluations-list">
+				<div v-for="ev in evaluations" :key="ev.id" class="evaluation-item">
+					<div class="eval-header">
+						<span class="verdict-badge" :class="'verdict-' + (ev.verdict || 'OK').toLowerCase()">{{ ev.verdict || 'OK' }}</span>
+						<span class="eval-time">{{ formatTime(ev.created_at) }}</span>
+					</div>
+					<div class="eval-summary">{{ ev.summary }}</div>
+					<div v-if="ev.detail && ev.detail !== '—'" class="eval-detail">{{ ev.detail }}</div>
+					<div v-if="ev.actions && ev.actions.length" class="eval-actions">
+						<span v-for="(a, i) in ev.actions" :key="i" class="eval-action-chip" :title="a.summary">{{ a.summary }}</span>
+					</div>
+				</div>
+			</div>
+		</div>
+
 		<!-- Recent Calls -->
 		<div class="panel">
 			<h3>Recent API Calls</h3>
@@ -187,6 +208,7 @@ import { API_ORIGIN } from '@/services/api'
 const loading = ref(false)
 const metrics = ref({})
 const toolStats = ref([])
+const evaluations = ref([])
 
 const tokenPercentages = computed(() => {
 	const total = metrics.value.total_tokens_used || 1
@@ -239,15 +261,18 @@ function getCostBarHeight(cost) {
 async function refreshData() {
 	loading.value = true
 	try {
-		const [dashboardRes, toolsRes] = await Promise.all([
+		const [dashboardRes, toolsRes, evalsRes] = await Promise.all([
 			fetch(`${API_ORIGIN}/api/v1/ai/monitor/dashboard`),
 			fetch(`${API_ORIGIN}/api/v1/ai/monitor/tools`),
+			fetch(`${API_ORIGIN}/api/v1/ai/companion/evaluations?limit=20`),
 		])
 		const dashboard = await dashboardRes.json()
 		const tools = await toolsRes.json()
+		const evals = await evalsRes.json()
 
 		if (dashboard.success) metrics.value = dashboard.data
 		if (tools.success) toolStats.value = tools.data || []
+		if (evals.success) evaluations.value = evals.data || []
 	} catch (err) {
 		console.error('Failed to load monitor data:', err)
 	} finally {
@@ -275,6 +300,75 @@ onMounted(refreshData)
 .monitor-header h2 {
 	margin: 0;
 	color: var(--text-primary);
+}
+
+/* Companion Observations */
+.evaluations-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+}
+
+.evaluation-item {
+	background: rgba(0, 0, 0, 0.2);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-left: 3px solid rgba(255, 255, 255, 0.25);
+	border-radius: 8px;
+	padding: 0.6rem 0.85rem;
+}
+
+.evaluation-item .verdict-TIP { border-left-color: #00d9ff; }
+.evaluation-item .verdict-WARNING { border-left-color: #ffc107; }
+
+.eval-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 0.3rem;
+}
+
+.verdict-badge {
+	font-size: 0.68rem;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	padding: 0.15rem 0.45rem;
+	border-radius: 4px;
+}
+
+.verdict-badge.verdict-OK { background: rgba(40, 167, 69, 0.2); color: #28a745; }
+.verdict-badge.verdict-TIP { background: rgba(0, 217, 255, 0.15); color: #00d9ff; }
+.verdict-badge.verdict-WARNING { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+
+.eval-time {
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.4);
+}
+
+.eval-summary {
+	font-size: 0.85rem;
+	color: var(--text-primary, #fff);
+}
+
+.eval-detail {
+	font-size: 0.78rem;
+	color: rgba(255, 255, 255, 0.55);
+	margin-top: 0.2rem;
+}
+
+.eval-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-top: 0.4rem;
+}
+
+.eval-action-chip {
+	font-size: 0.7rem;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 10px;
+	padding: 0.15rem 0.55rem;
+	color: rgba(255, 255, 255, 0.6);
 }
 
 .btn-refresh {

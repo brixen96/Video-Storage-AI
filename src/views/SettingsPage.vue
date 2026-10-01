@@ -732,6 +732,7 @@
 
 <script>
 import settingsService from '@/services/settingsService'
+import { useActionTracker } from '@/composables/ai/useActionTracker'
 import { jdownloaderAPI, aiAPI, appConfigAPI, systemAPI, consoleLogAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
 
@@ -845,6 +846,7 @@ export default {
 			if (success) {
 				settingsService.applyTheme()
 				this.$toast.success('Settings Saved', 'Your preferences have been updated')
+				useActionTracker().trackAction('settings_saved', 'Saved app settings (general)', { section: 'general' })
 			} else {
 				this.$toast.error('Save Failed', 'Could not save settings')
 			}
@@ -893,6 +895,7 @@ export default {
 			try {
 				await jdownloaderAPI.updateConfig(this.jdConfig)
 				this.$toast.success('JDownloader configuration saved')
+				useActionTracker().trackAction('settings_saved', 'Saved JDownloader settings', { section: 'jdownloader' })
 				this.checkJDStatus()
 			} catch (error) {
 				console.error('Failed to save JDownloader config:', error)
@@ -948,6 +951,7 @@ export default {
 			try {
 				await aiAPI.updateConfig(this.aiConfig)
 				this.$toast.success('AI config saved!')
+				useActionTracker().trackAction('settings_saved', 'Saved AI/OpenRouter settings', { section: 'ai' })
 			} catch (error) {
 				console.error('Failed to save AI config:', error)
 				this.$toast.error('Failed to save AI configuration')

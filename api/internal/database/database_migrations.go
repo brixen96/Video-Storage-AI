@@ -1084,6 +1084,32 @@ func runMigrations() error {
 		log.Println("Migration 65: Added reasoning_effort column to ai_config")
 	}
 
+	// Migration 66: Companion Supervisor — UI action telemetry + evaluations
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS companion_actions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		action_type TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		details TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 66 (companion_actions): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_actions_created ON companion_actions(created_at DESC)`)
+
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS companion_evaluations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		verdict TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		detail TEXT,
+		actions_json TEXT,
+		model TEXT,
+		latency_ms INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 66 (companion_evaluations): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_evaluations_created ON companion_evaluations(created_at DESC)`)
+
 	return nil
 }
 

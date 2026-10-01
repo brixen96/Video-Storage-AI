@@ -392,7 +392,10 @@ const LeakVidsTab = defineAsyncComponent(() => import('@/components/scraper/tabs
 import { jdownloaderAPI, scrapersAPI, deleteVideosBySource, API_ORIGIN } from '@/services/api'
 
 const { proxy } = getCurrentInstance()
+import { useActionTracker } from '@/composables/ai/useActionTracker'
+
 const toast = proxy.$toast
+const { trackAction } = useActionTracker()
 
 // JDownloader integration
 const jdAvailable = ref(false)
@@ -839,6 +842,7 @@ const startCustomTabScrape = async (tab) => {
 		if (data.success) {
 			customTabJobs.value[tab.id] = data.data
 			toast.success('Scraping job started! It will run in the background.')
+			trackAction('scrape_started', `Started scrape: ${url} (tab "${tab.name}")`, { tab: tab.name, url })
 
 			// Poll for progress
 			pollJobProgress(tab.id, data.data.id)

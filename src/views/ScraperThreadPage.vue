@@ -261,10 +261,12 @@ import { API_ORIGIN } from '@/services/api'
 import websocketService from '@/services/websocket'
 import ThreadPostCard from '@/components/ThreadPostCard.vue'
 import ThreadJDModal from '@/components/ThreadJDModal.vue'
+import { useActionTracker } from '@/composables/ai/useActionTracker'
 
 const route = useRoute()
 const { proxy } = getCurrentInstance()
 const toast = proxy.$toast
+const { trackAction } = useActionTracker()
 
 // State
 const loading = ref(false)
@@ -486,6 +488,7 @@ const startEnhancement = async () => {
 		
 		if (data.success) {
 			toast.success('AI Enhancement started! Check the activity panel for progress.')
+			trackAction('thread_enhanced', `AI-enhanced thread "${thread.value?.title || route.params.id}"`, { thread_id: route.params.id })
 			// Poll for completion
 			pollEnhancementStatus()
 		} else {
@@ -648,6 +651,7 @@ const rescrapeThread = async () => {
 
 		if (data.success) {
 			toast.success('Thread rescraping started. Check Tasks page for progress.')
+			trackAction('thread_rescraped', `Rescraped thread "${thread.value?.title || route.params.id}"`, { thread_id: route.params.id })
 			setTimeout(loadThread, 3000)
 		} else {
 			toast.error(data.message || 'Failed to start rescraping')
@@ -683,6 +687,7 @@ const deleteThread = async () => {
 
 		if (data.success) {
 			toast.success('Thread deleted successfully')
+			trackAction('thread_deleted', `Deleted thread "${thread.value?.title || route.params.id}"`, { thread_id: route.params.id })
 			setTimeout(() => {
 				window.location.href = '/scraper'
 			}, 1000)

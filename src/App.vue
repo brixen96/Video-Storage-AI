@@ -19,6 +19,7 @@ import NavBar from '@/components/NavBar.vue'
 import ActivityTracker from '@/components/ActivityTracker.vue'
 import GlobalSearch from '@/components/GlobalSearch.vue'
 import ToastNotification from '@/components/ToastNotification.vue'
+import websocketService from '@/services/websocket'
 
 // Lazy load heavy component
 const AICompanionChat = defineAsyncComponent(() => import('@/components/AICompanionChat.vue'))
@@ -31,6 +32,23 @@ export default {
 		AICompanionChat,
 		GlobalSearch,
 		ToastNotification,
+	},
+	mounted() {
+		// Companion Supervisor evaluations → toasts (full write-up lives in Monitor tab)
+		this.wsUnsubCompanion = websocketService.on('companion_event', (evt) => {
+			if (evt?.type !== 'supervisor_evaluation') return
+			if (evt.data?.verdict === 'WARNING') {
+				this.$refs.toast.warning('⚠️ Companion: ' + evt.message, evt.data?.detail || '', 10000)
+			} else if (evt.data?.verdict === 'TIP') {
+				this.$refs.toast.info('💡 Companion tip: ' + evt.message, evt.data?.detail || '', 8000)
+			}
+		})
+	},
+	beforeUnmount() {
+		if (this.wsUnsubCompanion) {
+			this.wsUnsubCompanion()
+			this.wsUnsubCompanion = null
+		}
 	},
 }
 </script>

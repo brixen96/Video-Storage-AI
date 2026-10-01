@@ -239,6 +239,10 @@ export const aiAPI = {
 	clearChatHistory: () => api.delete('/ai/chat/history'),
 	resetChat: () => api.post('/ai/chat/reset'),
 
+	// Companion Supervisor
+	trackActions: (actions) => api.post('/ai/companion/actions', { actions }),
+	getCompanionEvaluations: (limit = 20) => api.get('/ai/companion/evaluations', { params: { limit } }),
+
 	// Memory management
 	saveMemory: (data) => api.post('/ai/memories', data),
 	getMemories: (params) => api.get('/ai/memories', { params }),
