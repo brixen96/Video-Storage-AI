@@ -1,7 +1,9 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -273,4 +275,356 @@ func (s *AICompanionService) registerScraperTools() {
 			"tables":         fixes,
 		}, nil
 	})
+
+	// Register thread enhancement tools
+	s.registerThreadEnhancementTools()
+}
+
+// registerThreadEnhancementTools adds AI-powered thread enhancement tools
+func (s *AICompanionService) registerThreadEnhancementTools() {
+	activitySvc := NewActivityService()
+	enhancer := NewThreadEnhancer(activitySvc)
+
+	// Tool: Enhance Thread
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "enhance_thread",
+			Description: "AI-powered thread enhancement: clean up post content, extract performer names, extract tags, and generate summaries. Use this to improve thread quality and metadata.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"thread_id": map[string]interface{}{
+						"type":        "number",
+						"description": "ID of the thread to enhance",
+					},
+					"clean_content": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Remove forum boilerplate, signatures, and clutter from posts (default: true)",
+					},
+					"extract_performers": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Extract performer names from post content (default: true)",
+					},
+					"extract_tags": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Extract content tags like BBC, interracial, etc. (default: true)",
+					},
+					"generate_summary": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Generate a summary of the thread (default: true)",
+					},
+				},
+				"required": []string{"thread_id"},
+			},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		threadID := int64(args["thread_id"].(float64))
+		if threadID == 0 {
+			return map[string]interface{}{"error": "thread_id is required"}, nil
+		}
+
+		options := EnhancementOptions{
+			CleanContent:      getBoolArg(args, "clean_content", true),
+			ExtractPerformers: getBoolArg(args, "extract_performers", true),
+			ExtractTags:       getBoolArg(args, "extract_tags", true),
+			GenerateSummary:   getBoolArg(args, "generate_summary", true),
+		}
+
+		result, err := enhancer.EnhanceThread(threadID, options)
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+
+		return map[string]interface{}{
+			"success":          true,
+			"thread_id":        result.ThreadID,
+			"posts_processed":  result.PostsProcessed,
+			"posts_cleaned":    result.PostsCleaned,
+			"performers_found": result.PerformersFound,
+			"tags_extracted":   result.TagsExtracted,
+			"summary":          result.Summary,
+			"duration":         result.Duration.String(),
+		}, nil
+	})
+
+	// Tool: Get Thread Enhancement Status
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "get_thread_enhancement_status",
+			Description: "Check the status of a thread enhancement job and get results.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"thread_id": map[string]interface{}{
+						"type":        "number",
+						"description": "ID of the thread to check",
+					},
+				},
+				"required": []string{"thread_id"},
+			},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		threadID := int64(args["thread_id"].(float64))
+		if threadID == 0 {
+			return map[string]interface{}{"error": "thread_id is required"}, nil
+		}
+
+		// Check recent enhancement activities for this thread
+		rows, err := s.db.Query(`
+			SELECT id, status, message, progress, started_at, completed_at
+			FROM activity_logs
+			WHERE task_type = 'thread_enhancement' 
+			AND details LIKE ?
+			ORDER BY started_at DESC
+			LIMIT 5
+		`, fmt.Sprintf(`%%"thread_id":%d%%`, threadID))
+		if err != nil {
+			return map[string]interface{}{"error": err.Error()}, nil
+		}
+		defer rows.Close()
+
+		jobs := []map[string]interface{}{}
+		for rows.Next() {
+			var id int64
+			var status, message string
+			var progress int
+			var startedAt, completedAt time.Time
+			if err := rows.Scan(&id, &status, &message, &progress, &startedAt, &completedAt); err == nil {
+				jobs = append(jobs, map[string]interface{}{
+					"id":           id,
+					"status":       status,
+					"message":      message,
+					"progress":     progress,
+					"started_at":   startedAt,
+					"completed_at": completedAt,
+				})
+			}
+		}
+
+		return map[string]interface{}{
+			"thread_id": threadID,
+			"jobs":      jobs,
+			"count":     len(jobs),
+		}, nil
+	})
+
+	// Tool: Batch Enhance Threads
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "batch_enhance_threads",
+			Description: "Enhance multiple threads at once. Use for bulk cleanup of thread content.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"thread_ids": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "number"},
+						"description": "List of thread IDs to enhance",
+					},
+					"source": map[string]interface{}{
+						"type":        "string",
+						"description": "Enhance all threads from this source (e.g., 'simpcity'). Overrides thread_ids if provided.",
+					},
+					"limit": map[string]interface{}{
+						"type":        "number",
+						"description": "Max threads to process (default: 10, max: 50)",
+					},
+				},
+				"required": []string{},
+			},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		threadIDs := []int64{}
+		if ids, ok := args["thread_ids"].([]interface{}); ok {
+			for _, id := range ids {
+				if idFloat, ok := id.(float64); ok {
+					threadIDs = append(threadIDs, int64(idFloat))
+				}
+			}
+		}
+
+		source, _ := args["source"].(string)
+		limit := intArg(args, "limit", 10)
+		if limit > 50 {
+			limit = 50
+		}
+
+		// If source provided, get thread IDs from that source
+		if source != "" {
+			rows, err := s.db.Query(`
+				SELECT id FROM scraped_threads 
+				WHERE source = ? 
+				ORDER BY last_scraped_at DESC 
+				LIMIT ?
+			`, source, limit)
+			if err != nil {
+				return map[string]interface{}{"error": err.Error()}, nil
+			}
+			defer rows.Close()
+			threadIDs = []int64{}
+			for rows.Next() {
+				var id int64
+				if rows.Scan(&id) == nil {
+					threadIDs = append(threadIDs, id)
+				}
+			}
+		}
+
+		if len(threadIDs) == 0 {
+			return map[string]interface{}{"error": "No threads found to enhance"}, nil
+		}
+
+		// Limit
+		if len(threadIDs) > limit {
+			threadIDs = threadIDs[:limit]
+		}
+
+		// Start enhancement in background
+		go func() {
+			for _, threadID := range threadIDs {
+				options := EnhancementOptions{
+					CleanContent:      true,
+					ExtractPerformers: true,
+					ExtractTags:       true,
+					GenerateSummary:   false,
+				}
+				_, err := enhancer.EnhanceThread(threadID, options)
+				if err != nil {
+					log.Printf("Failed to enhance thread %d: %v", threadID, err)
+				}
+			}
+		}()
+
+		return map[string]interface{}{
+			"success":    true,
+			"message":    fmt.Sprintf("Started enhancing %d threads", len(threadIDs)),
+			"thread_ids": threadIDs,
+		}, nil
+	})
+
+	// Register image validation tool
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name:        "validate_thread_images",
+			Description: "Validate images in a thread using AI vision analysis. Checks image quality, content, and detects broken/invalid images. Uses Qwen3.8-omni-flash for cost-effective analysis.",
+			Parameters: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"thread_id": map[string]interface{}{
+						"type":        "number",
+						"description": "ID of the thread to validate images for",
+					},
+					"image_urls": map[string]interface{}{
+						"type":        "array",
+						"items":       map[string]interface{}{"type": "string"},
+						"description": "Optional: Specific image URLs to validate (if empty, validates all thread images)",
+					},
+					"auto_fix": map[string]interface{}{
+						"type":        "boolean",
+						"description": "Automatically remove invalid images from thread metadata (default: false)",
+					},
+				},
+				"required": []string{"thread_id"},
+			},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		threadID := int64(args["thread_id"].(float64))
+		autoFix, _ := args["auto_fix"].(bool)
+
+		// Get thread images
+		var imageURLs []string
+		if specificURLs, ok := args["image_urls"].([]interface{}); ok && len(specificURLs) > 0 {
+			for _, u := range specificURLs {
+				if urlStr, ok := u.(string); ok {
+					imageURLs = append(imageURLs, urlStr)
+				}
+			}
+		} else {
+			// Get images from thread posts
+			rows, err := s.db.Query(`
+				SELECT DISTINCT metadata 
+				FROM scraped_posts 
+				WHERE thread_id = ? AND metadata != ''
+			`, threadID)
+			if err != nil {
+				return map[string]interface{}{"error": fmt.Sprintf("Failed to query posts: %v", err)}, nil
+			}
+			defer rows.Close()
+
+			for rows.Next() {
+				var metaStr string
+				if err := rows.Scan(&metaStr); err == nil {
+					var meta struct {
+						Attachments []struct {
+							Type        string `json:"type"`
+							URL         string `json:"url"`
+							ThumbnailURL string `json:"thumbnail_url"`
+						} `json:"attachments"`
+					}
+					if err := json.Unmarshal([]byte(metaStr), &meta); err == nil {
+						for _, att := range meta.Attachments {
+							if att.Type == "image" {
+								if att.ThumbnailURL != "" {
+									imageURLs = append(imageURLs, att.ThumbnailURL)
+								} else if att.URL != "" {
+									imageURLs = append(imageURLs, att.URL)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if len(imageURLs) == 0 {
+			return map[string]interface{}{
+				"success":  true,
+				"message":  "No images found in thread",
+				"thread_id": threadID,
+			}, nil
+		}
+
+		// Validate images using AI
+		validator := NewImageValidator("") // API key will be fetched from config
+		threadTitle := ""
+		s.db.QueryRow("SELECT title FROM scraped_threads WHERE id = ?", threadID).Scan(&threadTitle)
+
+		results, err := validator.ValidateThreadImages(threadTitle, imageURLs)
+		if err != nil {
+			return map[string]interface{}{"error": fmt.Sprintf("Validation failed: %v", err)}, nil
+		}
+
+		// Auto-fix if requested
+		if autoFix {
+			invalidCount := 0
+			for _, r := range results.Results {
+				if !r.IsValid {
+					invalidCount++
+					// Log invalid image for manual review
+					log.Printf("[ImageValidator] Invalid image in thread %d: %s - %s", threadID, r.ImageURL, r.Error)
+				}
+			}
+			results.InvalidCount = invalidCount
+		}
+
+		return map[string]interface{}{
+			"success":      true,
+			"thread_id":    threadID,
+			"total_images": results.TotalCount,
+			"valid_images": results.ValidCount,
+			"invalid_images": results.InvalidCount,
+			"duration":     results.Duration,
+			"results":      results.Results,
+		}, nil
+	})
+}
+
+// getBoolArg extracts a boolean from args with a default value
+func getBoolArg(args map[string]interface{}, key string, defaultVal bool) bool {
+	if v, ok := args[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return defaultVal
 }

@@ -8,7 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/brixen96/video-storage-ai/internal/models"
 	"github.com/brixen96/video-storage-ai/internal/services"
 	"github.com/gin-gonic/gin"
@@ -647,6 +649,133 @@ func getWatchedThreads(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.SuccessResponse(threads, fmt.Sprintf("Found %d watched threads", len(threads))))
+}
+
+// enhanceThread triggers AI-powered thread enhancement
+func enhanceThread(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid thread ID",
+			err.Error(),
+		))
+		return
+	}
+
+	var request struct {
+		CleanContent      bool `json:"clean_content"`
+		ExtractPerformers bool `json:"extract_performers"`
+		ExtractTags       bool `json:"extract_tags"`
+		GenerateSummary   bool `json:"generate_summary"`
+	}
+
+	// Bind with defaults
+	if err := c.ShouldBindJSON(&request); err != nil {
+		// Use defaults if no body provided
+		request = struct {
+			CleanContent      bool `json:"clean_content"`
+			ExtractPerformers bool `json:"extract_performers"`
+			ExtractTags       bool `json:"extract_tags"`
+			GenerateSummary   bool `json:"generate_summary"`
+		}{
+			CleanContent:      true,
+			ExtractPerformers: true,
+			ExtractTags:       true,
+			GenerateSummary:   true,
+		}
+	}
+
+	// Set defaults
+	if !request.CleanContent && !request.ExtractPerformers && !request.ExtractTags && !request.GenerateSummary {
+		request = struct {
+			CleanContent      bool `json:"clean_content"`
+			ExtractPerformers bool `json:"extract_performers"`
+			ExtractTags       bool `json:"extract_tags"`
+			GenerateSummary   bool `json:"generate_summary"`
+		}{
+			CleanContent:      true,
+			ExtractPerformers: true,
+			ExtractTags:       true,
+			GenerateSummary:   true,
+		}
+	}
+
+	options := services.EnhancementOptions{
+		CleanContent:      request.CleanContent,
+		ExtractPerformers: request.ExtractPerformers,
+		ExtractTags:       request.ExtractTags,
+		GenerateSummary:   request.GenerateSummary,
+	}
+
+	enhancer := services.NewThreadEnhancer(ensureActivityService())
+
+	// Run enhancement in background
+	go func() {
+		result, err := enhancer.EnhanceThread(id, options)
+		if err != nil {
+			log.Printf("Thread enhancement failed for thread %d: %v", id, err)
+		} else {
+			log.Printf("Thread enhancement completed: %s", result.Summary)
+		}
+	}()
+
+	c.JSON(http.StatusAccepted, models.SuccessResponse(nil, "Thread enhancement started. Check activity logs for progress."))
+}
+
+// getThreadEnhancementStatus returns enhancement status for a thread
+func getThreadEnhancementStatus(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg(
+			"Invalid thread ID",
+			err.Error(),
+		))
+		return
+	}
+
+	// Query recent enhancement activities
+	db := database.GetDB()
+	rows, err := db.Query(`
+		SELECT id, status, message, progress, started_at, completed_at
+		FROM activity_logs
+		WHERE task_type = 'thread_enhancement' 
+		AND details LIKE ?
+		ORDER BY started_at DESC
+		LIMIT 10
+	`, fmt.Sprintf(`%%"thread_id":%d%%`, id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(
+			"Failed to get enhancement status",
+			err.Error(),
+		))
+		return
+	}
+	defer rows.Close()
+
+	jobs := []map[string]interface{}{}
+	for rows.Next() {
+		var jobID int64
+		var status, message string
+		var progress int
+		var startedAt, completedAt time.Time
+		if err := rows.Scan(&jobID, &status, &message, &progress, &startedAt, &completedAt); err == nil {
+			jobs = append(jobs, map[string]interface{}{
+				"id":           jobID,
+				"status":       status,
+				"message":      message,
+				"progress":     progress,
+				"started_at":   startedAt,
+				"completed_at": completedAt,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, models.SuccessResponse(gin.H{
+		"thread_id": id,
+		"jobs":      jobs,
+	}, "Enhancement status retrieved"))
 }
 
 // getThreadRecentPosts returns recent posts for a thread (for hover preview)

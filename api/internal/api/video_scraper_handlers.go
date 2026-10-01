@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -764,20 +765,25 @@ func unmarkScrapedVideoDownloadedHandler(c *gin.Context) {
 func proxyScraperImageHandler(c *gin.Context) {
 	rawURL := c.Query("url")
 	if rawURL == "" {
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url parameter required"})
 		return
 	}
 
 	parsed, err := url.Parse(rawURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid url"})
 		return
 	}
 
 	referer := inferImageReferer(parsed.Host)
+	log.Printf("[ProxyImage] URL: %s, Host: %s, Referer: %s", rawURL, parsed.Host, referer)
 
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
+		log.Printf("[ProxyImage] Failed to create request: %v", err)
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.Status(http.StatusBadGateway)
 		return
 	}
@@ -789,19 +795,31 @@ func proxyScraperImageHandler(c *gin.Context) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("[ProxyImage] Request failed: %v", err)
+		c.Header("Access-Control-Allow-Origin", "*")
 		c.Status(http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
+
+	// Only proxy successful responses (2xx) to avoid OpaqueResponseBlocking
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[ProxyImage] Upstream returned %d for %s", resp.StatusCode, rawURL)
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Status(resp.StatusCode)
+		return
+	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if !strings.HasPrefix(contentType, "image/") && !strings.HasPrefix(contentType, "video/") {
 		contentType = "image/jpeg"
 	}
 
+	// Add CORS headers to ensure browser can read the response
+	c.Header("Access-Control-Allow-Origin", "*")
 	c.Header("Cache-Control", "public, max-age=3600")
 	c.Header("Content-Type", contentType)
-	c.Status(resp.StatusCode)
+	c.Status(http.StatusOK)
 	io.Copy(c.Writer, resp.Body)
 }
 
