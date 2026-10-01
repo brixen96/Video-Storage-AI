@@ -236,6 +236,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/chat/stream", aiCompanionChatStream)   // Chat with streaming SSE response
 			ai.GET("/chat/history", getChatHistory)          // Get persistent chat history
 			ai.DELETE("/chat/history", clearChatHistory)     // Clear chat history
+			ai.POST("/chat/reset", resetChat)                // Reset chat + memories to defaults
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

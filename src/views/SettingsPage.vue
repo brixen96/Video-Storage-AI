@@ -417,18 +417,28 @@
 								</div>
 							</div>
 							<div class="row g-3 mb-3">
-								<div class="col-md-4">
+								<div class="col-md-3">
 									<label class="form-label text-muted small">Model</label>
 									<input v-model="aiConfig.modelName" type="text" class="form-control bg-dark text-white border-secondary" placeholder="mistralai/mistral-nemo" />
                                     <small class="text-muted">Recommended: deepseek/deepseek-v4-flash for reasoning-enabled OpenRouter tasks.</small>
 								</div>
-								<div class="col-md-4">
+								<div class="col-md-3">
 									<label class="form-label text-muted small">Max Tokens</label>
 									<input v-model.number="aiConfig.maxTokens" type="number" class="form-control bg-dark text-white border-secondary" min="100" max="32768" />
 								</div>
-								<div class="col-md-4">
+								<div class="col-md-3">
 									<label class="form-label text-muted small">Temperature ({{ aiConfig.temperature }})</label>
 									<input v-model.number="aiConfig.temperature" type="range" class="form-range" min="0" max="1" step="0.1" />
+								</div>
+								<div class="col-md-3">
+									<label class="form-label text-muted small">Thinking Effort</label>
+									<select v-model="aiConfig.reasoningEffort" class="form-select bg-dark text-white border-secondary">
+										<option value="none">None (no reasoning)</option>
+										<option value="low">Low</option>
+										<option value="medium">Medium</option>
+										<option value="high">High</option>
+									</select>
+									<small class="text-muted">Controls OpenRouter reasoning tokens. Higher = smarter but slower and costs more tokens.</small>
 								</div>
 							</div>
 							<div class="d-flex gap-2">
@@ -757,6 +767,7 @@ export default {
 				modelName: 'mistralai/mistral-nemo',
 				temperature: 0.7,
 				maxTokens: 8192,
+				reasoningEffort: 'medium',
 				enabled: true,
 			},
 			aiConfigStatus: {
@@ -925,6 +936,7 @@ export default {
 					modelName: data.modelName || 'mistralai/mistral-nemo',
 					temperature: data.temperature ?? 0.7,
 					maxTokens: data.maxTokens || 8192,
+					reasoningEffort: data.reasoningEffort || 'medium',
 					enabled: data.enabled !== false,
 				}
 			} catch (error) {

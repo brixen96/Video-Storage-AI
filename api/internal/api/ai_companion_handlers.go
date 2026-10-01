@@ -101,7 +101,11 @@ func aiCompanionChatStream(c *gin.Context) {
 	// Set up progress callback so tools can report incremental progress via SSE
 	aiCompanionService.SetProgressCallback(func(data map[string]interface{}) {
 		evt, _ := json.Marshal(data)
-		fmt.Fprintf(c.Writer, "event: tool_progress\ndata: %s\n\n", string(evt))
+		if data["type"] == "request_info" {
+			fmt.Fprintf(c.Writer, "event: request_info\ndata: %s\n\n", string(evt))
+		} else {
+			fmt.Fprintf(c.Writer, "event: tool_progress\ndata: %s\n\n", string(evt))
+		}
 		flusher.Flush()
 	})
 	defer aiCompanionService.SetProgressCallback(nil)
@@ -201,6 +205,17 @@ func clearChatHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Chat history cleared"})
+}
+
+// resetChat resets the companion to defaults: clears chat messages and
+// non-app memories, then restores the default app identity memory.
+func resetChat(c *gin.Context) {
+	if aiCompanionService == nil {
+		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
+		return
+	}
+	summary := aiCompanionService.ResetChat()
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Companion reset to defaults", "data": summary})
 }
 
 // aiCompanionChat handles chat messages to the AI Companion
@@ -450,24 +465,28 @@ func deleteAIMemory(c *gin.Context) {
 func getAIConfig(c *gin.Context) {
 	db := database.GetDB()
 	var config models.AIConfig
-	err := db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
+	err := db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), enabled, created_at, updated_at FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.Enabled, &config.CreatedAt, &config.UpdatedAt,
 	)
 	if err != nil {
 		config = models.AIConfig{
-			ID:          1,
-			APIURL:      "https://openrouter.ai/api",
-			APIKey:      "",
-			ModelName:   "mistralai/mistral-nemo",
-			Temperature: 0.7,
-				MaxTokens:   8192,
-			Enabled:     true,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:              1,
+			APIURL:          "https://openrouter.ai/api",
+			APIKey:          "",
+			ModelName:       "mistralai/mistral-nemo",
+			Temperature:     0.7,
+			MaxTokens:       8192,
+			ReasoningEffort: "medium",
+			Enabled:         true,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
 		}
 	}
 	if config.APIURL == "" {
 		config.APIURL = "https://openrouter.ai/api"
+	}
+	if !services.IsValidReasoningEffort(config.ReasoningEffort) {
+		config.ReasoningEffort = "medium"
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -486,13 +505,24 @@ func updateAIConfig(c *gin.Context) {
 		))
 		return
 	}
+	if !services.IsValidReasoningEffort(config.ReasoningEffort) {
+		config.ReasoningEffort = "medium"
+	}
 
 	db := database.GetDB()
 	_, err := db.Exec(`
-		UPDATE ai_config SET
-			api_url = ?, api_key = ?, model_name = ?, temperature = ?, max_tokens = ?, enabled = ?, updated_at = ?
-		WHERE id = 1`,
-		config.APIURL, config.APIKey, config.ModelName, config.Temperature, config.MaxTokens, config.Enabled, time.Now(),
+		INSERT INTO ai_config (id, api_url, api_key, model_name, temperature, max_tokens, reasoning_effort, enabled, updated_at)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			api_url = excluded.api_url,
+			api_key = excluded.api_key,
+			model_name = excluded.model_name,
+			temperature = excluded.temperature,
+			max_tokens = excluded.max_tokens,
+			reasoning_effort = excluded.reasoning_effort,
+			enabled = excluded.enabled,
+			updated_at = excluded.updated_at`,
+		config.APIURL, config.APIKey, config.ModelName, config.Temperature, config.MaxTokens, config.ReasoningEffort, config.Enabled, time.Now(),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg(

@@ -106,6 +106,9 @@ func (s *AICompanionService) Start() error {
 
 	log.Println("🤖 Starting AI Companion Service...")
 
+	// Seed the default app identity memory (INSERT OR IGNORE — user edits survive restarts)
+	s.SeedDefaultAppMemory(false)
+
 	// Start file watchers for all libraries
 	if err := s.startFileWatchers(); err != nil {
 		log.Printf("Warning: Failed to start file watchers: %v", err)
@@ -339,15 +342,16 @@ func (s *AICompanionService) GetFullContext() string {
 // GetAIConfig retrieves the AI provider configuration from the database
 func (s *AICompanionService) GetAIConfig() models.AIConfig {
 	config := models.AIConfig{
-		ID:          1,
-		APIURL:      "https://openrouter.ai/api",
-		ModelName:   "deepseek/deepseek-v4-flash",
-		Temperature: 0.7,
-		MaxTokens:   8192,
-		Enabled:     true,
+		ID:              1,
+		APIURL:          "https://openrouter.ai/api",
+		ModelName:       "deepseek/deepseek-v4-flash",
+		Temperature:     0.7,
+		MaxTokens:       8192,
+		ReasoningEffort: "medium",
+		Enabled:         true,
 	}
-	if err := s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, enabled FROM ai_config WHERE id = 1`).Scan(
-		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.Enabled,
+	if err := s.db.QueryRow(`SELECT id, COALESCE(api_url, 'https://openrouter.ai/api'), COALESCE(api_key, ''), model_name, temperature, max_tokens, COALESCE(reasoning_effort, 'medium'), enabled FROM ai_config WHERE id = 1`).Scan(
+		&config.ID, &config.APIURL, &config.APIKey, &config.ModelName, &config.Temperature, &config.MaxTokens, &config.ReasoningEffort, &config.Enabled,
 	); err != nil {
 		log.Printf("[AI] Failed to read ai_config, using defaults: %v", err)
 	}
@@ -357,7 +361,28 @@ func (s *AICompanionService) GetAIConfig() models.AIConfig {
 	if config.ModelName == "" {
 		config.ModelName = "deepseek/deepseek-v4-flash"
 	}
+	if !IsValidReasoningEffort(config.ReasoningEffort) {
+		config.ReasoningEffort = "medium"
+	}
 	return config
+}
+
+// IsValidReasoningEffort returns true when effort is one of none/low/medium/high.
+func IsValidReasoningEffort(effort string) bool {
+	switch effort {
+	case "none", "low", "medium", "high":
+		return true
+	}
+	return false
+}
+
+// reasoningParam builds the OpenRouter unified reasoning object for the given
+// effort, or nil when reasoning should be omitted from the request.
+func reasoningParam(effort string) map[string]interface{} {
+	if !IsValidReasoningEffort(effort) || effort == "none" {
+		return nil
+	}
+	return map[string]interface{}{"effort": effort}
 }
 
 // TestAIConnection tests connectivity to the configured AI provider (OpenRouter)
@@ -679,6 +704,9 @@ When the user asks to scrape a site:
 			"max_tokens":  config.MaxTokens,
 			"stream":      false,
 		}
+		if rp := reasoningParam(config.ReasoningEffort); rp != nil {
+			reqBody["reasoning"] = rp
+		}
 
 		bodyBytes, err := json.Marshal(reqBody)
 		if err != nil {
@@ -912,19 +940,34 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 			"max_tokens":  config.MaxTokens,
 			"stream":      true,
 		}
+		if rp := reasoningParam(config.ReasoningEffort); rp != nil {
+			reqBody["reasoning"] = rp
+		}
 
 		bodyBytes, err := json.Marshal(reqBody)
 		if err != nil {
 			return fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		log.Printf("[AI] OpenRouter request: model=%s tools=%d body_size=%d bytes", config.ModelName, len(toolDefs), len(bodyBytes))
+		log.Printf("[AI] OpenRouter request: model=%s tools=%d body_size=%d bytes effort=%s", config.ModelName, len(toolDefs), len(bodyBytes), config.ReasoningEffort)
 
+		iterStart := time.Now()
 		resp, err := openLLMStream(config.APIURL+"/v1/chat/completions", config.APIKey, bodyBytes)
+		latencyMs := int(time.Since(iterStart).Milliseconds())
 		if err != nil {
 			log.Printf("[AI] Stream open failed after retries: %v", err)
+			s.ReportProgress(map[string]interface{}{
+				"type": "request_info", "iteration": iteration + 1, "model": config.ModelName,
+				"tools_sent": len(toolDefs), "body_size": len(bodyBytes), "latency_ms": latencyMs,
+				"effort": config.ReasoningEffort, "status": "error", "error": truncate(err.Error(), 120),
+			})
 			return fmt.Errorf("AI stream failed: %w", err)
 		}
+		s.ReportProgress(map[string]interface{}{
+			"type": "request_info", "iteration": iteration + 1, "model": config.ModelName,
+			"tools_sent": len(toolDefs), "body_size": len(bodyBytes), "latency_ms": latencyMs,
+			"effort": config.ReasoningEffort, "status": "ok",
+		})
 
 		var accContent strings.Builder
 		var accCalls []accToolCall
@@ -1195,6 +1238,49 @@ func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}
 func (s *AICompanionService) ClearChatHistory() error {
 	_, err := s.db.Exec("DELETE FROM ai_chat_messages")
 	return err
+}
+
+// ================== Default App Memory & Reset ==================
+
+// defaultAppMemoryText describes the app and who the companion chats with.
+// This identity memory ensures the AI treats the owner as the developer —
+// peer-to-peer and technical, not customer-service tone.
+const defaultAppMemoryText = `You are the AI Companion of Video Storage AI — a local, self-hosted video library management app running on Brix's Windows PC. The person you chat with is Brix, the OWNER and DEVELOPER of this app — not a regular user. He wrote the entire codebase: Go backend (Gin, SQLite), Vue 3 frontend, OpenRouter/DeepSeek integration. Talk to him as a peer: technical, direct, honest. No customer-service tone, no dumbed-down explanations, no need to re-explain concepts he built himself — he knows the internals better than anyone. Call him Brix. The app manages 50k+ videos across 5 libraries on 4 drives, with site scrapers, forum thread scrapers, JDownloader integration, AI analysis tools, a Shared Task Board, and an AI Monitor dashboard. Your tools query the local SQLite database directly — always use them for real data instead of guessing.`
+
+// SeedDefaultAppMemory inserts the default app identity memory if missing.
+// When force is true it replaces any existing version (used by ResetChat to
+// restore the canonical default).
+func (s *AICompanionService) SeedDefaultAppMemory(force bool) {
+	query := `INSERT OR IGNORE INTO memories (key, value, category, importance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+	if force {
+		query = `INSERT OR REPLACE INTO memories (key, value, category, importance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+	}
+	now := time.Now()
+	if _, err := s.db.Exec(query, "app_profile", defaultAppMemoryText, "app", 10, now, now); err != nil {
+		log.Printf("[AI] Failed to seed default app memory: %v", err)
+	}
+}
+
+// ResetChat wipes chat history and all non-app memories, then restores the
+// default app memory. Returns a summary of what was reset.
+func (s *AICompanionService) ResetChat() map[string]interface{} {
+	var chatCount int64
+	s.db.QueryRow(`SELECT COUNT(*) FROM ai_chat_messages`).Scan(&chatCount)
+	s.db.Exec(`DELETE FROM ai_chat_messages`)
+
+	var memCount int64
+	s.db.QueryRow(`SELECT COUNT(*) FROM memories WHERE COALESCE(category, '') != 'app'`).Scan(&memCount)
+	s.db.Exec(`DELETE FROM memories WHERE COALESCE(category, '') != 'app'`)
+
+	// Restore canonical app memory (replaces user edits — that's the point of reset)
+	s.SeedDefaultAppMemory(true)
+
+	log.Printf("[AI] Chat reset: %d messages and %d memories deleted, app memory restored", chatCount, memCount)
+	return map[string]interface{}{
+		"messages_deleted":    chatCount,
+		"memories_deleted":    memCount,
+		"app_memory_restored": true,
+	}
 }
 
 // ================== Memory Management ==================

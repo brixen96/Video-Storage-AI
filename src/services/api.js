@@ -237,6 +237,7 @@ export const aiAPI = {
 	chat: (data) => api.post('/ai/chat', data),
 	getChatHistory: (limit = 100) => api.get('/ai/chat/history', { params: { limit } }),
 	clearChatHistory: () => api.delete('/ai/chat/history'),
+	resetChat: () => api.post('/ai/chat/reset'),
 
 	// Memory management
 	saveMemory: (data) => api.post('/ai/memories', data),

@@ -1076,6 +1076,14 @@ func runMigrations() error {
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_created ON companion_tasks(created_at DESC)`)
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_created_by ON companion_tasks(created_by)`)
 
+	// Migration 65: Add reasoning_effort to ai_config (OpenRouter unified reasoning param)
+	var hasReasoningEffort int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ai_config') WHERE name = 'reasoning_effort'`).Scan(&hasReasoningEffort)
+	if hasReasoningEffort == 0 {
+		DB.Exec(`ALTER TABLE ai_config ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'`)
+		log.Println("Migration 65: Added reasoning_effort column to ai_config")
+	}
+
 	return nil
 }
 
