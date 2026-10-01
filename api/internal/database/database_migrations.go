@@ -750,7 +750,7 @@ func runMigrations() error {
 		lm_studio_url TEXT DEFAULT 'http://localhost:1234',
 		model_name TEXT DEFAULT '',
 		temperature REAL DEFAULT 0.7,
-		max_tokens INTEGER DEFAULT 2000,
+		max_tokens INTEGER DEFAULT 8192,
 		enabled BOOLEAN DEFAULT 1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -972,6 +972,109 @@ func runMigrations() error {
 		log.Printf("Migration 58 (links): %v", err)
 	}
 	log.Println("Migration 58: Simpcity URLs fixed")
+
+	// Migration 59: AI Call Logging for monitoring OpenRouter API calls
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS ai_call_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		interaction_id TEXT NOT NULL,
+		model TEXT NOT NULL,
+		endpoint TEXT NOT NULL,
+		status_code INTEGER,
+		prompt_tokens INTEGER DEFAULT 0,
+		completion_tokens INTEGER DEFAULT 0,
+		reasoning_tokens INTEGER DEFAULT 0,
+		total_tokens INTEGER DEFAULT 0,
+		cost_usd REAL DEFAULT 0,
+		latency_ms INTEGER DEFAULT 0,
+		retry_count INTEGER DEFAULT 0,
+		success BOOLEAN DEFAULT 1,
+		error_message TEXT,
+		request_size_bytes INTEGER DEFAULT 0,
+		response_size_bytes INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 59 (ai_call_logs): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_call_logs_interaction ON ai_call_logs(interaction_id)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_call_logs_model ON ai_call_logs(model)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_call_logs_created ON ai_call_logs(created_at)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_call_logs_success ON ai_call_logs(success)`)
+
+	// Migration 60: AI Tool Execution Logging
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS ai_tool_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		interaction_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		arguments TEXT,
+		result_summary TEXT,
+		success BOOLEAN DEFAULT 1,
+		error_message TEXT,
+		latency_ms INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 60 (ai_tool_logs): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_tool_logs_interaction ON ai_tool_logs(interaction_id)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_tool_logs_tool ON ai_tool_logs(tool_name)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_tool_logs_created ON ai_tool_logs(created_at)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_tool_logs_success ON ai_tool_logs(success)`)
+
+	// Migration 61: Add created_at to activity_logs if missing (fix for tables created from database.go)
+	var hasActivityCreatedAt int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('activity_logs') WHERE name = 'created_at'`).Scan(&hasActivityCreatedAt)
+	if hasActivityCreatedAt == 0 {
+		DB.Exec(`ALTER TABLE activity_logs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
+		DB.Exec(`UPDATE activity_logs SET created_at = started_at WHERE created_at IS NULL`)
+		DB.Exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC)`)
+		log.Println("Migration 61: Added created_at column to activity_logs")
+	}
+
+	// Migration 62: Add tool_steps column to ai_chat_messages for persisting tool call history
+	var hasToolSteps int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ai_chat_messages') WHERE name = 'tool_steps'`).Scan(&hasToolSteps)
+	if hasToolSteps == 0 {
+		DB.Exec(`ALTER TABLE ai_chat_messages ADD COLUMN tool_steps TEXT`)
+		log.Println("Migration 62: Added tool_steps column to ai_chat_messages")
+	}
+
+	// Migration 63: Bump max_tokens default from 2000 to 8192
+	DB.Exec(`UPDATE ai_config SET max_tokens = 8192 WHERE max_tokens <= 2000`)
+	log.Println("Migration 63: Bumped max_tokens to 8192")
+
+	// Migration 61: Ensure activity_logs has created_at column
+	var hasCreatedAt int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('activity_logs') WHERE name = 'created_at'`).Scan(&hasCreatedAt)
+	if hasCreatedAt == 0 {
+		DB.Exec(`ALTER TABLE activity_logs ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP`)
+		DB.Exec(`UPDATE activity_logs SET created_at = started_at WHERE created_at IS NULL`)
+		DB.Exec(`CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at DESC)`)
+		log.Println("Migration 61: Added created_at column to activity_logs")
+	}
+
+	// Migration 64: Shared Task Board for AI Companion and developer collaboration
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS companion_tasks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		title TEXT NOT NULL,
+		description TEXT,
+		status TEXT NOT NULL DEFAULT 'open',
+		priority INTEGER DEFAULT 5,
+		created_by TEXT NOT NULL DEFAULT 'companion',
+		assigned_to TEXT DEFAULT '',
+		tags TEXT DEFAULT '[]',
+		related_file TEXT,
+		related_line INTEGER,
+		error_context TEXT,
+		resolution TEXT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		completed_at DATETIME
+	)`); err != nil {
+		log.Printf("Migration 64 (companion_tasks): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_status ON companion_tasks(status)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_priority ON companion_tasks(priority DESC)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_created ON companion_tasks(created_at DESC)`)
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_companion_tasks_created_by ON companion_tasks(created_by)`)
 
 	return nil
 }
