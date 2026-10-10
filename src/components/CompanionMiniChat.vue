@@ -7,6 +7,16 @@
 				<font-awesome-icon :icon="['fas', 'mask']" class="me-1" />
 				{{ contextNpc.name }}
 			</span>
+			<button
+				v-if="contextNpc"
+				class="btn btn-sm btn-info mini-generate"
+				:disabled="isStreaming"
+				title="Generate your next in-game response from the current dialogue"
+				@click="generateResponse"
+			>
+				<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
+				Generate response
+			</button>
 			<span v-if="isStreaming" class="mini-thinking">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-1" />
 				thinking...
@@ -104,31 +114,36 @@ watch(
 	{ immediate: true }
 )
 
-// Build the full context block prepended to each message in split view
+// Build the RP context block. Sent as a SYSTEM-role history entry (not part of
+// the user message) so persisted chat history stays clean and readable.
+// Knowledge scope: ONLY the conversation dialogue + mechanical state (mood/relation).
+// Backstory/personality/world lore are deliberately EXCLUDED — no cheating.
 const buildContextBlock = () => {
 	const c = rpContext.value
 	const npc = props.contextNpc
-	if (!c || !npc) return `[Writing response to ${npc?.name || 'NPC'}] `
+	if (!c || !npc) return ''
 	const n = c.npc || {}
 	const lines = []
 	lines.push(`[ROLEPLAY CONTEXT — Bannerlord AIInfluence campaign ${c.campaign_id}]`)
-	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below. Follow the campaign RP rules exactly (they follow below). Match the NPC's current mood, relation, and personality. Output ONLY the response text - no preamble, no explanation, no markdown formatting, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples below.`)
-	lines.push(`CRITICAL - FACTS: Use ONLY the recent dialogue below for what has been said between Emil and this NPC, and what the NPC knows or has heard. Do NOT invent, reference, or imply backstory events, rumors, or world facts as known content unless they actually appear in the dialogue. The personality/backstory fields below are ONLY for matching voice, tone, and behavior - never as facts the NPC quotes or claims to have heard about.`)
+	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below, as a direct continuation of the conversation. Follow the campaign RP rules (below). Output ONLY the response text — no preamble, no explanation, no markdown, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples.`)
+	lines.push(`FACTS: The conversation below is the ONLY source of what has been said and what the NPC knows or has heard. Do NOT invent or reference backstory, rumors, personality traits, or world facts. Nothing exists except what is in the dialogue and the mechanical state below.`)
 	if (minResponseLength.value > 0) {
-		lines.push(`LENGTH: The response must be at least ${minResponseLength.value} characters. Fill it naturally with reactions, inner thoughts, small physical details, and dialogue - do NOT pad with descriptions of the room or repeated phrases.`)
+		lines.push(`LENGTH: at least ${minResponseLength.value} characters — fill naturally with reactions, inner thoughts, small physical details, and dialogue. No padding, no room descriptions.`)
 	}
-	if (c.rp_rules) lines.push(`\n## RP Rules (campaign actionrules.txt — highest priority)\n${c.rp_rules}`)
-	if (c.world_lore) lines.push(`\n## World (campaign world.txt)\n${c.world_lore}`)
-	if (c.player_description) lines.push(`\n## Emil — the player character (playerdescription.txt)\n${c.player_description}`)
-	lines.push(`\n## NPC: ${n.name || npc.name} (${n.string_id || npc.string_id})`)
-	if (n.personality) lines.push(`Personality: ${n.personality}`)
-	if (n.backstory) lines.push(`Backstory: ${n.backstory}`)
-	if (n.character_description) lines.push(`Description: ${n.character_description}`)
-	lines.push(`Mood: ${n.mood || 'unknown'}${n.mood_reason ? ' (' + n.mood_reason + ')' : ''}`)
-	lines.push(`Relation to Emil: ${n.relation_desc || '?'} (${n.relation_value ?? '?'})`)
-	if (n.current_task) lines.push(`Current task: ${n.current_task}`)
+	if (c.rp_rules) {
+		lines.push(`\n## RP Rules (highest priority)\n${c.rp_rules}`)
+	}
+	if (c.player_description) {
+		lines.push(`\n## Emil — the player character (playerdescription.txt)\n${c.player_description}`)
+	}
+	if (n.mood || n.relation_desc) {
+		lines.push(`\n## Current mechanical state (from the game)\nMood: ${n.mood || 'unknown'}${n.mood_reason ? ' (' + n.mood_reason + ')' : ''}\nRelation to Emil: ${n.relation_desc || '?'} (${n.relation_value ?? '?'})`)
+		if (n.current_task) {
+			lines.push(`Task: ${n.current_task}`)
+		}
+	}
 	if (c.recent_dialogue?.length) {
-		lines.push(`\n## Recent dialogue (oldest first — latest entry is the current moment)`)
+		lines.push(`\n## Conversation so far (oldest first — the last entry is the current moment)`)
 		c.recent_dialogue.forEach((e, i) => lines.push(`[${i + 1}] ${e}`))
 	}
 	lines.push(`\n---\nBrix's request: `)
@@ -155,25 +170,31 @@ const send = async () => {
 	if (!text || isStreaming.value) return
 	input.value = ''
 
-	// Full RP context when an NPC conversation is open, else short prefix
-	let fullText = text
+	// The user message stays CLEAN (persisted to DB, shown in history).
+	// Full RP context rides as a SYSTEM-role history entry - the LLM sees it,
+	// but it never pollutes the saved chat.
+	let contextEntry = null
 	if (props.contextNpc) {
-		fullText = buildContextBlock() + text
+		const block = buildContextBlock()
+		if (block) contextEntry = { role: 'system', content: block }
 	}
 
 	pushMessage({ role: 'user', content: text, timestamp: new Date() })
 	await scrollDown()
 
-	const historyPayload = chatHistory.value
-		.filter((m) => m.role === 'user' || m.role === 'assistant')
-		.slice(-10)
-		.map((m) => ({ role: m.role, content: m.content }))
+	const historyPayload = [
+		...(contextEntry ? [contextEntry] : []),
+		...chatHistory.value
+			.filter((m) => m.role === 'user' || m.role === 'assistant')
+			.slice(-14)
+			.map((m) => ({ role: m.role, content: m.content })),
+	]
 
 	const msgIndex = chatHistory.value.length
 	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true })
 	await scrollDown()
 
-	streamMessage(fullText, historyPayload, {
+	streamMessage(text, historyPayload, {
 		onTextChunk: (chunk) => {
 			chatHistory.value[msgIndex].content += chunk
 			scrollDown()
@@ -209,6 +230,10 @@ const send = async () => {
 const quickAction = (text) => {
 	input.value = text
 	send()
+}
+
+const generateResponse = () => {
+	quickAction('Write my next in-game response')
 }
 </script>
 
@@ -247,10 +272,27 @@ const quickAction = (text) => {
 }
 
 .mini-thinking {
-	margin-left: auto;
 	font-size: 0.72rem;
 	font-weight: 400;
 	color: rgba(255, 255, 255, 0.5);
+}
+
+.mini-generate {
+	margin-left: auto;
+	font-weight: 700;
+	font-size: 0.75rem;
+	background: rgba(0, 217, 255, 0.15);
+	border: 1px solid rgba(0, 217, 255, 0.5);
+	color: #00d9ff;
+}
+
+.mini-generate:hover:not(:disabled) {
+	background: rgba(0, 217, 255, 0.3);
+	color: #fff;
+}
+
+.mini-generate:disabled {
+	opacity: 0.5;
 }
 
 .mini-chat-messages {

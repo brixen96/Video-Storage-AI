@@ -421,15 +421,16 @@ func GetBannerlordRPContext(npcPath string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("not an NPC file (no Name/StringId)")
 	}
 
-	// Last 6 dialogue entries, each capped at 500 chars (oldest first)
+	// Last 12 dialogue entries, each capped at 800 chars (oldest first).
+	// The dialogue is the Companion's ONLY knowledge source for RP writing.
 	recent := []string{}
 	if len(npc.ConversationHistory) > 0 {
-		start := len(npc.ConversationHistory) - 6
+		start := len(npc.ConversationHistory) - 12
 		if start < 0 {
 			start = 0
 		}
 		for _, e := range npc.ConversationHistory[start:] {
-			recent = append(recent, truncate(e, 500))
+			recent = append(recent, truncate(e, 800))
 		}
 	}
 
