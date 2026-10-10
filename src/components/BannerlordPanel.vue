@@ -25,8 +25,9 @@
 		</div>
 
 		<template v-if="overview">
-			<!-- NPC Conversation View (chat-style) -->
-			<div v-if="selectedNpc" class="bl-conversation">
+			<!-- NPC Conversation + Companion split view -->
+			<div v-if="selectedNpc" class="bl-split">
+				<div class="bl-conversation">
 				<div class="conv-header">
 					<button class="btn btn-sm btn-outline-secondary" @click="closeDialogue">
 						<font-awesome-icon :icon="['fas', 'arrow-left']" class="me-1" />
@@ -62,6 +63,10 @@
 						</div>
 					</div>
 				</div>
+				</div><!-- /bl-conversation -->
+
+				<!-- Live Companion chat (side-by-side helper) -->
+				<CompanionMiniChat :context-npc="selectedNpc" />
 			</div>
 
 			<!-- Campaign overview (roster + diplomacy) -->
@@ -199,6 +204,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { bannerlordAPI, aiAPI } from '@/services/api'
+import CompanionMiniChat from '@/components/CompanionMiniChat.vue'
 
 const campaigns = ref([])
 const selectedCampaign = ref(localStorage.getItem('bannerlord_selected_campaign') || '')
@@ -614,15 +620,35 @@ onMounted(loadCampaigns)
 }
 
 /* Conversation view (chat-style) */
+.bl-split {
+	display: flex;
+	gap: 1rem;
+	height: calc(100vh - 320px);
+	min-height: 480px;
+}
+
+@media (max-width: 1199.98px) {
+	.bl-split {
+		flex-direction: column;
+		height: auto;
+	}
+	.bl-conversation {
+		height: 480px;
+	}
+	.bl-split .mini-chat {
+		height: 420px;
+	}
+}
+
 .bl-conversation {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
 	background: rgba(255, 255, 255, 0.03);
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	border-radius: 12px;
-	display: flex;
-	flex-direction: column;
-	height: calc(100vh - 320px);
-	min-height: 480px;
-	overflow: hidden;
 }
 
 .conv-header {
