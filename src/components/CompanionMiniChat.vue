@@ -11,11 +11,11 @@
 				v-if="contextNpc"
 				class="btn btn-sm btn-info mini-generate"
 				:disabled="isStreaming"
-				title="Generate your next in-game response from the current dialogue"
+				:title="generateTitle"
 				@click="generateResponse"
 			>
 				<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
-				Generate response
+				{{ generateLabel }}
 			</button>
 			<span v-if="isStreaming" class="mini-thinking">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-1" />
@@ -44,12 +44,26 @@
 			</div>
 		</div>
 
+		<div class="mini-modes">
+			<button
+				v-for="m in modes"
+				:key="m.id"
+				class="mini-mode-chip"
+				:class="{ active: mode === m.id }"
+				@click="mode = m.id"
+				:title="m.hint"
+			>
+				<font-awesome-icon :icon="['fas', m.icon]" class="me-1" />
+				{{ m.label }}
+			</button>
+		</div>
+
 		<div class="mini-chat-input">
 			<input
 				v-model="input"
 				type="text"
 				class="form-control form-control-sm"
-				:placeholder="contextNpc ? 'Ask about ' + contextNpc.name + ' or request a response...' : 'Ask the Companion...'"
+				:placeholder="modePlaceholder"
 				@keyup.enter="send"
 				:disabled="isStreaming"
 			/>
@@ -92,6 +106,44 @@ const { isStreaming, streamMessage, stopStreaming } = useChatStreaming()
 const input = ref('')
 const msgsRef = ref(null)
 
+// ── Companion modes ──
+const modes = [
+	{ id: 'write', label: 'Write', icon: 'pen', hint: 'Generate the next in-game response' },
+	{ id: 'improve', label: 'Improve', icon: 'magic', hint: 'Improve a draft Brix wrote himself + feedback' },
+	{ id: 'ooc', label: 'OOC', icon: 'comment-dots', help: true, hint: 'Help write an OOC (out-of-character) message' },
+	{ id: 'plan', label: 'Plan', icon: 'route', hint: 'Plan a scene or scenario with this NPC' },
+]
+const mode = ref(localStorage.getItem('rp_companion_mode') || 'write')
+watch(mode, (v) => localStorage.setItem('rp_companion_mode', v))
+
+const modePlaceholder = computed(() => {
+	const npcName = props.contextNpc?.name || 'the NPC'
+	switch (mode.value) {
+		case 'improve': return 'Paste your draft response here...'
+		case 'ooc': return 'What do you want to say OOC?'
+		case 'plan': return 'Describe the scene direction you want...'
+		default: return props.contextNpc ? `Ask about ${npcName} or request a response...` : 'Ask the Companion...'
+	}
+})
+
+const generateLabel = computed(() => {
+	switch (mode.value) {
+		case 'improve': return 'Improve draft'
+		case 'ooc': return 'Draft OOC'
+		case 'plan': return 'Plan scene'
+		default: return 'Generate response'
+	}
+})
+
+const generateTitle = computed(() => {
+	switch (mode.value) {
+		case 'improve': return 'Improve the draft in the input and give feedback'
+		case 'ooc': return 'Draft an OOC message based on the input'
+		case 'plan': return 'Plan the next scene/scenario with this NPC'
+		default: return 'Generate your next in-game response from the current dialogue'
+	}
+})
+
 // Minimum response length (chars) - persisted across sessions
 const minResponseLength = ref(parseInt(localStorage.getItem('rp_min_response_length') || '400', 10))
 watch(minResponseLength, (v) => {
@@ -125,7 +177,22 @@ const buildContextBlock = () => {
 	const n = c.npc || {}
 	const lines = []
 	lines.push(`[ROLEPLAY CONTEXT — Bannerlord AIInfluence campaign ${c.campaign_id}]`)
-	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below, as a direct continuation of the conversation. Follow the campaign RP rules (below). Output ONLY the response text — no preamble, no explanation, no markdown, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples.`)
+
+	// Mode-specific framing
+	switch (mode.value) {
+		case 'improve':
+			lines.push(`Brix plays Emil. He wrote a response HIMSELF (his text follows the request marker). IMPROVE it: keep his intent, voice, and plot beats — fix flow, grammar, and adherence to the campaign RP rules below. Output in TWO parts: (1) the improved version ONLY — no preamble — using *asterisks for actions/thoughts* and "quotes" for speech; (2) a line '---' then 2-4 short feedback bullets on what you changed and why.`)
+			break
+		case 'ooc':
+			lines.push(`Brix plays Emil. He wants to send an OOC (out-of-character) message to the game's AI per the campaign's OOC protocol (see rules below). Help him write it clearly and completely. Output ONLY the final OOC message text, formatted as [OOC: ...] — no preamble, no explanation.`)
+			break
+		case 'plan':
+			lines.push(`Brix plays Emil. He wants to PLAN the next scene/scenario with this NPC. Based ONLY on the conversation so far and the campaign rules, propose 2-3 distinct scene directions with brief beats for each, then recommend one. Be concrete about what could happen moment to moment. Output the plan only — no preamble.`)
+			break
+		default:
+			lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below, as a direct continuation of the conversation. Follow the campaign RP rules (below). Output ONLY the response text — no preamble, no explanation, no markdown, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples.`)
+	}
+
 	lines.push(`FACTS: The conversation below is the ONLY source of what has been said and what the NPC knows or has heard. Do NOT invent or reference backstory, rumors, personality traits, or world facts. Nothing exists except what is in the dialogue and the mechanical state below.`)
 	if (minResponseLength.value > 0) {
 		lines.push(`LENGTH: at least ${minResponseLength.value} characters — fill naturally with reactions, inner thoughts, small physical details, and dialogue. No padding, no room descriptions.`)
@@ -233,7 +300,21 @@ const quickAction = (text) => {
 }
 
 const generateResponse = () => {
-	quickAction('Write my next in-game response')
+	switch (mode.value) {
+		case 'improve':
+			if (input.value.trim()) quickAction('Improve my draft: ' + input.value.trim())
+			else input.value = '' // focus input — needs a draft
+			break
+		case 'ooc':
+			if (input.value.trim()) quickAction('Draft this OOC message: ' + input.value.trim())
+			else input.value = ''
+			break
+		case 'plan':
+			quickAction('Help me plan the next scene')
+			break
+		default:
+			quickAction('Write my next in-game response')
+	}
 }
 </script>
 
@@ -429,5 +510,36 @@ const generateResponse = () => {
 	letter-spacing: 0.04em;
 	color: rgba(255, 255, 255, 0.4);
 	margin-top: 1px;
+}
+
+/* Mode chips */
+.mini-modes {
+	display: flex;
+	gap: 0.3rem;
+	padding: 0.45rem 0.6rem 0;
+}
+
+.mini-mode-chip {
+	flex: 1;
+	background: rgba(0, 0, 0, 0.25);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	color: rgba(255, 255, 255, 0.6);
+	border-radius: 7px;
+	padding: 0.3rem 0.4rem;
+	font-size: 0.72rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.mini-mode-chip:hover {
+	color: #fff;
+	border-color: rgba(0, 217, 255, 0.4);
+}
+
+.mini-mode-chip.active {
+	background: rgba(0, 217, 255, 0.12);
+	border-color: #00d9ff;
+	color: #00d9ff;
 }
 </style>

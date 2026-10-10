@@ -398,6 +398,10 @@ const toggleWatchFromConversation = async () => {
 
 const refresh = async () => {
 	await Promise.all([loadCampaigns(), loadOverview()])
+	// Also reload the open conversation so refresh fetches new NPC responses
+	if (selectedNpc.value) {
+		await openDialogue(selectedNpc.value)
+	}
 }
 
 watch(selectedCampaign, (id) => {

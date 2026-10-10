@@ -54,14 +54,23 @@ type roleplayState struct {
 	FileModifiedTime string   `json:"file_modified_time"`
 }
 
+// roleplayTarget identifies one watched NPC file inside its directory.
+type roleplayTarget struct {
+	Dir      string
+	FileName string
+}
+
 // roleplayWatcherService manages fsnotify watchers for NPC JSON files.
+// Windows note: we watch the PARENT DIRECTORY (not the file) so writes via
+// temp-file+rename (common on Windows) still produce events, plus a periodic
+// ModTime sweep as a guaranteed safety net.
 type roleplayWatcherService struct {
-	db      *sql.DB
+	db        *sql.DB
 	companion *AICompanionService
-	mu      sync.Mutex
-	watcher *fsnotify.Watcher
-	active  map[int64]string // watch_id -> file path (currently watched)
-	started bool
+	mu        sync.Mutex
+	watcher   *fsnotify.Watcher
+	active    map[int64]roleplayTarget // watch_id -> dir + file name
+	started   bool
 }
 
 // roleplayWatcher is the package-level singleton (lazy init, no package vars).
@@ -80,7 +89,7 @@ func getRoleplayWatcher() *roleplayWatcherService {
 		roleplayWatcherInst = &roleplayWatcherService{
 			db:      database.GetDB(),
 			watcher: w,
-			active:  make(map[int64]string),
+			active:  make(map[int64]roleplayTarget),
 		}
 	})
 	return roleplayWatcherInst
@@ -119,22 +128,55 @@ func StartRoleplayWatcher(svc *AICompanionService) {
 
 	activated := 0
 	for _, w := range watches {
-		if rw.watcher.Add(w.FilePath) == nil {
-			rw.active[w.ID] = w.FilePath
+		if rw.activateWatch(w.ID, w.FilePath) {
 			activated++
 		} else {
 			log.Printf("[Roleplay] Cannot watch (missing?): %s", w.FilePath)
 		}
 	}
-	log.Printf("[Roleplay] Watcher started — %d NPC file(s) watched", activated)
+	log.Printf("[Roleplay] Watcher started — %d NPC file(s) watched (dir-level + 30s sweep)", activated)
 
 	go rw.eventLoop()
 }
 
-// eventLoop processes fsnotify events with a debounce.
+// activateWatch registers the watch: fsnotify on the parent directory plus
+// in-memory target entry. Returns false if the file is missing.
+// Caller must NOT hold rw.mu.
+func (rw *roleplayWatcherService) activateWatch(watchID int64, filePath string) bool {
+	if _, err := os.Stat(filePath); err != nil {
+		return false
+	}
+	dir := filepath.Dir(filePath)
+	fileName := filepath.Base(filePath)
+
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+
+	// Watch the directory once even if multiple NPC files live in it
+	alreadyWatchingDir := false
+	for _, t := range rw.active {
+		if strings.EqualFold(t.Dir, dir) {
+			alreadyWatchingDir = true
+			break
+		}
+	}
+	if !alreadyWatchingDir {
+		if err := rw.watcher.Add(dir); err != nil {
+			log.Printf("[Roleplay] Cannot watch dir %s: %v", dir, err)
+			return false
+		}
+	}
+	rw.active[watchID] = roleplayTarget{Dir: dir, FileName: fileName}
+	return true
+}
+
+// eventLoop processes fsnotify events (debounced) and runs a periodic ModTime
+// sweep so changes are NEVER missed even if fsnotify drops an event.
 func (rw *roleplayWatcherService) eventLoop() {
 	debounce := make(map[string]*time.Timer)
 	var debounceMu sync.Mutex
+	sweep := time.NewTicker(30 * time.Second)
+	defer sweep.Stop()
 
 	for {
 		select {
@@ -142,14 +184,14 @@ func (rw *roleplayWatcherService) eventLoop() {
 			if !ok {
 				return
 			}
-			// Only care about write/create/rename of JSON files
+			// Only care about write/create/rename
 			if event.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue
 			}
-			if !strings.HasSuffix(strings.ToLower(event.Name), ".json") {
+			path := rw.matchWatchedFile(event.Name)
+			if path == "" {
 				continue
 			}
-			path := event.Name
 			debounceMu.Lock()
 			if t, exists := debounce[path]; exists {
 				t.Stop()
@@ -160,11 +202,62 @@ func (rw *roleplayWatcherService) eventLoop() {
 			})
 			debounceMu.Unlock()
 
+		case <-sweep.C:
+			rw.sweepChanges()
+
 		case err, ok := <-rw.watcher.Errors:
 			if !ok {
 				return
 			}
 			log.Printf("[Roleplay] Watcher error: %v", err)
+		}
+	}
+}
+
+// matchWatchedFile returns the full path when the fsnotify event path equals
+// one of the watched NPC files (case-insensitive — Windows paths).
+func (rw *roleplayWatcherService) matchWatchedFile(eventPath string) string {
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	for _, t := range rw.active {
+		full := filepath.Join(t.Dir, t.FileName)
+		if strings.EqualFold(eventPath, full) {
+			return full
+		}
+	}
+	return ""
+}
+
+// sweepChanges stats every watched file and triggers a snapshot when the file's
+// ModTime is newer than the latest stored snapshot. Guaranteed fallback for
+// missed fsnotify events (Windows temp+rename patterns, service restarts).
+func (rw *roleplayWatcherService) sweepChanges() {
+	rw.mu.Lock()
+	targets := make(map[int64]roleplayTarget, len(rw.active))
+	for id, t := range rw.active {
+		targets[id] = t
+	}
+	rw.mu.Unlock()
+
+	for id, t := range targets {
+		full := filepath.Join(t.Dir, t.FileName)
+		fi, err := os.Stat(full)
+		if err != nil {
+			continue
+		}
+		var lastSnap string
+		rw.db.QueryRow(`SELECT COALESCE(MAX(created_at), '') FROM roleplay_snapshots WHERE watch_id = ?`, id).Scan(&lastSnap)
+		snapTime := time.Time{}
+		if lastSnap != "" {
+			if parsed, pErr := time.Parse("2006-01-02 15:04:05.999999999-07:00", lastSnap); pErr == nil {
+				snapTime = parsed
+			} else if parsed, pErr := time.Parse(time.RFC3339, lastSnap); pErr == nil {
+				snapTime = parsed
+			}
+		}
+		if fi.ModTime().After(snapTime.Add(time.Second)) {
+			log.Printf("[Roleplay] Sweep detected change: %s (mod %s)", t.FileName, fi.ModTime().Format("15:04:05"))
+			rw.handleFileChange(full)
 		}
 	}
 }
@@ -258,16 +351,13 @@ func AddRoleplayWatch(filePath string) (map[string]interface{}, error) {
 
 	var watchID int64
 	rw.db.QueryRow(`SELECT id FROM roleplay_watches WHERE file_path = ?`, filePath).Scan(&watchID)
-
-	rw.mu.Lock()
-	if rw.watcher != nil && !rw.hasPath(filePath) {
-		if err := rw.watcher.Add(filePath); err != nil {
-			rw.mu.Unlock()
-			return nil, fmt.Errorf("failed to watch file: %v", err)
-		}
-		rw.active[watchID] = filePath
+	if watchID == 0 {
+		return nil, fmt.Errorf("failed to register watch")
 	}
-	rw.mu.Unlock()
+
+	if !rw.activateWatch(watchID, filePath) {
+		return nil, fmt.Errorf("failed to watch file (missing?)")
+	}
 
 	// Baseline snapshot: extract current state immediately so the Companion
 	// has context without waiting for the next game save.
@@ -280,10 +370,10 @@ func AddRoleplayWatch(filePath string) (map[string]interface{}, error) {
 	}, nil
 }
 
-// hasPath checks if the fsnotify watcher already has this path (caller holds lock).
+// hasPath checks if a file path is already watched (caller holds lock).
 func (rw *roleplayWatcherService) hasPath(path string) bool {
-	for _, p := range rw.active {
-		if p == path {
+	for _, t := range rw.active {
+		if strings.EqualFold(filepath.Join(t.Dir, t.FileName), path) {
 			return true
 		}
 	}
@@ -299,9 +389,19 @@ func RemoveRoleplayWatch(watchID int64) error {
 	}
 
 	rw.mu.Lock()
-	if path, ok := rw.active[watchID]; ok {
-		rw.watcher.Remove(path)
+	if t, ok := rw.active[watchID]; ok {
 		delete(rw.active, watchID)
+		// Remove the dir watch only if no other watch lives in the same dir
+		stillNeeded := false
+		for _, other := range rw.active {
+			if strings.EqualFold(other.Dir, t.Dir) {
+				stillNeeded = true
+				break
+			}
+		}
+		if !stillNeeded {
+			rw.watcher.Remove(t.Dir)
+		}
 	}
 	rw.mu.Unlock()
 
