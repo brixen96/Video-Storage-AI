@@ -835,8 +835,7 @@ const loadMemories = async () => {
 	loadingMemories.value = true
 	try {
 		const res = await aiAPI.getMemories({ limit: 50 })
-		const body = res?.data || res || {}
-		memories.value = body.data || []
+		memories.value = res?.data || []
 	} catch {
 		memories.value = []
 	} finally {
@@ -861,12 +860,10 @@ const loadRoleplay = async () => {
 			aiAPI.getRoleplaySnapshots(),
 		])
 		if (wRes.status === 'fulfilled') {
-			const body = wRes.value?.data || wRes.value || {}
-			roleplayWatches.value = body.data || []
+			roleplayWatches.value = wRes.value?.data || []
 		}
 		if (sRes.status === 'fulfilled') {
-			const body = sRes.value?.data || sRes.value || {}
-			roleplaySnapshots.value = body.data || []
+			roleplaySnapshots.value = sRes.value?.data || []
 		}
 	} catch { /* ignore */ } finally {
 		loadingRoleplay.value = false

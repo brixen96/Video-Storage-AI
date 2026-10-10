@@ -177,8 +177,7 @@ const loadCampaigns = async () => {
 	loadingCampaigns.value = true
 	try {
 		const res = await bannerlordAPI.getCampaigns()
-		const body = res?.data || res || {}
-		campaigns.value = body.data || []
+		campaigns.value = res?.data || []
 		// Auto-select: remembered choice, else most recent campaign
 		if (selectedCampaign.value && !campaigns.value.some((c) => c.id === selectedCampaign.value)) {
 			selectedCampaign.value = ''
@@ -198,8 +197,7 @@ const loadOverview = async () => {
 	loadingOverview.value = true
 	try {
 		const res = await bannerlordAPI.getCampaignOverview(selectedCampaign.value)
-		const body = res?.data || res || {}
-		overview.value = body.data || null
+		overview.value = res?.data || null
 	} catch {
 		overview.value = null
 	} finally {
