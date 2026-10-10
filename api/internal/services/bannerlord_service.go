@@ -315,6 +315,59 @@ func GetBannerlordCampaignOverview(campaignID string) (map[string]interface{}, e
 	}, nil
 }
 
+// GetBannerlordNPCDialogue returns the full conversation history and identity
+// for one NPC file. Read-only. Path must match the NPC file pattern.
+func GetBannerlordNPCDialogue(filePath string) (map[string]interface{}, error) {
+	if !strings.Contains(filePath, " (") || !strings.HasSuffix(filePath, ").json") {
+		return nil, fmt.Errorf("not an NPC file path")
+	}
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read NPC file: %w", err)
+	}
+	var npc struct {
+		Name                 string   `json:"Name"`
+		StringID             string   `json:"StringId"`
+		Gender               string   `json:"Gender"`
+		CharacterDescription string   `json:"CharacterDescription"`
+		AIGeneratedPersonality string `json:"AIGeneratedPersonality"`
+		AIGeneratedBackstory string   `json:"AIGeneratedBackstory"`
+		CurrentTask          string   `json:"CurrentTask"`
+		LocationType         string   `json:"LocationType"`
+		ConversationHistory  []string `json:"ConversationHistory"`
+		EmotionalState       struct {
+			Mood   string `json:"Mood"`
+			Reason string `json:"Reason"`
+		} `json:"EmotionalState"`
+		PlayerRelation struct {
+			Value       int    `json:"Value"`
+			Description string `json:"Description"`
+		} `json:"PlayerRelation"`
+	}
+	if err := json.Unmarshal(raw, &npc); err != nil {
+		return nil, fmt.Errorf("invalid NPC JSON: %w", err)
+	}
+	if npc.Name == "" && npc.StringID == "" {
+		return nil, fmt.Errorf("not an NPC file (no Name/StringId)")
+	}
+	return map[string]interface{}{
+		"name":                  npc.Name,
+		"string_id":             npc.StringID,
+		"gender":                npc.Gender,
+		"character_description": truncate(npc.CharacterDescription, 500),
+		"personality":           truncate(npc.AIGeneratedPersonality, 500),
+		"backstory":             truncate(npc.AIGeneratedBackstory, 500),
+		"current_task":          npc.CurrentTask,
+		"location":              npc.LocationType,
+		"mood":                  npc.EmotionalState.Mood,
+		"mood_reason":           npc.EmotionalState.Reason,
+		"relation_value":        npc.PlayerRelation.Value,
+		"relation_desc":         npc.PlayerRelation.Description,
+		"conversation_history":  npc.ConversationHistory,
+		"entry_count":           len(npc.ConversationHistory),
+	}, nil
+}
+
 // parseNPCRosterEntry extracts the compact roster fields from an NPC file.
 func parseNPCRosterEntry(path string, item *BannerlordNPCRosterEntry) error {
 	raw, err := os.ReadFile(path)

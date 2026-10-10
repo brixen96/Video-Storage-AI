@@ -25,6 +25,47 @@
 		</div>
 
 		<template v-if="overview">
+			<!-- NPC Conversation View (chat-style) -->
+			<div v-if="selectedNpc" class="bl-conversation">
+				<div class="conv-header">
+					<button class="btn btn-sm btn-outline-secondary" @click="closeDialogue">
+						<font-awesome-icon :icon="['fas', 'arrow-left']" class="me-1" />
+						Roster
+					</button>
+					<div class="conv-title">
+						<span class="conv-name">{{ selectedNpc.name || selectedNpc.file_name }}</span>
+						<span v-if="selectedNpc.relation_desc" class="badge" :class="relationClass(selectedNpc.relation_value)">{{ selectedNpc.relation_desc }} {{ selectedNpc.relation_value }}</span>
+						<span v-if="selectedNpc.mood" class="badge bg-dark">{{ selectedNpc.mood }}</span>
+						<span class="conv-count">{{ dialogue.length }} entries</span>
+					</div>
+					<div class="conv-actions">
+						<button class="btn btn-sm btn-outline-info" title="Ask the Companion for a session recap" @click="journal(selectedNpc)">
+							<font-awesome-icon :icon="['fas', 'book-open']" class="me-1" />
+							Journal
+						</button>
+						<button class="btn btn-sm" :class="selectedNpc.watched ? 'btn-info' : 'btn-outline-info'" :title="selectedNpc.watched ? 'Unwatch' : 'Watch'" @click="toggleWatchFromConversation">
+							<font-awesome-icon :icon="['fas', selectedNpc.watched ? 'eye' : 'eye-slash']" />
+						</button>
+					</div>
+				</div>
+				<div v-if="selectedNpc.personality" class="conv-personality">
+					<font-awesome-icon :icon="['fas', 'brain']" class="me-1" />
+					{{ selectedNpc.personality }}
+				</div>
+				<div ref="convMessagesRef" class="conv-messages">
+					<div v-if="loadingDialogue" class="bl-empty-sm">Loading conversation...</div>
+					<div v-else-if="parsedDialogue.length === 0" class="bl-empty-sm">No conversation history yet.</div>
+					<div v-for="(m, i) in parsedDialogue" :key="i" class="conv-msg" :class="m.isPlayer ? 'from-player' : 'from-npc'">
+						<div class="conv-bubble">
+							<div class="conv-speaker">{{ m.speaker }}</div>
+							<div class="conv-content">{{ m.content }}</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Campaign overview (roster + diplomacy) -->
+			<template v-else>
 			<!-- Stats row -->
 			<div class="bl-stats">
 				<div class="bl-stat">
@@ -69,7 +110,7 @@
 					<div class="bl-npc-grid">
 						<div v-for="npc in npcs" :key="npc.file_path" class="bl-npc-card" :class="{ watched: npc.watched }">
 							<div class="bl-npc-top">
-								<span class="bl-npc-name" :title="npc.string_id">{{ npc.name || npc.file_name }}</span>
+								<button class="bl-npc-name" :title="'Open conversation with ' + (npc.name || npc.file_name)" @click="openDialogue(npc)">{{ npc.name || npc.file_name }}</button>
 								<div class="bl-npc-buttons">
 									<button class="bl-watch-btn journal" title="Ask the Companion for a session recap of this NPC" @click="journal(npc)">
 										<font-awesome-icon :icon="['fas', 'book-open']" />
@@ -149,13 +190,14 @@
 						</table>
 					</div>
 				</div>
-			</div>
+				</div><!-- /bl-grid -->
+			</template>
 		</template>
 	</div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { bannerlordAPI, aiAPI } from '@/services/api'
 
 const campaigns = ref([])
@@ -268,6 +310,58 @@ const emit = defineEmits(['journal'])
 
 const journal = (npc) => {
 	emit('journal', { name: npc.name || npc.file_name, stringId: npc.string_id })
+}
+
+// ── Conversation view (chat-style ConversationHistory) ──
+const selectedNpc = ref(null)
+const dialogue = ref([])
+const loadingDialogue = ref(false)
+const convMessagesRef = ref(null)
+
+const parsedDialogue = computed(() => {
+	return dialogue.value.map((entry) => {
+		// Format: "Unidentified person (`main_hero`): text" (player)
+		//     or: "I (Empress Rhagaea, `lord_1_14`): text" (NPC)
+		const idx = entry.indexOf('): ')
+		if (idx === -1) return { isPlayer: false, speaker: selectedNpc.value?.name || 'NPC', content: entry }
+		const prefix = entry.slice(0, idx + 1)
+		const content = entry.slice(idx + 3)
+		const isPlayer = prefix.includes('main_hero')
+		let speaker = isPlayer ? 'Emil' : (selectedNpc.value?.name || 'NPC')
+		const m = prefix.match(/^I \(([^,)]+)[,)]/)
+		if (m && m[1]) speaker = m[1]
+		return { isPlayer, speaker, content }
+	})
+})
+
+const openDialogue = async (npc) => {
+	selectedNpc.value = npc
+	loadingDialogue.value = true
+	dialogue.value = []
+	try {
+		const res = await bannerlordAPI.getNpcDialogue(npc.file_path)
+		dialogue.value = res?.data?.conversation_history || []
+	} catch { /* ignore */ } finally {
+		loadingDialogue.value = false
+		nextTick(() => {
+			if (convMessagesRef.value) {
+				convMessagesRef.value.scrollTop = convMessagesRef.value.scrollHeight
+			}
+		})
+	}
+}
+
+const closeDialogue = () => {
+	selectedNpc.value = null
+	dialogue.value = []
+}
+
+const toggleWatchFromConversation = async () => {
+	if (!selectedNpc.value) return
+	await toggleWatch(selectedNpc.value)
+	// toggleWatch reloads the overview; keep the conversation open with fresh flags
+	const fresh = npcs.value.find((n) => n.file_path === selectedNpc.value.file_path)
+	if (fresh) selectedNpc.value = fresh
 }
 
 const refresh = async () => {
@@ -448,6 +542,17 @@ onMounted(loadCampaigns)
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	text-align: left;
+	transition: color 0.2s;
+}
+
+.bl-npc-name:hover {
+	color: #00d9ff;
+	text-decoration: underline;
 }
 
 .bl-watch-btn {
@@ -506,6 +611,129 @@ onMounted(loadCampaigns)
 .bl-npc-error {
 	font-size: 0.7rem;
 	color: #dc3545;
+}
+
+/* Conversation view (chat-style) */
+.bl-conversation {
+	background: rgba(255, 255, 255, 0.03);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 12px;
+	display: flex;
+	flex-direction: column;
+	height: calc(100vh - 320px);
+	min-height: 480px;
+	overflow: hidden;
+}
+
+.conv-header {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	padding: 0.75rem 1rem;
+	background: rgba(0, 0, 0, 0.3);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	flex-wrap: wrap;
+}
+
+.conv-title {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex: 1;
+	min-width: 0;
+}
+
+.conv-name {
+	font-weight: 700;
+	font-size: 1.05rem;
+	color: #00d9ff;
+}
+
+.conv-count {
+	font-size: 0.72rem;
+	color: rgba(255, 255, 255, 0.4);
+}
+
+.conv-actions {
+	display: flex;
+	gap: 0.4rem;
+}
+
+.conv-personality {
+	font-size: 0.75rem;
+	color: rgba(255, 255, 255, 0.5);
+	padding: 0.5rem 1.25rem;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+	background: rgba(0, 0, 0, 0.15);
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.conv-messages {
+	flex: 1;
+	overflow-y: auto;
+	padding: 1.25rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.9rem;
+	background: rgba(0, 0, 0, 0.2);
+	scroll-behavior: smooth;
+}
+
+.conv-msg {
+	display: flex;
+}
+
+.conv-msg.from-npc {
+	justify-content: flex-start;
+}
+
+.conv-msg.from-player {
+	justify-content: flex-end;
+}
+
+.conv-bubble {
+	max-width: 78%;
+	border-radius: 14px;
+	padding: 0.6rem 0.9rem;
+}
+
+.conv-msg.from-npc .conv-bubble {
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-bottom-left-radius: 4px;
+}
+
+.conv-msg.from-player .conv-bubble {
+	background: rgba(0, 217, 255, 0.1);
+	border: 1px solid rgba(0, 217, 255, 0.25);
+	border-bottom-right-radius: 4px;
+}
+
+.conv-speaker {
+	font-size: 0.65rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: 0.3rem;
+}
+
+.conv-msg.from-npc .conv-speaker {
+	color: #00d9ff;
+}
+
+.conv-msg.from-player .conv-speaker {
+	color: rgba(0, 217, 255, 0.7);
+}
+
+.conv-content {
+	font-size: 0.85rem;
+	line-height: 1.55;
+	color: rgba(255, 255, 255, 0.88);
+	white-space: pre-wrap;
+	word-break: break-word;
 }
 
 /* Diplomacy side */

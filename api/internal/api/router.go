@@ -249,6 +249,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		// Bannerlord campaign views (AIInfluence mod, read-only)
 		v1.GET("/bannerlord/campaigns", bannerlordListCampaigns)           // List campaign folders
 		v1.GET("/bannerlord/campaigns/:id/overview", bannerlordCampaignOverview) // Per-campaign overview
+		v1.GET("/bannerlord/dialogue", bannerlordNpcDialogue)              // Full NPC conversation history
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

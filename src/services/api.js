@@ -279,6 +279,7 @@ export const aiAPI = {
 export const bannerlordAPI = {
 	getCampaigns: () => api.get('/bannerlord/campaigns'),
 	getCampaignOverview: (id) => api.get(`/bannerlord/campaigns/${encodeURIComponent(id)}/overview`),
+	getNpcDialogue: (filePath) => api.get('/bannerlord/dialogue', { params: { path: filePath } }),
 }
 
 // Dashboard API
