@@ -250,6 +250,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		v1.GET("/bannerlord/campaigns", bannerlordListCampaigns)           // List campaign folders
 		v1.GET("/bannerlord/campaigns/:id/overview", bannerlordCampaignOverview) // Per-campaign overview
 		v1.GET("/bannerlord/dialogue", bannerlordNpcDialogue)              // Full NPC conversation history
+		v1.GET("/bannerlord/rp-context", bannerlordRpContext)              // Full RP writing context (prompts + NPC + dialogue)
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

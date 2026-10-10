@@ -58,6 +58,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useChatHistory } from '@/composables/ai/useChatHistory'
 import { useChatStreaming } from '@/composables/ai/useChatStreaming'
+import { bannerlordAPI } from '@/services/api'
 import MarkdownMessage from '@/components/MarkdownMessage.vue'
 
 const props = defineProps({
@@ -70,6 +71,49 @@ const { isStreaming, streamMessage, stopStreaming } = useChatStreaming()
 
 const input = ref('')
 const msgsRef = ref(null)
+
+// ── Full RP context (world lore, rules, player description, NPC identity) ──
+const rpContext = ref(null)
+
+watch(
+	() => props.contextNpc?.file_path,
+	async (path) => {
+		rpContext.value = null
+		if (!path) return
+		try {
+			const res = await bannerlordAPI.getRpContext(path)
+			rpContext.value = res?.data || null
+		} catch { /* fall back to short prefix */ }
+	},
+	{ immediate: true }
+)
+
+// Build the full context block prepended to each message in split view
+const buildContextBlock = () => {
+	const c = rpContext.value
+	const npc = props.contextNpc
+	if (!c || !npc) return `[Writing response to ${npc?.name || 'NPC'}] `
+	const n = c.npc || {}
+	const lines = []
+	lines.push(`[ROLEPLAY CONTEXT — Bannerlord AIInfluence campaign ${c.campaign_id}]`)
+	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below. Follow the campaign RP rules exactly (they follow below). Match the NPC's current mood, relation, and personality. Output ONLY the response text — no preamble, no explanation, no quotes around it.`)
+	if (c.rp_rules) lines.push(`\n## RP Rules (campaign actionrules.txt — highest priority)\n${c.rp_rules}`)
+	if (c.world_lore) lines.push(`\n## World (campaign world.txt)\n${c.world_lore}`)
+	if (c.player_description) lines.push(`\n## Emil — the player character (playerdescription.txt)\n${c.player_description}`)
+	lines.push(`\n## NPC: ${n.name || npc.name} (${n.string_id || npc.string_id})`)
+	if (n.personality) lines.push(`Personality: ${n.personality}`)
+	if (n.backstory) lines.push(`Backstory: ${n.backstory}`)
+	if (n.character_description) lines.push(`Description: ${n.character_description}`)
+	lines.push(`Mood: ${n.mood || 'unknown'}${n.mood_reason ? ' (' + n.mood_reason + ')' : ''}`)
+	lines.push(`Relation to Emil: ${n.relation_desc || '?'} (${n.relation_value ?? '?'})`)
+	if (n.current_task) lines.push(`Current task: ${n.current_task}`)
+	if (c.recent_dialogue?.length) {
+		lines.push(`\n## Recent dialogue (oldest first — latest entry is the current moment)`)
+		c.recent_dialogue.forEach((e, i) => lines.push(`[${i + 1}] ${e}`))
+	}
+	lines.push(`\n---\nBrix's request: `)
+	return lines.join('\n')
+}
 
 // Show only the last 20 messages to keep the side panel readable
 const visibleMessages = computed(() => chatHistory.value.slice(-20))
@@ -86,10 +130,10 @@ const send = async () => {
 	if (!text || isStreaming.value) return
 	input.value = ''
 
-	// Prefix so the backend (and DB history) knows which NPC context applies
+	// Full RP context when an NPC conversation is open, else short prefix
 	let fullText = text
 	if (props.contextNpc) {
-		fullText = `[Writing response to ${props.contextNpc.name}] ${text}`
+		fullText = buildContextBlock() + text
 	}
 
 	pushMessage({ role: 'user', content: text, timestamp: new Date() })

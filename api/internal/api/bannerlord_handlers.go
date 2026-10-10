@@ -45,3 +45,18 @@ func bannerlordNpcDialogue(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
 }
+
+// bannerlordRpContext returns the full roleplay writing context for one NPC
+func bannerlordRpContext(c *gin.Context) {
+	path := c.Query("path")
+	if path == "" {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", "path query param required"))
+		return
+	}
+	data, err := services.GetBannerlordRPContext(path)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Failed to load RP context", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}

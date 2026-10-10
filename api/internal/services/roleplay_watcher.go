@@ -268,6 +268,10 @@ func AddRoleplayWatch(filePath string) (map[string]interface{}, error) {
 	}
 	rw.mu.Unlock()
 
+	// Baseline snapshot: extract current state immediately so the Companion
+	// has context without waiting for the next game save.
+	rw.handleFileChange(filePath)
+
 	log.Printf("[Roleplay] Now watching: %s (%s)", state.NPCName, filepath.Base(filePath))
 	return map[string]interface{}{
 		"watch_id": watchID, "npc_name": state.NPCName, "file_path": filePath,

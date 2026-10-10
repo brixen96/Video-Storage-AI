@@ -368,6 +368,92 @@ func GetBannerlordNPCDialogue(filePath string) (map[string]interface{}, error) {
 	}, nil
 }
 
+// GetBannerlordRPContext builds the full roleplay writing context for one NPC:
+// the campaign's editable prompts (world lore, RP rules, player description)
+// plus the NPC's identity and recent dialogue. Read-only.
+func GetBannerlordRPContext(npcPath string) (map[string]interface{}, error) {
+	if !strings.Contains(npcPath, " (") || !strings.HasSuffix(npcPath, ").json") {
+		return nil, fmt.Errorf("not an NPC file path")
+	}
+	if _, err := os.Stat(npcPath); err != nil {
+		return nil, fmt.Errorf("NPC file not found")
+	}
+	campaignDir := filepath.Dir(npcPath)
+
+	readCampaignFile := func(rel string, max int) string {
+		b, err := os.ReadFile(filepath.Join(campaignDir, rel))
+		if err != nil {
+			return ""
+		}
+		return truncate(string(b), max)
+	}
+
+	playerDesc := readCampaignFile(filepath.Join("prompts", "playerdescription.txt"), 2000)
+	worldLore := readCampaignFile(filepath.Join("prompts", "world_data", "world.txt"), 6000)
+	rpRules := readCampaignFile(filepath.Join("prompts", "rules", "actionrules.txt"), 8000)
+
+	// Parse NPC identity + recent dialogue
+	raw, err := os.ReadFile(npcPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read NPC file: %w", err)
+	}
+	var npc struct {
+		Name                   string   `json:"Name"`
+		StringID               string   `json:"StringId"`
+		CharacterDescription   string   `json:"CharacterDescription"`
+		AIGeneratedPersonality string   `json:"AIGeneratedPersonality"`
+		AIGeneratedBackstory   string   `json:"AIGeneratedBackstory"`
+		CurrentTask            string   `json:"CurrentTask"`
+		ConversationHistory    []string `json:"ConversationHistory"`
+		EmotionalState         struct {
+			Mood   string `json:"Mood"`
+			Reason string `json:"Reason"`
+		} `json:"EmotionalState"`
+		PlayerRelation struct {
+			Value       int    `json:"Value"`
+			Description string `json:"Description"`
+		} `json:"PlayerRelation"`
+	}
+	if err := json.Unmarshal(raw, &npc); err != nil {
+		return nil, fmt.Errorf("invalid NPC JSON: %w", err)
+	}
+	if npc.Name == "" && npc.StringID == "" {
+		return nil, fmt.Errorf("not an NPC file (no Name/StringId)")
+	}
+
+	// Last 6 dialogue entries, each capped at 500 chars (oldest first)
+	recent := []string{}
+	if len(npc.ConversationHistory) > 0 {
+		start := len(npc.ConversationHistory) - 6
+		if start < 0 {
+			start = 0
+		}
+		for _, e := range npc.ConversationHistory[start:] {
+			recent = append(recent, truncate(e, 500))
+		}
+	}
+
+	return map[string]interface{}{
+		"campaign_id":         filepath.Base(campaignDir),
+		"player_description":  playerDesc,
+		"world_lore":          worldLore,
+		"rp_rules":            rpRules,
+		"npc": map[string]interface{}{
+			"name":                  npc.Name,
+			"string_id":             npc.StringID,
+			"character_description": truncate(npc.CharacterDescription, 600),
+			"personality":           truncate(npc.AIGeneratedPersonality, 600),
+			"backstory":             truncate(npc.AIGeneratedBackstory, 600),
+			"current_task":          truncate(npc.CurrentTask, 200),
+			"mood":                  npc.EmotionalState.Mood,
+			"mood_reason":           npc.EmotionalState.Reason,
+			"relation_value":        npc.PlayerRelation.Value,
+			"relation_desc":         npc.PlayerRelation.Description,
+		},
+		"recent_dialogue": recent,
+	}, nil
+}
+
 // parseNPCRosterEntry extracts the compact roster fields from an NPC file.
 func parseNPCRosterEntry(path string, item *BannerlordNPCRosterEntry) error {
 	raw, err := os.ReadFile(path)
