@@ -126,6 +126,9 @@ func (s *AICompanionService) Start() error {
 	go s.observeAndEvaluate()
 	go s.runInitiativePass()
 
+	// Roleplay watcher — observes AIInfluence NPC JSON files for changes
+	StartRoleplayWatcher(s)
+
 	// Fire daily briefing after a short delay (gives app time to fully start)
 	go func() {
 		time.Sleep(6 * time.Second)

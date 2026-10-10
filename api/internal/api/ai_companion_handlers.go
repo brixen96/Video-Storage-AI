@@ -307,6 +307,60 @@ func rejectProposal(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
+// ── Roleplay Watcher (AIInfluence NPC files) ──
+
+// getRoleplayWatches returns all NPC file watches
+func getRoleplayWatches(c *gin.Context) {
+	watches, err := services.GetRoleplayWatches()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get watches", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": watches})
+}
+
+// addRoleplayWatch registers an NPC file for watching
+func addRoleplayWatch(c *gin.Context) {
+	var request struct {
+		FilePath string `json:"file_path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
+		return
+	}
+	result, err := services.AddRoleplayWatch(request.FilePath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Failed to add watch", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
+// removeRoleplayWatch stops watching an NPC file
+func removeRoleplayWatch(c *gin.Context) {
+	var id int64
+	fmt.Sscanf(c.Param("id"), "%d", &id)
+	if id <= 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid watch id", ""))
+		return
+	}
+	if err := services.RemoveRoleplayWatch(id); err != nil {
+		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Failed to remove watch", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Watch removed"})
+}
+
+// getRoleplaySnapshots returns the latest NPC state per watched file
+func getRoleplaySnapshots(c *gin.Context) {
+	snapshots, err := services.GetRoleplaySnapshots()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get snapshots", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": snapshots})
+}
+
 // aiCompanionChat handles chat messages to the AI Companion
 func aiCompanionChat(c *gin.Context) {
 	if aiCompanionService == nil {

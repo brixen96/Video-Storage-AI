@@ -241,6 +241,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.GET("/companion/evaluations", getCompanionEvaluations) // Supervisor evaluations for Monitor tab
 			ai.POST("/companion/proposals/:id/approve", approveProposal) // Execute an approved supervisor proposal
 			ai.POST("/companion/proposals/:id/reject", rejectProposal)   // Reject a supervisor proposal
+			ai.GET("/roleplay/watches", getRoleplayWatches)              // List watched NPC files
+			ai.POST("/roleplay/watches", addRoleplayWatch)               // Watch an NPC JSON file
+			ai.DELETE("/roleplay/watches/:id", removeRoleplayWatch)      // Unwatch an NPC file
+			ai.GET("/roleplay/snapshots", getRoleplaySnapshots)           // Latest NPC state per watch
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

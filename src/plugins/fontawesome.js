@@ -188,6 +188,7 @@ import {
 	faHeartPulse,
 	faClipboardList,
 	faClipboardCheck,
+	faMask,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -389,6 +390,7 @@ library.add(
 	faHeartPulse,
 	faClipboardList,
 	faClipboardCheck,
+	faMask,
 )
 
 export default FontAwesomeIcon

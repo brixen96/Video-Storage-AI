@@ -245,6 +245,12 @@ export const aiAPI = {
 	approveProposal: (id) => api.post(`/ai/companion/proposals/${id}/approve`),
 	rejectProposal: (id) => api.post(`/ai/companion/proposals/${id}/reject`),
 
+	// Roleplay watcher (AIInfluence NPC files)
+	getRoleplayWatches: () => api.get('/ai/roleplay/watches'),
+	addRoleplayWatch: (filePath) => api.post('/ai/roleplay/watches', { file_path: filePath }),
+	removeRoleplayWatch: (id) => api.delete(`/ai/roleplay/watches/${id}`),
+	getRoleplaySnapshots: () => api.get('/ai/roleplay/snapshots'),
+
 	// Memory management
 	saveMemory: (data) => api.post('/ai/memories', data),
 	getMemories: (params) => api.get('/ai/memories', { params }),

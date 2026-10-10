@@ -1127,6 +1127,28 @@ func runMigrations() error {
 	DB.Exec(`UPDATE companion_evaluations SET proposal_status = 'none' WHERE proposal_status IS NULL OR proposal_status = ''`)
 	log.Println("Migration 67: Added proposal columns to companion_evaluations")
 
+	// Migration 68: Roleplay watcher — AIInfluence NPC JSON files watched for changes
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS roleplay_watches (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		file_path TEXT NOT NULL UNIQUE,
+		npc_name TEXT DEFAULT '',
+		enabled INTEGER DEFAULT 1,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 68 (roleplay_watches): %v", err)
+	}
+	if _, err := DB.Exec(`CREATE TABLE IF NOT EXISTS roleplay_snapshots (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		watch_id INTEGER NOT NULL,
+		npc_name TEXT DEFAULT '',
+		file_path TEXT DEFAULT '',
+		state_json TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		log.Printf("Migration 68 (roleplay_snapshots): %v", err)
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_roleplay_snapshots_created ON roleplay_snapshots(created_at DESC)`)
+
 	return nil
 }
 

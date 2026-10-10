@@ -244,6 +244,10 @@
 								<font-awesome-icon :icon="['fas', 'brain']" class="me-1" />
 								Memory
 							</button>
+							<button class="inspector-tab" :class="{ active: inspectorTab === 'roleplay' }" @click="inspectorTab = 'roleplay'">
+								<font-awesome-icon :icon="['fas', 'mask']" class="me-1" />
+								RP
+							</button>
 						</div>
 						<div class="inspector-body">
 							<!-- Session: live request/response insight -->
@@ -369,6 +373,63 @@
 									<button v-if="mem.value.length > 160" class="btn btn-sm btn-link btn-link p-0" @click="expandedMemoryId = expandedMemoryId === mem.id ? null : mem.id">
 										{{ expandedMemoryId === mem.id ? 'Show less' : 'Show more' }}
 									</button>
+								</div>
+							</div>
+
+							<!-- Roleplay (Bannerlord AIInfluence) -->
+							<div v-if="inspectorTab === 'roleplay'">
+								<div class="inspector-section-title">Watched NPCs</div>
+								<p class="inspector-hint">The Companion reads NPC JSON files on change — it automatically knows each NPC's latest response, mood, and relation. No more copying.</p>
+
+								<div class="input-group input-group-sm mb-2">
+									<input v-model="newWatchPath" type="text" class="form-control bg-dark text-white border-secondary" placeholder="Paste full path to NPC .json file..." @keyup.enter="addWatch" />
+									<button class="btn btn-outline-info" @click="addWatch" :disabled="addingWatch || !newWatchPath.trim()">
+										<font-awesome-icon :icon="['fas', addingWatch ? 'spinner' : 'eye']" :spin="addingWatch" />
+									</button>
+								</div>
+								<div v-if="watchError" class="inspector-hint text-danger">{{ watchError }}</div>
+
+								<div v-if="roleplayWatches.length === 0 && !loadingRoleplay" class="inspector-empty">No NPC files watched yet. Paste a path like:</div>
+								<div v-if="roleplayWatches.length === 0" class="inspector-empty" style="font-family: monospace; font-size: 0.68rem; word-break: break-all;">C:\SteamLibrary\...\Empress_Rhagaea (lord_1_14).json</div>
+
+								<div v-for="w in roleplayWatches" :key="w.id" class="memory-card">
+									<div class="memory-header">
+										<span class="memory-key">
+											<font-awesome-icon :icon="['fas', 'mask']" class="me-1 text-info" />
+											{{ w.npc_name || 'Unknown NPC' }}
+										</span>
+										<button class="btn btn-sm btn-link text-danger p-0" title="Unwatch" @click="removeWatch(w.id)">
+											<font-awesome-icon :icon="['fas', 'times']" />
+										</button>
+									</div>
+									<div class="inspector-hint" style="margin-bottom: 0;">
+										<font-awesome-icon :icon="['fas', 'clock']" class="me-1" />
+										{{ w.last_snapshot_at ? 'Updated ' + formatRPTime(w.last_snapshot_at) : 'No updates yet' }}
+									</div>
+								</div>
+
+								<!-- Latest NPC states -->
+								<div class="inspector-section-title mt-3">Live NPC States</div>
+								<div v-if="roleplaySnapshots.length === 0" class="inspector-empty">No snapshots yet — states appear after the game writes an NPC file.</div>
+								<div v-for="snap in roleplaySnapshots" :key="snap.file_path" class="memory-card">
+									<div class="memory-header">
+										<span class="memory-key">{{ snap.npc_name }}</span>
+										<div class="memory-meta">
+											<span v-if="snap.state?.relation_desc" class="badge" :class="(snap.state.relation_value || 0) >= 20 ? 'bg-success' : ((snap.state.relation_value || 0) <= -20 ? 'bg-danger' : 'bg-secondary')">{{ snap.state.relation_desc }} {{ snap.state.relation_value }}</span>
+											<span v-if="snap.state?.mood" class="badge bg-dark">{{ snap.state.mood }}</span>
+										</div>
+									</div>
+									<div v-if="snap.state?.current_task" class="inspector-hint">
+										<font-awesome-icon :icon="['fas', 'route']" class="me-1" />{{ snap.state.current_task }}
+									</div>
+									<p v-if="snap.state?.last_response" class="memory-value" :class="{ expanded: expandedRPId === snap.file_path }">{{ snap.state.last_response }}</p>
+									<button v-if="snap.state?.last_response?.length > 160" class="btn btn-sm btn-link p-0" @click="expandedRPId = expandedRPId === snap.file_path ? null : snap.file_path">
+										{{ expandedRPId === snap.file_path ? 'Show less' : 'Show more' }}
+									</button>
+									<div class="inspector-hint mt-1">
+										<font-awesome-icon :icon="['fas', 'history']" class="me-1" />
+										{{ snap.state?.recent_history?.length || 0 }} history entries · {{ formatRPTime(snap.created_at) }}
+									</div>
 								</div>
 							</div>
 						</div>
@@ -534,6 +595,15 @@ const resetting = ref(false)
 const memories = ref([])
 const loadingMemories = ref(false)
 const expandedMemoryId = ref(null)
+
+// ── Roleplay watcher state ──
+const roleplayWatches = ref([])
+const roleplaySnapshots = ref([])
+const loadingRoleplay = ref(false)
+const newWatchPath = ref('')
+const addingWatch = ref(false)
+const watchError = ref('')
+const expandedRPId = ref(null)
 
 const sortedMemories = computed(() => {
 	return [...memories.value].sort((a, b) => {
@@ -768,6 +838,58 @@ const deleteMemory = async (id) => {
 	} catch { /* ignore */ }
 }
 
+// ── Roleplay watcher methods ──
+
+const loadRoleplay = async () => {
+	loadingRoleplay.value = true
+	try {
+		const [wRes, sRes] = await Promise.allSettled([
+			aiAPI.getRoleplayWatches(),
+			aiAPI.getRoleplaySnapshots(),
+		])
+		if (wRes.status === 'fulfilled') {
+			const body = wRes.value?.data || wRes.value || {}
+			roleplayWatches.value = body.data || []
+		}
+		if (sRes.status === 'fulfilled') {
+			const body = sRes.value?.data || sRes.value || {}
+			roleplaySnapshots.value = body.data || []
+		}
+	} catch { /* ignore */ } finally {
+		loadingRoleplay.value = false
+	}
+}
+
+const addWatch = async () => {
+	const path = newWatchPath.value.trim()
+	if (!path || addingWatch.value) return
+	addingWatch.value = true
+	watchError.value = ''
+	try {
+		await aiAPI.addRoleplayWatch(path)
+		newWatchPath.value = ''
+		await loadRoleplay()
+	} catch (err) {
+		watchError.value = err?.response?.data?.message || err?.message || 'Failed to add watch'
+	} finally {
+		addingWatch.value = false
+	}
+}
+
+const removeWatch = async (id) => {
+	try {
+		await aiAPI.removeRoleplayWatch(id)
+		roleplayWatches.value = roleplayWatches.value.filter((w) => w.id !== id)
+		await loadRoleplay()
+	} catch { /* ignore */ }
+}
+
+const formatRPTime = (ts) => {
+	if (!ts) return ''
+	const d = new Date(ts)
+	return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
 const setEffort = async (effort) => {
 	if (!aiConfig.value || savingEffort.value) return
 	const prev = aiConfig.value.reasoningEffort
@@ -833,6 +955,9 @@ watch(activeTab, (newTab) => {
 watch(inspectorTab, (tab) => {
 	if (tab === 'memory') {
 		loadMemories()
+	}
+	if (tab === 'roleplay') {
+		loadRoleplay()
 	}
 })
 

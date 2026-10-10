@@ -36,6 +36,10 @@ export default {
 	mounted() {
 		// Companion Supervisor evaluations → toasts (full write-up lives in Monitor tab)
 		this.wsUnsubCompanion = websocketService.on('companion_event', (evt) => {
+			if (evt?.type === 'roleplay_update') {
+				this.$refs.toast.info('🎭 ' + evt.message, `Mood: ${evt.data?.mood || '—'} · Relation: ${evt.data?.relation || '—'} — the Companion already knows.`, 7000)
+				return
+			}
 			if (evt?.type !== 'supervisor_evaluation') return
 			const d = evt.data || {}
 			if (d.proposed_tool && d.proposal_status === 'pending') {
