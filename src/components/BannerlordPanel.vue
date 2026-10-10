@@ -55,14 +55,29 @@
 					<div class="bl-section-header">
 						NPC Roster
 						<span class="bl-section-sub">click 👁 to watch — the Companion follows changes live</span>
+						<div class="bl-roster-actions">
+							<button class="btn btn-sm btn-outline-info" @click="watchAll" :disabled="bulkBusy || overview.watched_count === overview.npc_count">
+								<font-awesome-icon :icon="['fas', bulkBusy ? 'spinner' : 'eye']" :spin="bulkBusy" class="me-1" />
+								{{ bulkLabel || 'Watch All' }}
+							</button>
+							<button class="btn btn-sm btn-outline-secondary" @click="unwatchAll" :disabled="bulkBusy || overview.watched_count === 0">
+								<font-awesome-icon :icon="['fas', 'eye-slash']" class="me-1" />
+								Unwatch All
+							</button>
+						</div>
 					</div>
 					<div class="bl-npc-grid">
 						<div v-for="npc in npcs" :key="npc.file_path" class="bl-npc-card" :class="{ watched: npc.watched }">
 							<div class="bl-npc-top">
 								<span class="bl-npc-name" :title="npc.string_id">{{ npc.name || npc.file_name }}</span>
-								<button class="bl-watch-btn" :class="{ on: npc.watched }" :title="npc.watched ? 'Unwatch — Companion stops following this NPC' : 'Watch — Companion follows this NPC'" @click="toggleWatch(npc)">
-									<font-awesome-icon :icon="['fas', npc.watched ? 'eye' : 'eye-slash']" />
-								</button>
+								<div class="bl-npc-buttons">
+									<button class="bl-watch-btn journal" title="Ask the Companion for a session recap of this NPC" @click="journal(npc)">
+										<font-awesome-icon :icon="['fas', 'book-open']" />
+									</button>
+									<button class="bl-watch-btn" :class="{ on: npc.watched }" :title="npc.watched ? 'Unwatch — Companion stops following this NPC' : 'Watch — Companion follows this NPC'" @click="toggleWatch(npc)">
+										<font-awesome-icon :icon="['fas', npc.watched ? 'eye' : 'eye-slash']" />
+									</button>
+								</div>
 							</div>
 							<div class="bl-npc-badges">
 								<span v-if="npc.relation_desc" class="badge" :class="relationClass(npc.relation_value)">{{ npc.relation_desc }} {{ npc.relation_value }}</span>
@@ -216,6 +231,45 @@ const toggleWatch = async (npc) => {
 	} catch { /* ignore */ }
 }
 
+// ── Watch All / Unwatch All (per campaign) ──
+const bulkBusy = ref(false)
+const bulkLabel = ref('')
+
+const watchAll = async () => {
+	const targets = npcs.value.filter((n) => !n.watched)
+	if (targets.length === 0 || bulkBusy.value) return
+	bulkBusy.value = true
+	let done = 0
+	for (const npc of targets) {
+		bulkLabel.value = `${++done}/${targets.length}`
+		try { await aiAPI.addRoleplayWatch(npc.file_path) } catch { /* skip invalid */ }
+	}
+	bulkLabel.value = ''
+	bulkBusy.value = false
+	await loadOverview()
+}
+
+const unwatchAll = async () => {
+	const targets = npcs.value.filter((n) => n.watched && n.watch_id)
+	if (targets.length === 0 || bulkBusy.value) return
+	bulkBusy.value = true
+	let done = 0
+	for (const npc of targets) {
+		bulkLabel.value = `${++done}/${targets.length}`
+		try { await aiAPI.removeRoleplayWatch(npc.watch_id) } catch { /* skip */ }
+	}
+	bulkLabel.value = ''
+	bulkBusy.value = false
+	await loadOverview()
+}
+
+// ── Journal: ask the Companion for an NPC session recap ──
+const emit = defineEmits(['journal'])
+
+const journal = (npc) => {
+	emit('journal', { name: npc.name || npc.file_name, stringId: npc.string_id })
+}
+
 const refresh = async () => {
 	await Promise.all([loadCampaigns(), loadOverview()])
 }
@@ -345,6 +399,13 @@ onMounted(loadCampaigns)
 	display: flex;
 	align-items: baseline;
 	gap: 0.6rem;
+	flex-wrap: wrap;
+}
+
+.bl-roster-actions {
+	margin-left: auto;
+	display: flex;
+	gap: 0.4rem;
 }
 
 .bl-section-sub {
@@ -401,6 +462,15 @@ onMounted(loadCampaigns)
 
 .bl-watch-btn:hover {
 	color: rgba(255, 255, 255, 0.7);
+}
+
+.bl-watch-btn.journal {
+	margin-right: 0.35rem;
+}
+
+.bl-npc-buttons {
+	display: flex;
+	align-items: center;
 }
 
 .bl-watch-btn.on {

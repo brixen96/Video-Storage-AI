@@ -543,7 +543,7 @@
 
 			<!-- Bannerlord Tab -->
 			<div v-if="activeTab === 'bannerlord'">
-				<BannerlordPanel />
+				<BannerlordPanel @journal="handleBannerlordJournal" />
 			</div>
 		</div>
 	</div>
@@ -825,6 +825,17 @@ const sendQuickMessage = (text) => {
 	sendMessage()
 }
 
+// Bannerlord NPC journal → jump to chat with a prefilled session-recap request
+const handleBannerlordJournal = async ({ name, stringId }) => {
+	activeTab.value = 'chat'
+	await nextTick() // let the tab watcher fire and start the history reload
+	if (historyLoadPromise) {
+		try { await historyLoadPromise } catch { /* fallback to current state */ }
+	}
+	chatInput.value = `📋 Session recap for ${name} (${stringId}): summarize our recent dialogue — what happened, her current mood and relation to me, and where the scene stands right now.`
+	sendMessage()
+}
+
 const clearChat = async () => {
 	await clearHistory()
 }
@@ -955,9 +966,10 @@ const resetCompanion = async () => {
 }
 
 // Reload chat history when switching to chat tab
+let historyLoadPromise = null
 watch(activeTab, (newTab) => {
 	if (newTab === 'chat') {
-		loadHistory()
+		historyLoadPromise = loadHistory()
 	}
 })
 
