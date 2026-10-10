@@ -16,16 +16,15 @@
 		<div ref="msgsRef" class="mini-chat-messages">
 			<div v-if="visibleMessages.length === 0 && !isStreaming" class="mini-empty">
 				<p>Ask the Companion for help with your roleplay.</p>
-				<button v-if="contextNpc" class="mini-hint-btn" @click="useHint">
-					✍ Help me write my next response to {{ contextNpc.name }}
-				</button>
+				<div v-if="contextNpc" class="mini-quick-actions">
+					<button class="mini-hint-btn" @click="quickAction('Help me write my next response')">✍ Write my next response</button>
+					<button class="mini-hint-btn" @click="quickAction('Analyze her current mood and what it means for me')">🧠 Analyze the mood</button>
+					<button class="mini-hint-btn" @click="quickAction('What does she want to hear right now? Give me 2-3 response options.')">💡 Response options</button>
+				</div>
 			</div>
 			<div v-for="(msg, i) in visibleMessages" :key="i" class="mini-msg" :class="msg.role">
 				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}</div>
-				<div class="mini-content">
-					<template v-if="msg.role === 'user'">{{ msg.content }}</template>
-					<MarkdownMessage v-else :content="msg.content" />
-				</div>
+				<div class="mini-content">{{ msg.content }}</div>
 			</div>
 			<div v-if="isStreaming" class="mini-msg assistant">
 				<div class="mini-role">Companion</div>
@@ -44,6 +43,18 @@
 				@keyup.enter="send"
 				:disabled="isStreaming"
 			/>
+			<div class="mini-len-wrap" title="Minimum response length in characters">
+				<input
+					v-model.number="minResponseLength"
+					type="number"
+					class="form-control form-control-sm mini-len-input"
+					min="0"
+					max="5000"
+					step="50"
+					:disabled="isStreaming"
+				/>
+				<span class="mini-len-label">min&nbsp;len</span>
+			</div>
 			<button v-if="isStreaming" class="btn btn-sm btn-danger" title="Stop" @click="stopStreaming">
 				<font-awesome-icon :icon="['fas', 'stop']" />
 			</button>
@@ -59,7 +70,6 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { useChatHistory } from '@/composables/ai/useChatHistory'
 import { useChatStreaming } from '@/composables/ai/useChatStreaming'
 import { bannerlordAPI } from '@/services/api'
-import MarkdownMessage from '@/components/MarkdownMessage.vue'
 
 const props = defineProps({
 	// When set, the Companion is told which NPC conversation is open
@@ -71,6 +81,12 @@ const { isStreaming, streamMessage, stopStreaming } = useChatStreaming()
 
 const input = ref('')
 const msgsRef = ref(null)
+
+// Minimum response length (chars) - persisted across sessions
+const minResponseLength = ref(parseInt(localStorage.getItem('rp_min_response_length') || '400', 10))
+watch(minResponseLength, (v) => {
+	localStorage.setItem('rp_min_response_length', String(v || 0))
+})
 
 // ── Full RP context (world lore, rules, player description, NPC identity) ──
 const rpContext = ref(null)
@@ -96,7 +112,11 @@ const buildContextBlock = () => {
 	const n = c.npc || {}
 	const lines = []
 	lines.push(`[ROLEPLAY CONTEXT — Bannerlord AIInfluence campaign ${c.campaign_id}]`)
-	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below. Follow the campaign RP rules exactly (they follow below). Match the NPC's current mood, relation, and personality. Output ONLY the response text — no preamble, no explanation, no quotes around it.`)
+	lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC below. Follow the campaign RP rules exactly (they follow below). Match the NPC's current mood, relation, and personality. Output ONLY the response text - no preamble, no explanation, no markdown formatting, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples below.`)
+	lines.push(`CRITICAL - FACTS: Use ONLY the recent dialogue below for what has been said between Emil and this NPC, and what the NPC knows or has heard. Do NOT invent, reference, or imply backstory events, rumors, or world facts as known content unless they actually appear in the dialogue. The personality/backstory fields below are ONLY for matching voice, tone, and behavior - never as facts the NPC quotes or claims to have heard about.`)
+	if (minResponseLength.value > 0) {
+		lines.push(`LENGTH: The response must be at least ${minResponseLength.value} characters. Fill it naturally with reactions, inner thoughts, small physical details, and dialogue - do NOT pad with descriptions of the room or repeated phrases.`)
+	}
 	if (c.rp_rules) lines.push(`\n## RP Rules (campaign actionrules.txt — highest priority)\n${c.rp_rules}`)
 	if (c.world_lore) lines.push(`\n## World (campaign world.txt)\n${c.world_lore}`)
 	if (c.player_description) lines.push(`\n## Emil — the player character (playerdescription.txt)\n${c.player_description}`)
@@ -115,8 +135,13 @@ const buildContextBlock = () => {
 	return lines.join('\n')
 }
 
-// Show only the last 20 messages to keep the side panel readable
-const visibleMessages = computed(() => chatHistory.value.slice(-20))
+// Last 20 messages, filtering out the app's default welcome message
+// (not relevant in the RP panel - *asterisks preserved as plain text*)
+const visibleMessages = computed(() =>
+	chatHistory.value
+		.filter((m) => !(m.role === 'assistant' && m.content.startsWith("# \ud83d\udc4b Hello! I'm your AI Companion")))
+		.slice(-20)
+)
 
 const scrollDown = async () => {
 	await nextTick()
@@ -181,8 +206,8 @@ const send = async () => {
 	})
 }
 
-const useHint = () => {
-	input.value = 'Help me write my next response'
+const quickAction = (text) => {
+	input.value = text
 	send()
 }
 </script>
@@ -253,6 +278,13 @@ const useHint = () => {
 
 .mini-empty p {
 	margin: 0;
+}
+
+.mini-quick-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	align-items: center;
 }
 
 .mini-hint-btn {
@@ -334,5 +366,26 @@ const useHint = () => {
 
 .mini-chat-input .form-control::placeholder {
 	color: rgba(255, 255, 255, 0.35);
+}
+
+.mini-len-wrap {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	flex-shrink: 0;
+}
+
+.mini-len-input {
+	width: 74px;
+	text-align: center;
+	font-size: 0.75rem;
+}
+
+.mini-len-label {
+	font-size: 0.55rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: rgba(255, 255, 255, 0.4);
+	margin-top: 1px;
 }
 </style>

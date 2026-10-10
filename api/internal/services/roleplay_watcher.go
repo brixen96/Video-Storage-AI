@@ -215,9 +215,10 @@ func (rw *roleplayWatcherService) handleFileChange(path string) {
 			Severity:  "info",
 			Timestamp: time.Now(),
 			Data: map[string]interface{}{
-				"npc":      state.NPCName,
-				"mood":     state.Mood,
-				"relation": state.RelationDesc,
+				"npc":       state.NPCName,
+				"mood":      state.Mood,
+				"relation":  state.RelationDesc,
+				"file_path": path,
 			},
 		})
 	}

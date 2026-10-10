@@ -202,8 +202,9 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { bannerlordAPI, aiAPI } from '@/services/api'
+import websocketService from '@/services/websocket'
 import CompanionMiniChat from '@/components/CompanionMiniChat.vue'
 
 const campaigns = ref([])
@@ -362,6 +363,31 @@ const closeDialogue = () => {
 	dialogue.value = []
 }
 
+// Live refresh: when the watcher detects a change to the OPEN NPC's file,
+// reload the conversation view automatically
+let wsUnsub = null
+
+const handleRoleplayUpdate = (data) => {
+	if (!selectedNpc.value || !data?.file_path) return
+	if (data.file_path === selectedNpc.value.file_path) {
+		openDialogue(selectedNpc.value)
+	}
+}
+
+onMounted(() => {
+	loadCampaigns()
+	wsUnsub = websocketService.on('companion_event', (evt) => {
+		if (evt?.type === 'roleplay_update') handleRoleplayUpdate(evt.data)
+	})
+})
+
+onBeforeUnmount(() => {
+	if (wsUnsub) {
+		wsUnsub()
+		wsUnsub = null
+	}
+})
+
 const toggleWatchFromConversation = async () => {
 	if (!selectedNpc.value) return
 	await toggleWatch(selectedNpc.value)
@@ -380,8 +406,6 @@ watch(selectedCampaign, (id) => {
 		loadOverview()
 	}
 })
-
-onMounted(loadCampaigns)
 </script>
 
 <style scoped>
