@@ -189,6 +189,7 @@ import {
 	faClipboardList,
 	faClipboardCheck,
 	faMask,
+	faHorse,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Import regular icons
@@ -391,6 +392,7 @@ library.add(
 	faClipboardList,
 	faClipboardCheck,
 	faMask,
+	faHorse,
 )
 
 export default FontAwesomeIcon

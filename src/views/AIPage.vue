@@ -41,7 +41,14 @@
 					<font-awesome-icon :icon="['fas', 'chart-line']" class="me-2" />
 					Monitor
 				</button>
-			</li>			</ul>
+			</li>
+			<li class="nav-item">
+				<button class="nav-link" :class="{ active: activeTab === 'bannerlord' }" @click="activeTab = 'bannerlord'">
+					<font-awesome-icon :icon="['fas', 'horse']" class="me-2" />
+					Bannerlord
+				</button>
+			</li>
+			</ul>
 
 			<!-- Companion Tab -->
 			<div v-if="activeTab === 'companion'" class="companion-tab">
@@ -533,6 +540,11 @@
 			<div v-if="activeTab === 'monitor'">
 				<AIMonitorDashboard />
 			</div>
+
+			<!-- Bannerlord Tab -->
+			<div v-if="activeTab === 'bannerlord'">
+				<BannerlordPanel />
+			</div>
 		</div>
 	</div>
 </template>
@@ -555,6 +567,7 @@ import AIAnalyzeThumbnails from '@/components/ai/AIAnalyzeThumbnails.vue'
 import AIMonitorDashboard from '@/components/ai/AIMonitorDashboard.vue'
 import MarkdownMessage from '@/components/MarkdownMessage.vue'
 import TaskBoard from '@/components/TaskBoard.vue'
+import BannerlordPanel from '@/components/BannerlordPanel.vue'
 
 // Shared composables — same state as the floating widget
 import { useChatHistory } from '@/composables/ai/useChatHistory'

@@ -245,6 +245,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/roleplay/watches", addRoleplayWatch)               // Watch an NPC JSON file
 			ai.DELETE("/roleplay/watches/:id", removeRoleplayWatch)      // Unwatch an NPC file
 			ai.GET("/roleplay/snapshots", getRoleplaySnapshots)           // Latest NPC state per watch
+
+		// Bannerlord campaign views (AIInfluence mod, read-only)
+		v1.GET("/bannerlord/campaigns", bannerlordListCampaigns)           // List campaign folders
+		v1.GET("/bannerlord/campaigns/:id/overview", bannerlordCampaignOverview) // Per-campaign overview
 			ai.GET("/status", getAICompanionStatus)          // Get AI Companion status
 			ai.POST("/memories", saveAIMemory)               // Save memory
 			ai.GET("/memories", getAIMemories)               // Get memories

@@ -275,6 +275,12 @@ export const aiAPI = {
 	testConnection: () => api.post('/ai/test-connection'),
 }
 
+// Bannerlord Campaign API (AIInfluence mod, read-only)
+export const bannerlordAPI = {
+	getCampaigns: () => api.get('/bannerlord/campaigns'),
+	getCampaignOverview: (id) => api.get(`/bannerlord/campaigns/${encodeURIComponent(id)}/overview`),
+}
+
 // Dashboard API
 export const dashboardAPI = {
 	getStats: () => api.get('/dashboard/stats'),
