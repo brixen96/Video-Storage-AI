@@ -59,7 +59,13 @@
 					<div v-for="(m, i) in parsedDialogue" :key="i" class="conv-msg" :class="m.isPlayer ? 'from-player' : 'from-npc'">
 						<div class="conv-bubble">
 							<div class="conv-speaker">{{ m.speaker }}</div>
-							<div class="conv-content">{{ m.content }}</div>
+							<div class="conv-content">
+								<template v-for="(seg, j) in m.segments" :key="j">
+									<span v-if="seg.type === 'action'" class="conv-action">{{ seg.text }}</span>
+									<span v-else-if="seg.type === 'speech'" class="conv-speech">{{ seg.text }}</span>
+									<span v-else>{{ seg.text }}</span>
+								</template>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -325,19 +331,48 @@ const dialogue = ref([])
 const loadingDialogue = ref(false)
 const convMessagesRef = ref(null)
 
+// Parse RP markup into styled segments:
+//   *action or inner thought*  -> italic, muted
+//   "spoken words"             -> bright, weight 500
+//   everything else            -> default
+// Tolerant of unbalanced markers (stray * stays literal).
+const parseRpSegments = (text) => {
+	const segments = []
+	const re = /\*([^*]+)\*|"([^"]+)"/g
+	let last = 0
+	let match
+	while ((match = re.exec(text)) !== null) {
+		if (match.index > last) {
+			segments.push({ type: 'plain', text: text.slice(last, match.index) })
+		}
+		if (match[1] !== undefined) {
+			segments.push({ type: 'action', text: match[1] })
+		} else {
+			segments.push({ type: 'speech', text: '"' + match[2] + '"' })
+		}
+		last = re.lastIndex
+	}
+	if (last < text.length) {
+		segments.push({ type: 'plain', text: text.slice(last) })
+	}
+	return segments
+}
+
 const parsedDialogue = computed(() => {
 	return dialogue.value.map((entry) => {
 		// Format: "Unidentified person (`main_hero`): text" (player)
 		//     or: "I (Empress Rhagaea, `lord_1_14`): text" (NPC)
 		const idx = entry.indexOf('): ')
-		if (idx === -1) return { isPlayer: false, speaker: selectedNpc.value?.name || 'NPC', content: entry }
+		if (idx === -1) {
+			return { isPlayer: false, speaker: selectedNpc.value?.name || 'NPC', content: entry, segments: parseRpSegments(entry) }
+		}
 		const prefix = entry.slice(0, idx + 1)
 		const content = entry.slice(idx + 3)
 		const isPlayer = prefix.includes('main_hero')
 		let speaker = isPlayer ? 'Emil' : (selectedNpc.value?.name || 'NPC')
 		const m = prefix.match(/^I \(([^,)]+)[,)]/)
 		if (m && m[1]) speaker = m[1]
-		return { isPlayer, speaker, content }
+		return { isPlayer, speaker, content, segments: parseRpSegments(content) }
 	})
 })
 
@@ -738,6 +773,18 @@ watch(selectedCampaign, (id) => {
 
 .conv-msg {
 	display: flex;
+	animation: convFadeIn 0.25s ease both;
+}
+
+@keyframes convFadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
 }
 
 .conv-msg.from-npc {
@@ -783,11 +830,23 @@ watch(selectedCampaign, (id) => {
 }
 
 .conv-content {
-	font-size: 0.85rem;
-	line-height: 1.55;
-	color: rgba(255, 255, 255, 0.88);
+	font-size: 0.87rem;
+	line-height: 1.65;
+	color: rgba(255, 255, 255, 0.78);
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+/* *actions and inner thoughts* — italic, muted violet */
+.conv-action {
+	font-style: italic;
+	color: rgba(196, 186, 232, 0.8);
+}
+
+/* "spoken words" — bright, slightly heavier */
+.conv-speech {
+	color: #f4f8ff;
+	font-weight: 500;
 }
 
 /* Diplomacy side */
