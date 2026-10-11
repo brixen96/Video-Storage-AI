@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,13 @@ import (
 	"github.com/brixen96/video-storage-ai/internal/database"
 	"github.com/fsnotify/fsnotify"
 )
+
+// stripBOM removes a UTF-8 byte order mark if present. Editors like VS Code
+// can save JSON files with a BOM, which makes encoding/json fail with
+// "invalid character '\u00ef' looking for beginning of value".
+func stripBOM(b []byte) []byte {
+	return bytes.TrimPrefix(b, []byte{0xEF, 0xBB, 0xBF})
+}
 
 // ── Roleplay Watcher ──
 //
@@ -491,6 +499,7 @@ func extractRoleplayState(path string) (*roleplayState, error) {
 	if err != nil {
 		return nil, err
 	}
+	raw = stripBOM(raw)
 
 	var npc struct {
 		Name               string   `json:"Name"`

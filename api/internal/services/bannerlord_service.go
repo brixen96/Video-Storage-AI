@@ -194,6 +194,7 @@ func GetBannerlordCampaignOverview(campaignID string) (map[string]interface{}, e
 	kingdomStatements := []map[string]interface{}{}
 	var campaignDays float64
 	dipRaw, err := os.ReadFile(filepath.Join(dir, "aiinfluence_campaign_diplomacy.json"))
+	dipRaw = stripBOM(dipRaw)
 	if err == nil {
 		var bundle struct {
 			DynamicEvents []struct {
@@ -241,6 +242,7 @@ func GetBannerlordCampaignOverview(campaignID string) (map[string]interface{}, e
 	// ── War statistics ──
 	kingdomWars := []map[string]interface{}{}
 	warRaw, err := os.ReadFile(filepath.Join(dir, "war_statistics.json"))
+	warRaw = stripBOM(warRaw)
 	if err == nil {
 		var war struct {
 			KingdomStats map[string]struct {
@@ -275,7 +277,7 @@ func GetBannerlordCampaignOverview(campaignID string) (map[string]interface{}, e
 		var a struct {
 			Alliances map[string]interface{} `json:"alliances"`
 		}
-		if json.Unmarshal(raw, &a) == nil {
+		if json.Unmarshal(stripBOM(raw), &a) == nil {
 			allianceCount = len(a.Alliances)
 		}
 	}
@@ -284,7 +286,7 @@ func GetBannerlordCampaignOverview(campaignID string) (map[string]interface{}, e
 		var t struct {
 			Tributes map[string]interface{} `json:"tributes"`
 		}
-		if json.Unmarshal(raw, &t) == nil {
+		if json.Unmarshal(stripBOM(raw), &t) == nil {
 			tributeCount = len(t.Tributes)
 		}
 	}
@@ -325,6 +327,7 @@ func GetBannerlordNPCDialogue(filePath string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read NPC file: %w", err)
 	}
+	raw = stripBOM(raw)
 	var npc struct {
 		Name                 string   `json:"Name"`
 		StringID             string   `json:"StringId"`
@@ -385,7 +388,7 @@ func GetBannerlordRPContext(npcPath string) (map[string]interface{}, error) {
 		if err != nil {
 			return ""
 		}
-		return truncate(string(b), max)
+		return truncate(string(stripBOM(b)), max)
 	}
 
 	playerDesc := readCampaignFile(filepath.Join("prompts", "playerdescription.txt"), 2000)
@@ -397,6 +400,7 @@ func GetBannerlordRPContext(npcPath string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read NPC file: %w", err)
 	}
+	raw = stripBOM(raw)
 	var npc struct {
 		Name                   string   `json:"Name"`
 		StringID               string   `json:"StringId"`
@@ -461,6 +465,7 @@ func parseNPCRosterEntry(path string, item *BannerlordNPCRosterEntry) error {
 	if err != nil {
 		return err
 	}
+	raw = stripBOM(raw)
 	var npc struct {
 		Name                string   `json:"Name"`
 		StringID            string   `json:"StringId"`
