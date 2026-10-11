@@ -19,6 +19,10 @@ if %ERRORLEVEL% neq 0 (
     exit /b 0
 )
 
+:: Preflight: required tools present?
+where npm >nul 2>&1 || ( echo ERROR: npm not found in PATH. Install Node.js first.  & pause & exit /b 1 )
+where go  >nul 2>&1 || ( echo ERROR: go not found in PATH. Install Go first.        & pause & exit /b 1 )
+
 :: Read version from VERSION file and auto-increment patch
 set /p VERSION=<"%ROOT%VERSION"
 if "%VERSION%"=="" set VERSION=0.1.0
@@ -37,17 +41,27 @@ echo %VERSION%> "%ROOT%VERSION"
 echo   Version: %VERSION% (auto-incremented)
 echo.
 
-:: --- 0. Stop services ---
+:: --- 0. Stop services and WAIT until each is actually STOPPED ---
+:: (sc stop is async; the old 3s sleep let builds race a still-dying process,
+::  which silently left the OLD binary running after a "successful" build)
 echo [0/5] Stopping services...
-sc stop VideoStorageAI-API >nul 2>&1
-sc stop VideoStorageAI-Web >nul 2>&1
-timeout /t 3 /nobreak >nul
+call :stopService VideoStorageAI-API
+if %ERRORLEVEL% neq 0 ( echo. & echo ERROR: Could not stop the API service. Check services.msc and re-run. & pause & exit /b 1 )
+call :stopService VideoStorageAI-Web
+if %ERRORLEVEL% neq 0 ( echo. & echo ERROR: Could not stop the Web service. Check services.msc and re-run. & pause & exit /b 1 )
 echo   Done.
 echo.
 
-:: --- 1. Clean release folder ---
+:: --- 1. Clean release folder (now safe: services confirmed stopped) ---
 echo [1/5] Cleaning release folder...
-if exist "%RELEASE_DIR%" rmdir /s /q "%RELEASE_DIR%" 2>nul
+if exist "%RELEASE_DIR%" (
+    rmdir /s /q "%RELEASE_DIR%" 2>nul
+    if exist "%RELEASE_DIR%" (
+        echo ERROR: Could not delete the release folder - files are still locked.
+        echo        A process is still running from release\ - check Task Manager.
+        pause & exit /b 1
+    )
+)
 mkdir "%RELEASE_DIR%" 2>nul
 
 :: --- 2. Build frontend ---
@@ -55,9 +69,10 @@ echo [2/5] Building frontend (npm run build)...
 cd /d "%ROOT%"
 call npm run build
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: Frontend build failed.
-    exit /b 1
+    echo ERROR: Frontend build failed. See output above.
+    pause & exit /b 1
 )
+echo.
 
 :: --- 3. Build Go binaries ---
 set LDFLAGS=-s -w -X github.com/brixen96/video-storage-ai/internal/config.Version=%VERSION%
@@ -69,16 +84,20 @@ set GOOS=windows
 set GOARCH=amd64
 go build -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-API.exe" ./cmd/server
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: API server build failed.
-    exit /b 1
+    echo ERROR: API server build failed. See output above.
+    pause & exit /b 1
 )
 
 echo [3/5] Building Web server (VideoStorageAI-Web.exe)...
 go build -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-Web.exe" ./cmd/web
 if %ERRORLEVEL% neq 0 (
-    echo ERROR: Web server build failed.
-    exit /b 1
+    echo ERROR: Web server build failed. See output above.
+    pause & exit /b 1
 )
+
+:: Verify outputs actually exist before deploying
+if not exist "%RELEASE_DIR%\VideoStorageAI-API.exe" ( echo ERROR: API exe missing after build. & pause & exit /b 1 )
+if not exist "%RELEASE_DIR%\VideoStorageAI-Web.exe"  ( echo ERROR: Web exe missing after build.  & pause & exit /b 1 )
 
 :: Copy VERSION file next to the binary
 copy "%ROOT%VERSION" "%RELEASE_DIR%\VERSION" >nul 2>&1
@@ -100,21 +119,77 @@ echo SERVER_MODE=release
 
 :: --- 4. Copy frontend dist ---
 echo [4/5] Copying frontend dist...
+if not exist "%ROOT%dist\index.html" ( echo ERROR: dist\index.html missing - frontend build produced nothing. & pause & exit /b 1 )
 xcopy /E /I /Q "%ROOT%dist" "%RELEASE_DIR%\dist\"
 
-:: --- 5. Restart services ---
-echo [5/5] Restarting services...
-sc start VideoStorageAI-API >nul 2>&1
-sc start VideoStorageAI-Web >nul 2>&1
-timeout /t 3 /nobreak >nul
 echo   Done.
+echo.
+
+:: --- 5. Start services and WAIT until each is actually RUNNING ---
+echo [5/5] Starting services...
+call :startService VideoStorageAI-API
+if %ERRORLEVEL% neq 0 ( echo. & echo WARNING: API service did not come up - see message above. )
+call :startService VideoStorageAI-Web
+if %ERRORLEVEL% neq 0 ( echo. & echo WARNING: Web service did not come up - see message above. )
+echo.
+
+:: --- 6. Health check: are the new binaries actually listening? ---
+echo [6/6] Health check (TCP port verification)...
+powershell -Command ^
+  "$api=$false; $web=$false; " ^
+  "for($i=0; $i -lt 15; $i++){ " ^
+  "  try { $c=New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',8080); $c.Close(); $api=$true } catch {}; " ^
+  "  try { $c=New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',3000); $c.Close(); $web=$true } catch {}; " ^
+  "  if($api -and $web){ break }; Start-Sleep 2 } " ^
+  "if($api){ Write-Host '   API  :8080  OK - listening' } else { Write-Host '   API  :8080  NOT RESPONDING' -ForegroundColor Red }; " ^
+  "if($web){ Write-Host '   Web  :3000  OK - listening' } else { Write-Host '   Web  :3000  NOT RESPONDING' -ForegroundColor Red }; " ^
+  "if(-not ($api -and $web)){ exit 1 }"
+set "HEALTH=%ERRORLEVEL%"
 echo.
 
 :: --- Summary ---
 echo =============================================
-echo   Build complete!  v%VERSION%
+if "%HEALTH%"=="0" (
+    echo   Build complete!  v%VERSION%  - all services verified up
+) else (
+    echo   BUILD FINISHED WITH WARNINGS - see health check above
+)
 echo =============================================
 echo.
 echo   http://localhost:3000
 echo.
 pause
+if not "%HEALTH%"=="0" exit /b 1
+exit /b 0
+
+
+:: ============================================================
+::  HELPERS
+:: ============================================================
+
+:stopService
+:: %1 = service name. Stops it and polls until STOPPED (max 30s).
+powershell -Command ^
+  "$n='%~1'; " ^
+  "$s=Get-Service -Name $n -ErrorAction SilentlyContinue; " ^
+  "if(-not $s){ Write-Host ('   ' + $n + ' not installed - skipped'); exit 0 }; " ^
+  "if($s.Status -eq 'Stopped'){ Write-Host ('   ' + $n + ' already stopped'); exit 0 }; " ^
+  "Write-Host ('   Stopping ' + $n + '...'); " ^
+  "sc.exe stop $n | Out-Null; " ^
+  "$ok=$false; " ^
+  "for($i=0; $i -lt 30; $i++){ Start-Sleep 1; $s.Refresh(); if($s.Status -eq 'Stopped'){ $ok=$true; break } }; " ^
+  "if($ok){ Write-Host ('   ' + $n + ' stopped') } else { Write-Host ('   ERROR: ' + $n + ' did not stop within 30 seconds') -ForegroundColor Red; exit 1 }"
+exit /b %ERRORLEVEL%
+
+:startService
+:: %1 = service name. Starts it and polls until RUNNING (max 20s).
+powershell -Command ^
+  "$n='%~1'; " ^
+  "$s=Get-Service -Name $n -ErrorAction SilentlyContinue; " ^
+  "if(-not $s){ Write-Host ('   ' + $n + ' not installed - skipped'); exit 0 }; " ^
+  "Write-Host ('   Starting ' + $n + '...'); " ^
+  "sc.exe start $n | Out-Null; " ^
+  "$ok=$false; " ^
+  "for($i=0; $i -lt 20; $i++){ Start-Sleep 1; $s.Refresh(); if($s.Status -eq 'Running'){ $ok=$true; break } }; " ^
+  "if($ok){ Write-Host ('   ' + $n + ' running') } else { Write-Host ('   ERROR: ' + $n + ' did not start within 20 seconds - check Event Viewer > Windows Logs > Application') -ForegroundColor Red; exit 1 }"
+exit /b %ERRORLEVEL%
