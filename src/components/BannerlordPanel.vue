@@ -58,7 +58,10 @@
 					<div v-else-if="parsedDialogue.length === 0" class="bl-empty-sm">No conversation history yet.</div>
 					<div v-for="(m, i) in parsedDialogue" :key="i" class="conv-msg" :class="m.isPlayer ? 'from-player' : 'from-npc'">
 						<div class="conv-bubble">
-							<div class="conv-speaker">{{ m.speaker }}</div>
+							<div class="conv-speaker">
+								<span class="conv-avatar" :class="m.isPlayer ? 'me' : 'npc'">{{ m.speaker.charAt(0) }}</span>
+								{{ m.speaker }}
+							</div>
 							<div class="conv-content">
 								<template v-for="(seg, j) in m.segments" :key="j">
 									<span v-if="seg.type === 'action'" class="conv-action">{{ seg.text }}</span>
@@ -805,19 +808,31 @@ watch(selectedCampaign, (id) => {
 .conv-bubble {
 	max-width: 78%;
 	border-radius: 14px;
-	padding: 0.6rem 0.9rem;
+	padding: 0.7rem 1rem;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .conv-msg.from-npc .conv-bubble {
-	background: rgba(255, 255, 255, 0.06);
+	background: linear-gradient(160deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.03));
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	border-bottom-left-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.conv-msg.from-npc .conv-bubble:hover {
+	border-color: rgba(0, 217, 255, 0.35);
+	box-shadow: 0 2px 12px rgba(0, 217, 255, 0.08);
 }
 
 .conv-msg.from-player .conv-bubble {
-	background: rgba(0, 217, 255, 0.1);
+	background: linear-gradient(160deg, rgba(0, 217, 255, 0.12), rgba(0, 217, 255, 0.05));
 	border: 1px solid rgba(0, 217, 255, 0.25);
 	border-bottom-right-radius: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.conv-msg.from-player .conv-bubble:hover {
+	border-color: rgba(0, 217, 255, 0.5);
 }
 
 .conv-speaker {
@@ -825,7 +840,36 @@ watch(selectedCampaign, (id) => {
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	margin-bottom: 0.3rem;
+	margin-bottom: 0.4rem;
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+}
+
+.conv-avatar {
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	font-size: 0.62rem;
+	font-weight: 700;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	text-transform: none;
+	letter-spacing: 0;
+}
+
+.conv-avatar.npc {
+	background: rgba(0, 217, 255, 0.14);
+	border: 1px solid rgba(0, 217, 255, 0.55);
+	color: #00d9ff;
+}
+
+.conv-avatar.me {
+	background: rgba(255, 255, 255, 0.1);
+	border: 1px solid rgba(255, 255, 255, 0.35);
+	color: rgba(255, 255, 255, 0.85);
 }
 
 .conv-msg.from-npc .conv-speaker {
@@ -838,22 +882,40 @@ watch(selectedCampaign, (id) => {
 
 .conv-content {
 	font-size: 0.87rem;
-	line-height: 1.65;
-	color: rgba(255, 255, 255, 0.78);
+	line-height: 1.7;
+	color: rgba(255, 255, 255, 0.68);
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
-/* *actions and inner thoughts* — italic, muted violet */
+/* *actions and inner thoughts* — italic violet on a faint tint */
 .conv-action {
 	font-style: italic;
-	color: rgba(196, 186, 232, 0.8);
+	color: rgba(196, 186, 232, 0.9);
+	background: rgba(196, 186, 232, 0.08);
+	padding: 0.05em 0.3em;
+	border-radius: 4px;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
 }
 
-/* "spoken words" — bright, slightly heavier */
+/* "spoken words" — bright on a subtle highlight that wraps line-by-line */
 .conv-speech {
-	color: #f4f8ff;
+	color: #f6faff;
 	font-weight: 500;
+	background: rgba(255, 255, 255, 0.07);
+	padding: 0.05em 0.3em;
+	border-radius: 4px;
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
+.conv-msg.from-npc .conv-speech {
+	background: rgba(255, 255, 255, 0.09);
+}
+
+.conv-msg.from-player .conv-speech {
+	background: rgba(0, 217, 255, 0.14);
 }
 
 /* Diplomacy side */
