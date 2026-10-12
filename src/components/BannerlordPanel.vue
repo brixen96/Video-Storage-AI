@@ -72,7 +72,7 @@
 				</div><!-- /bl-conversation -->
 
 				<!-- Live Companion chat (side-by-side helper) -->
-				<CompanionMiniChat :context-npc="selectedNpc" />
+				<CompanionMiniChat :context-npc="selectedNpc" :available-npcs="npcs" :auto-react-key="autoReactKey" />
 			</div>
 
 			<!-- Campaign overview (roster + diplomacy) -->
@@ -399,13 +399,20 @@ const closeDialogue = () => {
 }
 
 // Live refresh: when the watcher detects a change to the OPEN NPC's file,
-// reload the conversation view automatically
+// reload the conversation view automatically — and if the new entry is the
+// NPC's response (not the player's), trigger the Companion's auto-react.
 let wsUnsub = null
+const autoReactKey = ref(0)
 
-const handleRoleplayUpdate = (data) => {
+const handleRoleplayUpdate = async (data) => {
 	if (!selectedNpc.value || !data?.file_path) return
-	if (data.file_path === selectedNpc.value.file_path) {
-		openDialogue(selectedNpc.value)
+	if (data.file_path !== selectedNpc.value.file_path) return
+	await openDialogue(selectedNpc.value)
+	// Only react to NPC responses — skip when the last entry is the player's
+	const last = dialogue.value[dialogue.value.length - 1] || ''
+	const isNpcTurn = last.length > 0 && !last.startsWith('Unidentified person')
+	if (isNpcTurn) {
+		autoReactKey.value++
 	}
 }
 
