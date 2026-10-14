@@ -1204,28 +1204,46 @@ func (s *AICompanionService) SubscribeToEvents() (<-chan CompanionEvent, func())
 
 // ================== Chat History ==================
 
-// SaveChatMessage persists a chat message to the database
+// SaveChatMessage persists a chat message to the database (main AI Companion chat)
 func (s *AICompanionService) SaveChatMessage(role, content, source string) {
-	s.SaveChatMessageWithTools(role, content, source, "")
+	s.SaveChatMessageScoped(role, content, source, "", "main")
 }
 
-// SaveChatMessageWithTools persists a chat message with optional tool steps JSON
+// SaveChatMessageWithTools persists a chat message with optional tool steps JSON (main chat)
 func (s *AICompanionService) SaveChatMessageWithTools(role, content, source, toolStepsJSON string) {
-	_, _ = s.db.Exec(
-		`INSERT INTO ai_chat_messages (role, content, source, tool_steps, created_at) VALUES (?, ?, ?, ?, ?)`,
-		role, content, source, toolStepsJSON, time.Now(),
-	)
-	// Prune: keep only the 500 most recent messages
-	_, _ = s.db.Exec(`DELETE FROM ai_chat_messages WHERE id NOT IN (
-		SELECT id FROM ai_chat_messages ORDER BY created_at DESC LIMIT 500
-	)`)
+	s.SaveChatMessageScoped(role, content, source, toolStepsJSON, "main")
 }
 
-// GetChatHistory returns the most recent N messages, oldest-first
+// SaveChatMessageScoped persists a chat message into a specific thread scope
+// ("main" for the AI Companion chat, "rp" for the Bannerlord mini-chat).
+func (s *AICompanionService) SaveChatMessageScoped(role, content, source, toolStepsJSON, scope string) {
+	if scope == "" {
+		scope = "main"
+	}
+	_, _ = s.db.Exec(
+		`INSERT INTO ai_chat_messages (role, content, source, tool_steps, scope, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		role, content, source, toolStepsJSON, scope, time.Now(),
+	)
+	// Prune: keep only the 500 most recent messages *per scope* so the RP
+	// thread can never crowd out the main chat (and vice versa).
+	_, _ = s.db.Exec(`DELETE FROM ai_chat_messages WHERE scope = ? AND id NOT IN (
+		SELECT id FROM ai_chat_messages WHERE scope = ? ORDER BY created_at DESC LIMIT 500
+	)`, scope, scope)
+}
+
+// GetChatHistory returns the most recent N main-chat messages, oldest-first
 func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}, error) {
+	return s.GetChatHistoryScoped(limit, "main")
+}
+
+// GetChatHistoryScoped returns the most recent N messages for a scope, oldest-first
+func (s *AICompanionService) GetChatHistoryScoped(limit int, scope string) ([]map[string]interface{}, error) {
+	if scope == "" {
+		scope = "main"
+	}
 	rows, err := s.db.Query(
 		`SELECT id, role, content, COALESCE(source, ''), COALESCE(tool_steps, ''), created_at FROM ai_chat_messages
-		 ORDER BY created_at DESC LIMIT ?`, limit)
+		 WHERE scope = ? ORDER BY created_at DESC LIMIT ?`, scope, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1252,9 +1270,18 @@ func (s *AICompanionService) GetChatHistory(limit int) ([]map[string]interface{}
 	return results, nil
 }
 
-// ClearChatHistory deletes all persisted chat messages
+// ClearChatHistory deletes all persisted main-chat messages (leaves RP intact)
 func (s *AICompanionService) ClearChatHistory() error {
-	_, err := s.db.Exec("DELETE FROM ai_chat_messages")
+	_, err := s.db.Exec("DELETE FROM ai_chat_messages WHERE scope = 'main'")
+	return err
+}
+
+// ClearChatHistoryScoped deletes all persisted messages in a given scope
+func (s *AICompanionService) ClearChatHistoryScoped(scope string) error {
+	if scope == "" {
+		scope = "main"
+	}
+	_, err := s.db.Exec("DELETE FROM ai_chat_messages WHERE scope = ?", scope)
 	return err
 }
 

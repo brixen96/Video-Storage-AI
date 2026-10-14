@@ -54,10 +54,16 @@ func aiCompanionChatStream(c *gin.Context) {
 	var request struct {
 		Message string              `json:"message"`
 		History []map[string]string `json:"history"`
+		Scope   string              `json:"scope"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
 		return
+	}
+	// "rp" = Bannerlord mini-chat thread; anything else is the main companion chat
+	scope := request.Scope
+	if scope == "" {
+		scope = "main"
 	}
 
 	c.Header("Content-Type", "text/event-stream")
@@ -154,14 +160,14 @@ func aiCompanionChatStream(c *gin.Context) {
 
 	// Persist the exchange to the database
 	if fullResponse.Len() > 0 {
-		log.Printf("[AI] Persisting response: source=%s len=%d tools=%d", source, fullResponse.Len(), len(toolSteps))
-		aiCompanionService.SaveChatMessage("user", request.Message, "user")
+		log.Printf("[AI] Persisting response: source=%s scope=%s len=%d tools=%d", source, scope, fullResponse.Len(), len(toolSteps))
+		aiCompanionService.SaveChatMessageScoped("user", request.Message, "user", "", scope)
 		toolStepsJSON := ""
 		if len(toolSteps) > 0 {
 			b, _ := json.Marshal(toolSteps)
 			toolStepsJSON = string(b)
 		}
-		aiCompanionService.SaveChatMessageWithTools("assistant", fullResponse.String(), source, toolStepsJSON)
+		aiCompanionService.SaveChatMessageScoped("assistant", fullResponse.String(), source, toolStepsJSON, scope)
 	}
 
 	// Send video cards event before [DONE] so frontend can render inline cards
@@ -186,7 +192,11 @@ func getChatHistory(c *gin.Context) {
 	if l := c.Query("limit"); l != "" {
 		fmt.Sscanf(l, "%d", &limit)
 	}
-	messages, err := aiCompanionService.GetChatHistory(limit)
+	scope := c.Query("scope")
+	if scope == "" {
+		scope = "main"
+	}
+	messages, err := aiCompanionService.GetChatHistoryScoped(limit, scope)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to get chat history", err.Error()))
 		return
@@ -194,13 +204,17 @@ func getChatHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": messages, "count": len(messages)})
 }
 
-// clearChatHistory deletes all persisted chat messages
+// clearChatHistory deletes persisted chat messages
 func clearChatHistory(c *gin.Context) {
 	if aiCompanionService == nil {
 		c.JSON(http.StatusServiceUnavailable, models.ErrorResponseMsg("AI Companion not initialized", ""))
 		return
 	}
-	if err := aiCompanionService.ClearChatHistory(); err != nil {
+	scope := c.Query("scope")
+	if scope == "" {
+		scope = "main"
+	}
+	if err := aiCompanionService.ClearChatHistoryScoped(scope); err != nil {
 		c.JSON(http.StatusInternalServerError, models.ErrorResponseMsg("Failed to clear chat history", err.Error()))
 		return
 	}

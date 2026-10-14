@@ -34,8 +34,9 @@ export function useChatStreaming() {
 	 * @param {string} fullMessage - The message text (may include page context prefix)
 	 * @param {Array} historyPayload - Recent history as {role, content}[]
 	 * @param {object} hooks - { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn }
+	 * @param {object} opts - { scope } — 'rp' persists to the Bannerlord RP thread, 'main' (default) to the companion chat
 	 */
-	const streamMessage = (fullMessage, historyPayload, hooks = {}) => {
+	const streamMessage = (fullMessage, historyPayload, hooks = {}, opts = {}) => {
 		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage, onToolProgress, onRequestInfo } = hooks
 
 		isStreaming.value = true
@@ -49,7 +50,7 @@ export function useChatStreaming() {
 				const response = await fetch(`${API_ORIGIN}/api/v1/ai/chat/stream`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ message: fullMessage, history: historyPayload }),
+					body: JSON.stringify({ message: fullMessage, history: historyPayload, scope: opts.scope || 'main' }),
 					signal: streamAbortController.value.signal,
 				})
 

@@ -188,20 +188,14 @@
 									</div>
 									<div class="message-content">
 										<template v-if="msg.role === 'user'">{{ msg.content }}</template>
-										<MarkdownMessage v-else :content="msg.content" />
-										<div class="message-time">{{ formatTime() }}</div>
-									</div>
-								</div>
-								<div v-if="isStreaming" class="chat-message assistant">
-									<div class="message-avatar">
-										<font-awesome-icon :icon="['fas', 'robot']" />
-									</div>
-									<div class="message-content">
-										<div class="message-text">
+										<!-- Typing dots live INSIDE the streaming bubble (the old standalone isStreaming bubble rendered a 2nd empty one) -->
+										<div v-else-if="msg.streaming && !msg.content" class="message-text">
 											<div class="typing-indicator">
 												<span></span><span></span><span></span>
 											</div>
 										</div>
+										<MarkdownMessage v-else :content="msg.content" />
+										<div class="message-time">{{ formatTime() }}</div>
 									</div>
 								</div>
 							</div>

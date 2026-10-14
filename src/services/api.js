@@ -239,6 +239,10 @@ export const aiAPI = {
 	clearChatHistory: () => api.delete('/ai/chat/history'),
 	resetChat: () => api.post('/ai/chat/reset'),
 
+	// Bannerlord RP thread — separate memory from the main companion chat
+	getRpHistory: (limit = 100) => api.get('/ai/chat/history', { params: { limit, scope: 'rp' } }),
+	clearRpHistory: () => api.delete('/ai/chat/history', { params: { scope: 'rp' } }),
+
 	// Companion Supervisor
 	trackActions: (actions) => api.post('/ai/companion/actions', { actions }),
 	getCompanionEvaluations: (limit = 20) => api.get('/ai/companion/evaluations', { params: { limit } }),

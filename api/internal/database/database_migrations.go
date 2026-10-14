@@ -1149,6 +1149,17 @@ func runMigrations() error {
 	}
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_roleplay_snapshots_created ON roleplay_snapshots(created_at DESC)`)
 
+	// Migration 69: Scope AI chat history — separate the Bannerlord RP thread
+	// ('rp') from the main AI Companion chat ('main'). Default 'main' so all
+	// pre-existing rows stay in the main thread.
+	var hasChatScope int
+	DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ai_chat_messages') WHERE name = 'scope'`).Scan(&hasChatScope)
+	if hasChatScope == 0 {
+		DB.Exec(`ALTER TABLE ai_chat_messages ADD COLUMN scope TEXT NOT NULL DEFAULT 'main'`)
+		log.Println("Migration 69: Added scope column to ai_chat_messages")
+	}
+	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_scope ON ai_chat_messages(scope, created_at DESC)`)
+
 	return nil
 }
 

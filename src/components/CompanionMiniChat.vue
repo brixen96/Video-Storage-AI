@@ -23,23 +23,15 @@
 				<option v-for="n in linkableNpcs" :key="n.file_path" :value="n.file_path">{{ n.name }}</option>
 			</select>
 			<button
-				class="mini-auto-toggle"
-				:class="{ on: autoReact }"
-				title="Auto-react: when an NPC responds in-game, the Companion instantly analyzes it and drafts your reply"
-				@click="autoReact = !autoReact"
-			>
-				<font-awesome-icon :icon="['fas', autoReact ? 'bolt' : 'bolt']" class="me-1" />
-				Auto
-			</button>
-			<button
 				v-if="contextNpc"
 				class="btn btn-sm btn-info mini-generate"
+				:class="{ 'has-update': hasUpdate }"
 				:disabled="isStreaming"
-				:title="generateTitle"
-				@click="generateResponse"
+				:title="npcRespondedTitle"
+				@click="onNpcResponded"
 			>
 				<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
-				{{ generateLabel }}
+				NPC Responded!
 			</button>
 			<span v-if="isStreaming" class="mini-thinking">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-1" />
@@ -49,22 +41,21 @@
 
 		<div ref="msgsRef" class="mini-chat-messages">
 			<div v-if="visibleMessages.length === 0 && !isStreaming" class="mini-empty">
-				<p>Ask the Companion for help with your roleplay — or use the quick chips below.</p>
+				<p>Chat with the Companion normally — or switch on an add-on below for roleplay help.</p>
 			</div>
 			<div v-for="(msg, i) in visibleMessages" :key="i" class="mini-msg" :class="msg.role">
 				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}</div>
-				<div class="mini-content">{{ msg.content }}</div>
-			</div>
-			<div v-if="isStreaming" class="mini-msg assistant">
-				<div class="mini-role">Companion</div>
 				<div class="mini-content">
-					<div class="typing-indicator"><span></span><span></span><span></span></div>
+					<!-- Single bubble: typing dots live INSIDE the streaming message (a standalone second bubble used to appear alongside it) -->
+					<span v-if="msg.role === 'assistant' && msg.streaming && !msg.content" class="typing-indicator"><span></span><span></span><span></span></span>
+					<template v-else>{{ msg.content }}</template>
 				</div>
 			</div>
 		</div>
 
 		<!-- Persistent quick actions (often-used prompts) -->
 		<div v-if="contextNpc" class="mini-quick-row">
+			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickWrite">✍️ Write reply</button>
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('Analyze the mood of everyone here and what it means for me')">🧠 Mood</button>
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('Give me 3 distinct response options with a one-line summary each')">💡 3 options</button>
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('Summarize the scene so far in 3-4 sentences')">📜 Scene summary</button>
@@ -72,13 +63,15 @@
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('What is this NPC likely to do or say next, and why?')">🔮 Predict</button>
 		</div>
 
-		<div class="mini-modes">
+		<!-- Add-ons: optional roleplay behavior on top of normal chat. Nothing highlighted = plain conversation. -->
+		<div class="mini-modes" title="Add-ons — none active = normal chat. Click to toggle on, click again to turn off">
+			<span class="mini-modes-label">Add-ons</span>
 			<button
-				v-for="m in modes"
+				v-for="m in addOns"
 				:key="m.id"
 				class="mini-mode-chip"
-				:class="{ active: mode === m.id }"
-				@click="mode = m.id"
+				:class="{ active: addOn === m.id }"
+				@click="toggleAddOn(m.id)"
 				:title="m.hint"
 			>
 				<font-awesome-icon :icon="['fas', m.icon]" class="me-1" />
@@ -95,22 +88,6 @@
 				@keyup.enter="send"
 				:disabled="isStreaming"
 			/>
-			<div class="mini-len-wrap" title="Response length — Dynamic lets the Companion pick per moment; hard cap 2048 (in-game text input limit)">
-				<label class="mini-dyn-label">
-					<input v-model="dynamicLength" type="checkbox" class="me-1" />
-					Dynamic
-				</label>
-				<input
-					v-model.number="minResponseLength"
-					type="number"
-					class="form-control form-control-sm mini-len-input"
-					min="0"
-					max="2048"
-					step="50"
-					:disabled="isStreaming || dynamicLength"
-				/>
-				<span class="mini-len-label">min&nbsp;len</span>
-			</div>
 			<button v-if="isStreaming" class="btn btn-sm btn-danger" title="Stop" @click="stopStreaming">
 				<font-awesome-icon :icon="['fas', 'stop']" />
 			</button>
@@ -122,79 +99,105 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
-import { useChatHistory } from '@/composables/ai/useChatHistory'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { useChatStreaming } from '@/composables/ai/useChatStreaming'
-import { bannerlordAPI } from '@/services/api'
+import { aiAPI, bannerlordAPI } from '@/services/api'
 
 const props = defineProps({
 	// When set, the Companion is told which NPC conversation is open
 	contextNpc: { type: Object, default: null },
 	// Full roster — enables linking additional NPCs into group scenes
 	availableNpcs: { type: Array, default: () => [] },
-	// Parent bumps this when the NPC posts a new in-game response
-	autoReactKey: { type: Number, default: 0 },
+	// True when the newest in-game dialogue entry is the NPC's — lights up the
+	// "NPC Responded!" button. Nothing fires automatically; Brix clicks it.
+	npcResponded: { type: Boolean, default: false },
 })
 
-const { chatHistory, pushMessage } = useChatHistory()
+// The mini-chat keeps its OWN history ref (rpHistory) rather than the shared
+// singleton from useChatHistory, so RP chats and the main companion chat never
+// share a timeline. Persisted to the backend 'rp' thread — see loadRpHistory.
+const rpHistory = ref([])
+const pushMessage = (msg) => {
+	rpHistory.value.push(msg)
+	return msg
+}
 const { isStreaming, streamMessage, stopStreaming } = useChatStreaming()
+
+// Load the persisted RP thread from the backend on mount.
+const loadRpHistory = async () => {
+	try {
+		const res = await aiAPI.getRpHistory(100)
+		if (res?.data?.length) {
+			rpHistory.value = res.data.map((m) => ({
+				role: m.role,
+				content: m.content,
+				timestamp: new Date(m.created_at),
+				source: m.role !== 'user' ? m.source : undefined,
+				toolSteps: m.tool_steps ? JSON.parse(m.tool_steps) : undefined,
+			}))
+		}
+	} catch { /* backend down / no history yet — start empty */ }
+}
+
+onMounted(() => {
+	loadRpHistory()
+})
 
 const input = ref('')
 const msgsRef = ref(null)
 
-// ── Companion modes ──
-const modes = [
-	{ id: 'write', label: 'Write', icon: 'pen', hint: 'Generate the next in-game response' },
-	{ id: 'improve', label: 'Improve', icon: 'magic', hint: 'Improve a draft Brix wrote himself + feedback' },
-	{ id: 'ooc', label: 'OOC', icon: 'comment-dots', help: true, hint: 'Help write an OOC (out-of-character) message' },
-	{ id: 'plan', label: 'Plan', icon: 'route', hint: 'Plan a scene or scenario with this NPC' },
+// ── Add-ons: optional roleplay behavior layered on NORMAL CHAT ──
+// '' (no add-on) = plain conversation — no RP framing, no character limits.
+// NOTE: there is deliberately NO "Write" add-on. Writing the next in-game
+// response is the DEFAULT the Companion does when you just ask for it in plain
+// chat — it shouldn't need a toggle. These add-ons are extra behaviors only.
+const addOns = [
+	{ id: 'improve', label: 'Improve', icon: 'magic', hint: 'Add-on: improve a draft Brix wrote himself + feedback' },
+	{ id: 'ooc', label: 'OOC', icon: 'comment-dots', hint: 'Add-on: help write an OOC (out-of-character) message' },
+	{ id: 'plan', label: 'Plan', icon: 'route', hint: 'Add-on: plan a scene or scenario with this NPC' },
 ]
-const mode = ref(localStorage.getItem('rp_companion_mode') || 'write')
-watch(mode, (v) => localStorage.setItem('rp_companion_mode', v))
+// Fresh key (old 'rp_companion_mode' is intentionally not migrated) so the
+// first launch after this change lands in normal chat. Unknown stored values
+// (e.g. a stale 'write' from before that add-on was removed) are dropped.
+const VALID_ADDONS = addOns.map((m) => m.id)
+const savedAddOn = localStorage.getItem('rp_companion_addon') || ''
+const addOn = ref(VALID_ADDONS.includes(savedAddOn) ? savedAddOn : '')
+watch(addOn, (v) => localStorage.setItem('rp_companion_addon', v))
+
+const toggleAddOn = (id) => {
+	addOn.value = addOn.value === id ? '' : id
+}
 
 const modePlaceholder = computed(() => {
 	const npcName = props.contextNpc?.name || 'the NPC'
-	switch (mode.value) {
+	switch (addOn.value) {
 		case 'improve': return 'Paste your draft response here...'
 		case 'ooc': return 'What do you want to say OOC?'
 		case 'plan': return 'Describe the scene direction you want...'
-		default: return props.contextNpc ? `Ask about ${npcName} or request a response...` : 'Ask the Companion...'
+		default: return props.contextNpc ? `Ask ${npcName} anything, or just request your next response...` : 'Chat with the Companion...'
 	}
 })
 
-const generateLabel = computed(() => {
-	switch (mode.value) {
-		case 'improve': return 'Improve draft'
-		case 'ooc': return 'Draft OOC'
-		case 'plan': return 'Plan scene'
-		default: return 'Generate response'
-	}
-})
-
-const generateTitle = computed(() => {
-	switch (mode.value) {
-		case 'improve': return 'Improve the draft in the input and give feedback'
-		case 'ooc': return 'Draft an OOC message based on the input'
-		case 'plan': return 'Plan the next scene/scenario with this NPC'
-		default: return 'Generate your next in-game response from the current dialogue'
-	}
-})
-
-// Minimum response length (chars) - persisted across sessions
-const minResponseLength = ref(parseInt(localStorage.getItem('rp_min_response_length') || '400', 10))
-watch(minResponseLength, (v) => {
-	localStorage.setItem('rp_min_response_length', String(Math.min(v || 0, 2048)))
-})
-
-// Dynamic length: the Companion picks a natural length per moment.
-// Hard cap of 2048 chars — the in-game text input limit.
+// Response length: DYNAMIC only (min-len input + toggle were removed). The
+// Companion picks a natural length per moment, but we give it an explicit
+// TARGET so it doesn't default to ~400-char stubs. Hard cap = 2048 chars (the
+// in-game text input limit) — scoped to in-game Bannerlord responses only
+// (see buildContextBlock).
 const MAX_RESPONSE_LENGTH = 2048
-const dynamicLength = ref(localStorage.getItem('rp_length_dynamic') !== '0')
-watch(dynamicLength, (v) => localStorage.setItem('rp_length_dynamic', v ? '1' : '0'))
+const TARGET_RESPONSE_LENGTH = 1800
 
-// Auto-react: instantly analyze + draft a reply when an NPC responds in-game
-const autoReact = ref(localStorage.getItem('rp_auto_react') !== '0')
-watch(autoReact, (v) => localStorage.setItem('rp_auto_react', v ? '1' : '0'))
+// ── Manual NPC-responded trigger (replaced auto-react) ──
+// Auto-react used to fire on EVERY file change; now nothing runs on its own.
+const reacted = ref(false)
+watch(() => props.npcResponded, (v) => { if (!v) reacted.value = false })
+watch(() => props.contextNpc?.file_path, () => { reacted.value = false })
+
+const hasUpdate = computed(() => props.npcResponded && !reacted.value)
+
+const npcRespondedTitle = computed(() => {
+	if (hasUpdate.value) return 'The NPC just answered in-game — analyze their reply and draft your reply (manual: nothing runs automatically)'
+	return 'Analyze the current conversation and draft your reply (manual trigger)'
+})
 
 // ── Linked NPCs (group scenes) ──
 const linkedNpcs = ref([])
@@ -254,19 +257,22 @@ watch(
 // Supports multiple linked NPCs (group scenes): one section per NPC.
 const buildContextBlock = (opts = {}) => {
 	if (allNpcs.value.length === 0) return ''
-	const frameMode = opts.mode || mode.value
+	const frameMode = opts.mode || addOn.value
+	// No add-on (or explicit 'chat') = normal conversation: context is provided
+	// but no RP output rules, no RP rules block, no character cap.
+	const isChat = !frameMode || frameMode === 'chat'
 	const primaryCtx = npcContexts.value[allNpcs.value[0].file_path] || null
 	const lines = []
 	const campaign = primaryCtx?.campaign_id || 'current'
 	lines.push(`[ROLEPLAY CONTEXT — Bannerlord AIInfluence campaign ${campaign}]`)
 
-	// Mode-specific framing
+	// Framing per add-on — '' (no add-on) = normal chat
 	switch (frameMode) {
 		case 'autoreact':
 			lines.push(`Brix plays Emil. ${opts.autoReactNpc || 'An NPC'} just responded in-game (the newest dialogue entry). Do TWO things: (1) give quick FEEDBACK on their response — 2-3 sentences on tone, subtext, and what they really want (2-4 bullets); (2) then draft Brix's NEXT REPLY in the RP style — *asterisks for actions/thoughts*, "quotes" for speech, no preamble.`)
 			break
 		case 'improve':
-			lines.push(`Brix plays Emil. He wrote a response HIMSELF (his text follows the request marker). IMPROVE it: keep his intent, voice, and plot beats — fix flow, grammar, and adherence to the campaign RP rules below. Output in TWO parts: (1) the improved version ONLY — no preamble — using *asterisks for actions/thoughts* and "quotes" for speech; (2) a line '---' then 2-4 short feedback bullets on what you changed and why.`)
+			lines.push(`Brix plays Emil. He wrote a response HIMSELF (his latest message below is the draft). IMPROVE it: keep his intent, voice, and plot beats — fix flow, grammar, and adherence to the campaign RP rules below. Output in TWO parts: (1) the improved version ONLY — no preamble — using *asterisks for actions/thoughts* and "quotes" for speech; (2) a line '---' then 2-4 short feedback bullets on what you changed and why.`)
 			break
 		case 'ooc':
 			lines.push(`Brix plays Emil. He wants to send an OOC (out-of-character) message to the game's AI per the campaign's OOC protocol (see rules below). Help him write it clearly and completely. Output ONLY the final OOC message text, formatted as [OOC: ...] — no preamble, no explanation.`)
@@ -275,21 +281,31 @@ const buildContextBlock = (opts = {}) => {
 			lines.push(`Brix plays Emil. He wants to PLAN the next scene/scenario with the NPC(s) below. Based ONLY on the conversation(s) so far and the campaign rules, propose 2-3 distinct scene directions with brief beats for each, then recommend one. Be concrete about what could happen moment to moment. Output the plan only — no preamble.`)
 			break
 		default:
-			lines.push(`Brix plays Emil. Help him write his NEXT IN-GAME RESPONSE to the NPC(s) below, as a direct continuation of the conversation(s). Follow the campaign RP rules (below). Output ONLY the response text — no preamble, no explanation, no markdown, no quotes around it. Use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples.`)
+			// Normal chat — no add-on active. This is the DEFAULT, and it does
+			// double duty: casual conversation AND (when Brix asks) drafting the
+			// next in-game response. No toggle needed for writing.
+			lines.push(`Brix plays Emil. You are chatting with him about the NPC(s) below. Answer conversationally. If he ASKS you to write/draft his next in-game response (or anything to paste into the game), switch into the RP style for that piece: use *asterisks for actions and inner thoughts* and "quotes" for speech, exactly like the dialogue examples, no preamble — but keep chatting normally around it.`)
+			break
 	}
 
 	lines.push(`FACTS: The conversation(s) below are the ONLY source of what has been said and what the NPC(s) know or have heard. Do NOT invent or reference backstory, rumors, personality traits, or world facts. Nothing exists except what is in the dialogue and the mechanical states below.`)
 
-	// Length: Dynamic = Companion picks per moment; Fixed = at least N chars.
-	// Hard cap 2048 — the in-game text input limit.
-	if (dynamicLength.value) {
-		lines.push(`LENGTH: choose a natural length for the moment — reactions-heavy scenes longer, quick exchanges shorter. NEVER exceed ${MAX_RESPONSE_LENGTH} characters (in-game text input limit). No padding, no room descriptions.`)
-	} else if (minResponseLength.value > 0) {
-		const n = Math.min(minResponseLength.value, MAX_RESPONSE_LENGTH)
-		lines.push(`LENGTH: at least ${n} characters, NEVER more than ${MAX_RESPONSE_LENGTH} (in-game text input limit). Fill naturally with reactions, inner thoughts, small physical details, and dialogue. No padding, no room descriptions.`)
+	// Length — DYNAMIC only (min-len input + toggle were removed), but with an
+	// explicit TARGET so the Companion doesn't default to ~400 chars. Game input
+	// limit is 2048: the companion's MESSAGE to Brix is always uncapped; only
+	// each individual piece of in-game text is capped.
+	if (!isChat && ['improve', 'autoreact', 'ooc'].includes(frameMode)) {
+		lines.push(`LENGTH: your reply to Brix is NOT limited as a whole — explain, give feedback, and draft freely. But EVERY individual piece of in-game text he will paste into the game (each drafted response, each OOC message) must aim for ${TARGET_RESPONSE_LENGTH} characters and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. If you draft several options or responses for multiple NPCs, apply that to EACH. Rich, detailed, immersive responses — no padding, but never skimp either.`)
+	} else if (isChat) {
+		// In plain chat the Companion may still be asked to draft a response —
+		// give it the same target so a "write my next response" ask doesn't come
+		// back as a stunted 400-char stub.
+		lines.push(`LENGTH: any in-game response or OOC text you draft for Brix (even in plain chat) must aim for ${TARGET_RESPONSE_LENGTH} characters and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. Your casual chat replies themselves have no length limit. Rich, detailed, immersive responses — never skimp.`)
 	}
 
-	if (primaryCtx?.rp_rules) {
+	// RP rules govern IN-GAME responses — excluded from normal chat so casual
+	// conversation is never constrained by response formatting rules.
+	if (primaryCtx?.rp_rules && !isChat) {
 		lines.push(`\n## RP Rules (highest priority)\n${primaryCtx.rp_rules}`)
 	}
 	if (primaryCtx?.player_description) {
@@ -320,7 +336,7 @@ const buildContextBlock = (opts = {}) => {
 // Last 20 messages, filtering out the app's default welcome message
 // (not relevant in the RP panel - *asterisks preserved as plain text*)
 const visibleMessages = computed(() =>
-	chatHistory.value
+	rpHistory.value
 		.filter((m) => !(m.role === 'assistant' && m.content.startsWith("# \ud83d\udc4b Hello! I'm your AI Companion")))
 		.slice(-20)
 )
@@ -348,8 +364,9 @@ const send = async () => {
 	await sendMessageWithHistory(text, contextEntry)
 }
 
-// Shared send path — also used by auto-react with a prebuilt context block.
-// The auto-react user message is a synthetic instruction, not typed by Brix.
+// Shared send path — also used by the manual "NPC Responded!" trigger with a
+// prebuilt context block. The user message is a synthetic instruction, not
+// typed by Brix.
 const sendWithSystemContext = async (contextBlock, userText) => {
 	if (isStreaming.value) return
 	const contextEntry = contextBlock ? { role: 'system', content: contextBlock } : null
@@ -362,34 +379,34 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 
 	const historyPayload = [
 		...(contextEntry ? [contextEntry] : []),
-		...chatHistory.value
+		...rpHistory.value
 			.filter((m) => m.role === 'user' || m.role === 'assistant')
 			.slice(-14)
 			.map((m) => ({ role: m.role, content: m.content })),
 	]
 
-	const msgIndex = chatHistory.value.length
+	const msgIndex = rpHistory.value.length
 	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true })
 	await scrollDown()
 
 	streamMessage(text, historyPayload, {
 		onTextChunk: (chunk) => {
-			chatHistory.value[msgIndex].content += chunk
+			rpHistory.value[msgIndex].content += chunk
 			scrollDown()
 		},
 		onDone: () => {
-			chatHistory.value[msgIndex].streaming = false
+			rpHistory.value[msgIndex].streaming = false
 		},
 		onError: (error) => {
 			if (error.name === 'AbortError') {
-				const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+				const lastMsg = rpHistory.value[rpHistory.value.length - 1]
 				if (lastMsg?.streaming) {
 					lastMsg.streaming = false
-					if (lastMsg.content.length === 0) chatHistory.value.splice(-1, 1)
+					if (lastMsg.content.length === 0) rpHistory.value.splice(-1, 1)
 				}
 				return
 			}
-			const lastMsg = chatHistory.value[chatHistory.value.length - 1]
+			const lastMsg = rpHistory.value[rpHistory.value.length - 1]
 			if (lastMsg?.streaming) lastMsg.streaming = false
 			if (lastMsg?.content && lastMsg.content.length > 0) {
 				lastMsg.content += '\n\n⚠️ *Stream interrupted*'
@@ -402,7 +419,7 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 				})
 			}
 		},
-	})
+	}, { scope: 'rp' }) // persist to the RP thread, not the main companion chat
 }
 
 const quickAction = (text) => {
@@ -410,38 +427,22 @@ const quickAction = (text) => {
 	send()
 }
 
-const generateResponse = () => {
-	switch (mode.value) {
-		case 'improve':
-			if (input.value.trim()) quickAction('Improve my draft: ' + input.value.trim())
-			else input.value = '' // focus input — needs a draft
-			break
-		case 'ooc':
-			if (input.value.trim()) quickAction('Draft this OOC message: ' + input.value.trim())
-			else input.value = ''
-			break
-		case 'plan':
-			quickAction('Help me plan the next scene')
-			break
-		default:
-			quickAction('Write my next in-game response')
-	}
+// Writing is the DEFAULT behavior now — no add-on toggle needed. The default
+// chat framing already tells the Companion to switch into RP style when Brix
+// asks for something to paste into the game.
+const quickWrite = () => {
+	quickAction('Write my next in-game response')
 }
 
-// ── Auto-react: NPC responded in-game → instant feedback + reply draft ──
-watch(
-	() => props.autoReactKey,
-	(newKey, oldKey) => {
-		if (!newKey || newKey <= (oldKey || 0)) return
-		if (!autoReact.value || isStreaming.value || !props.contextNpc) return
-		// Let the freshly reloaded dialogue + context cache settle first
-		setTimeout(() => {
-			if (isStreaming.value) return
-			const block = buildContextBlock({ mode: 'autoreact', autoReactNpc: props.contextNpc.name })
-			sendWithSystemContext(block, 'Analyze their response and draft my reply')
-		}, 600)
-	}
-)
+// ── Manual trigger: Brix clicks "NPC Responded!" ──
+// Replaces auto-react: file changes no longer make the Companion act on their
+// own — the dialogue view refreshes live, and Brix decides when to analyze.
+const onNpcResponded = () => {
+	if (!props.contextNpc || isStreaming.value) return
+	reacted.value = true
+	const block = buildContextBlock({ mode: 'autoreact', autoReactNpc: props.contextNpc.name })
+	sendWithSystemContext(block, 'Analyze their response and draft my reply')
+}
 </script>
 
 <style scoped>
@@ -516,24 +517,6 @@ watch(
 	color: #fff;
 }
 
-.mini-auto-toggle {
-	background: rgba(0, 0, 0, 0.3);
-	border: 1px solid rgba(255, 255, 255, 0.2);
-	color: rgba(255, 255, 255, 0.5);
-	border-radius: 10px;
-	font-size: 0.7rem;
-	font-weight: 700;
-	padding: 0.15rem 0.5rem;
-	cursor: pointer;
-	transition: all 0.15s ease;
-}
-
-.mini-auto-toggle.on {
-	background: rgba(40, 167, 69, 0.15);
-	border-color: rgba(40, 167, 69, 0.5);
-	color: #7ee2a8;
-}
-
 .mini-thinking {
 	font-size: 0.72rem;
 	font-weight: 400;
@@ -556,6 +539,19 @@ watch(
 
 .mini-generate:disabled {
 	opacity: 0.5;
+}
+
+/* New NPC dialogue entry waiting — pulse until clicked or superseded */
+.mini-generate.has-update {
+	background: rgba(40, 167, 69, 0.22);
+	border-color: #28a745;
+	color: #7ee2a8;
+	animation: mini-npc-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes mini-npc-pulse {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.45); }
+	50% { box-shadow: 0 0 0 5px rgba(40, 167, 69, 0); }
 }
 
 .mini-chat-messages {
@@ -673,27 +669,6 @@ watch(
 	color: rgba(255, 255, 255, 0.35);
 }
 
-.mini-len-wrap {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	flex-shrink: 0;
-}
-
-.mini-len-input {
-	width: 74px;
-	text-align: center;
-	font-size: 0.75rem;
-}
-
-.mini-len-label {
-	font-size: 0.55rem;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	color: rgba(255, 255, 255, 0.4);
-	margin-top: 1px;
-}
-
 /* Mode chips */
 .mini-quick-row {
 	display: flex;
@@ -724,28 +699,25 @@ watch(
 	cursor: default;
 }
 
-.mini-dyn-label {
-	font-size: 0.6rem;
-	color: rgba(255, 255, 255, 0.55);
-	display: flex;
-	align-items: center;
-	white-space: nowrap;
-	margin: 0;
-	cursor: pointer;
-}
-
-.mini-dyn-label input {
-	cursor: pointer;
-}
-
 .mini-modes {
 	display: flex;
 	gap: 0.3rem;
 	padding: 0.45rem 0.6rem 0;
+	flex-wrap: wrap;
+	align-items: center;
+}
+
+.mini-modes-label {
+	font-size: 0.58rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: rgba(255, 255, 255, 0.35);
+	flex-shrink: 0;
 }
 
 .mini-mode-chip {
-	flex: 1;
+	flex: 1 1 auto;
 	background: rgba(0, 0, 0, 0.25);
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	color: rgba(255, 255, 255, 0.6);
