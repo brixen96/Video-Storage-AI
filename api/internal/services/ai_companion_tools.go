@@ -40,6 +40,7 @@ func (s *AICompanionService) buildToolRegistry() {
 	s.registerUniversalScraperTools()
 	s.registerTaskTools()
 	s.registerAgencyTools()
+	s.registerBrowserTools()
 }
 
 // getLMToolDefinitions returns all registered tool definitions, sorted by name

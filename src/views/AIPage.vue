@@ -48,6 +48,13 @@
 					Bannerlord
 				</button>
 			</li>
+			<li class="nav-item">
+				<button class="nav-link" :class="{ active: activeTab === 'browser' }" @click="activeTab = 'browser'">
+					<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
+					Browser
+					<span class="status-dot ms-2" :class="browserConnected ? 'bg-success' : 'bg-danger'"></span>
+				</button>
+			</li>
 			</ul>
 
 			<!-- Companion Tab -->
@@ -539,6 +546,68 @@
 			<div v-if="activeTab === 'bannerlord'">
 				<BannerlordPanel @journal="handleBannerlordJournal" />
 			</div>
+
+			<!-- Browser Tab (Firefox bridge live view) -->
+			<div v-if="activeTab === 'browser'" class="browser-tab">
+				<div class="row g-4">
+					<div class="col-12">
+						<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+							<div>
+								<h5 class="mb-1">
+									<font-awesome-icon :icon="['fas', 'globe']" class="me-2" />
+									Firefox Bridge
+								</h5>
+								<small class="text-muted">What the Companion sees in your real browser - current page, downloads, history, bookmarks</small>
+							</div>
+							<div class="d-flex align-items-center gap-2">
+								<span class="badge" :class="browserConnected ? 'bg-success' : 'bg-secondary'">
+									{{ browserConnected ? 'Extension connected' : 'Extension offline' }}
+								</span>
+								<button class="btn btn-sm btn-outline-primary" :disabled="!browserConnected || browserCapturing" @click="captureBrowserFrame">
+									{{ browserCapturing ? 'Capturing...' : 'Refresh' }}
+								</button>
+							</div>
+						</div>
+					</div>
+
+					<div class="col-lg-8">
+						<div class="card">
+							<div class="card-body p-2">
+								<div v-if="browserFrame" class="text-center">
+									<img :src="browserFrame" class="img-fluid rounded border" style="max-height: 70vh;" alt="Live view of the active Firefox tab" />
+									<div class="small text-muted mt-1">Captured {{ browserFrameAt }}</div>
+								</div>
+								<div v-else class="text-center text-muted py-5">
+									<p class="mb-1">No screenshot yet.</p>
+									<p class="mb-0 small">
+										{{ browserConnected ? 'Waiting for the first capture...' : 'Enable the VideoStorageAI Companion Bridge extension in Firefox (about:addons) and make sure the API is running.' }}
+									</p>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div class="col-lg-4">
+						<div class="card mb-3">
+							<div class="card-body py-2 px-3">
+								<div class="small text-muted">Active page</div>
+								<div class="fw-bold text-truncate" :title="browserActiveTab?.title">{{ browserActiveTab?.title || '-' }}</div>
+								<div class="small text-truncate text-primary" :title="browserActiveTab?.url">{{ browserActiveTab?.url || 'no page yet' }}</div>
+							</div>
+						</div>
+						<div class="card">
+							<div class="card-header py-2">Open tabs ({{ browserTabs.length }})</div>
+							<div class="list-group list-group-flush" style="max-height: 40vh; overflow-y: auto;">
+								<div v-for="t in browserTabs" :key="t.tab_id" class="list-group-item py-2">
+									<div class="small fw-bold text-truncate" :class="{ 'text-primary': t.active }" :title="t.title">{{ t.title || '(untitled)' }}</div>
+									<div class="small text-muted text-truncate" :title="t.url">{{ t.url }}</div>
+								</div>
+								<div v-if="!browserTabs.length" class="list-group-item text-muted small">No tab info yet.</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
@@ -566,12 +635,36 @@ import BannerlordPanel from '@/components/BannerlordPanel.vue'
 // Shared composables — same state as the floating widget
 import { useChatHistory } from '@/composables/ai/useChatHistory'
 import { useChatStreaming } from '@/composables/ai/useChatStreaming'
+import { useBrowserView } from '@/composables/ai/useBrowserView'
 
 const { chatHistory, pushMessage, clearHistory, loadHistory } = useChatHistory()
 const { isStreaming, streamMessage, stopStreaming, toolLabel } = useChatStreaming()
 
 // Tab state
 const activeTab = ref('companion')
+
+// Firefox bridge live view (Browser tab) - shares the websocket browser_state stream
+const {
+	connected: browserConnected,
+	activeTab: browserActiveTab,
+	tabs: browserTabs,
+	frameUrl: browserFrame,
+	frameAt: browserFrameAt,
+	capturing: browserCapturing,
+	loadStatus: loadBrowserStatus,
+	capture: captureBrowserFrame,
+	startLive: startBrowserLive,
+	stopLive: stopBrowserLive,
+} = useBrowserView()
+
+watch(activeTab, (tab) => {
+	if (tab === 'browser') {
+		loadBrowserStatus()
+		startBrowserLive()
+	} else {
+		stopBrowserLive()
+	}
+})
 
 // Companion state
 const companionOnline = ref(false)

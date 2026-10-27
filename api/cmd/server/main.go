@@ -155,6 +155,7 @@ func (p *apiProgram) run() {
 	hub := api.InitWebSocket()
 	services.SetWebSocketHub(hub)
 	services.SetNotificationWebSocketHub(hub)
+	services.SetBrowserHub(hub)
 
 	// Initialize AI Companion Service
 	log.Println("Initializing AI Companion...")

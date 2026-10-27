@@ -197,6 +197,13 @@ export const databaseAPI = {
 	restore: (backupPath) => api.post('/database/restore', { backup_path: backupPath }),
 }
 
+export const browserAPI = {
+	// Firefox extension bridge (live view of what the Companion sees)
+	getStatus: () => api.get('/browser/status'),
+	getScreenshot: () => api.get('/browser/screenshot'),
+	captureScreenshot: () => api.post('/browser/screenshot'),
+}
+
 export const aiAPI = {
 	// Performer linking
 	linkPerformers: (data) => api.post('/ai/link-performers', data),

@@ -617,6 +617,12 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 
 		// WebSocket endpoint
 		v1.GET("/ws", handleWebSocket)
+
+		// Firefox extension bridge (browser visibility for the AI Companion)
+		v1.GET("/browser/ws", handleBrowserWS)
+		v1.GET("/browser/status", getBrowserStatus)
+		v1.GET("/browser/screenshot", getBrowserScreenshot)
+		v1.POST("/browser/screenshot", captureBrowserScreenshot)
 	}
 
 	// Serve frontend static files from dist folder (production build)

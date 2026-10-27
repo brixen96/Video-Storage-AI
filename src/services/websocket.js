@@ -91,6 +91,9 @@ class WebSocketService {
 			case 'feed_update':
 				this.notifyListeners('feed_update', data)
 				break
+			case 'browser_state':
+				this.notifyListeners('browser_state', data)
+				break
 			default:
 				// Silently ignore unknown message types
 		}

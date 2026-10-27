@@ -134,6 +134,18 @@ func (h *Hub) BroadcastCompanionEvent(eventType, source, message, severity strin
 	}
 }
 
+// BroadcastBrowserState broadcasts the live Firefox bridge state (connection, active tab, open tabs) to all clients.
+func (h *Hub) BroadcastBrowserState(state interface{}) {
+	wrapper := map[string]interface{}{
+		"type": "browser_state",
+		"data": state,
+	}
+	msg, err := json.Marshal(wrapper)
+	if err == nil {
+		h.Broadcast(msg)
+	}
+}
+
 // BroadcastLinkVerificationComplete broadcasts a link verification completion event.
 func (h *Hub) BroadcastLinkVerificationComplete(threadID int64, active, dead, expired, total int) {
 	wrapper := map[string]interface{}{
