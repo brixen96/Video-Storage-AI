@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VideoStorageAI Companion Bridge",
   "version": "1.0.0",
-  "description": "Lets your VideoStorageAI Companion see and work with your browsing: current page, downloads, history and bookmarks. All data goes only to your own local backend (localhost:8080).",
+  "description": "Lets your VideoStorageAI Companion see and work with your browsing: current page, downloads, history and bookmarks. All data goes only to your own local backend (127.0.0.1:8080).",
   "permissions": [
     "tabs",
     "storage",

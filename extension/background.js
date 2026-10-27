@@ -2,7 +2,10 @@
 // Holds a WebSocket to the local backend, reports tab state, answers
 // commands (screenshot, snapshot, navigation, downloads, history, bookmarks).
 
-const DEFAULT_BRIDGE_URL = "ws://localhost:8080/api/v1/browser/ws";
+// 127.0.0.1 NOT localhost: the API binds IPv4 loopback only, and Firefox resolves
+// "localhost" to ::1 first for WebSocket attempts - which is refused silently
+// (no server-side log either). IPv4 literal sidesteps the whole family question.
+const DEFAULT_BRIDGE_URL = "ws://127.0.0.1:8080/api/v1/browser/ws";
 const RECONNECT_BASE_MS = 2000;
 const RECONNECT_MAX_MS = 30000;
 
@@ -56,6 +59,7 @@ function connect() {
 
   ws.onopen = () => {
     reconnectDelay = RECONNECT_BASE_MS;
+    console.log("[vsai] bridge connected to " + bridgeUrl);
     send({
       type: "hello",
       data: {
@@ -80,6 +84,7 @@ function connect() {
   };
 
   ws.onerror = () => {
+    console.warn("[vsai] bridge error on " + bridgeUrl);
     try {
       ws.close();
     } catch (e) {
@@ -87,7 +92,8 @@ function connect() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
+    console.warn("[vsai] bridge closed (code " + (event && event.code) + ") - reconnecting");
     ws = null;
     scheduleReconnect();
   };

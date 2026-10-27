@@ -79,6 +79,12 @@ account changes unless explicitly told, `submit=true` only when asked.
 
 ## Gotchas (learned the hard way)
 
+- **Use `127.0.0.1`, NEVER `localhost`, in the bridge URL.** The API binds
+  `127.0.0.1:8080` (IPv4 loopback only); `localhost` resolves to `::1` first,
+  so WS attempts hit v6 → connection refused → *zero server-side logs* and a
+  permanently `connected:false` status. Browsers/axios keep working (they race
+  both families), which makes the bug look extension-specific. Symptom signature:
+  `/browser/status` fine, but no `GET /browser/ws` line ever appears in logs.
 - **Firefox MV3 background is an event page**, not a service worker: use
   `"background": {"scripts": [...]}`. It suspends → `browser.alarms` (0.5min)
   reconnects; backend replays recent pending commands on reconnect.
