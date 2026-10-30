@@ -117,10 +117,22 @@ async function handleCommand(id, action, args) {
 }
 
 async function getActiveTab() {
-  let tabs = await browser.tabs.query({ active: true, windowType: "normal" });
-  if (!tabs || tabs.length === 0) {
-    tabs = await browser.tabs.query({ active: true });
+  // Multi-monitor/multi-window: tabs.query({active:true}) matches EVERY normal
+  // window, and the first hit may be a window on another monitor. Anchor to the
+  // most recently focused window - the one Brix is actually working in.
+  try {
+    const win = await browser.windows.getLastFocused({
+      populate: true,
+      windowTypes: ["normal"],
+    });
+    if (win && win.tabs) {
+      const tab = win.tabs.find((t) => t.active);
+      if (tab) return tab;
+    }
+  } catch (e) {
+    // fall through to the plain query
   }
+  const tabs = await browser.tabs.query({ active: true, windowType: "normal" });
   if (!tabs || tabs.length === 0) {
     throw new Error("No active Firefox tab");
   }
@@ -285,6 +297,15 @@ function pushTabState() {
     tabStateTimer = null;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     try {
+      // Only the focused window's tab counts as "active" - other windows have
+      // their own active tabs and would otherwise race for the slot.
+      let focusedWindowId = null;
+      try {
+        const w = await browser.windows.getLastFocused({ windowTypes: ["normal"] });
+        if (w) focusedWindowId = w.id;
+      } catch (e) {
+        // keep null - fall back to marking all active tabs
+      }
       const tabs = await browser.tabs.query({});
       const infos = tabs
         .filter((t) => t.id !== undefined)
@@ -293,7 +314,7 @@ function pushTabState() {
           url: t.url || "",
           title: t.title || "",
           fav_icon: t.favIconUrl || "",
-          active: !!t.active,
+          active: !!t.active && (focusedWindowId === null || t.windowId === focusedWindowId),
         }));
       const active = infos.find((i) => i.active) || null;
       send({ type: "tab_state", data: { tabs: infos, active } });

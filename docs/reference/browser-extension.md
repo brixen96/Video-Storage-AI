@@ -106,6 +106,10 @@ account changes unless explicitly told, `submit=true` only when asked.
 - **`captureVisibleTab`** only captures the *active* tab of a window and fails
   on privileged pages (`about:*`, `moz-extension:`) — errors surface as friendly
   tool messages, last good frame is kept.
+- **Multi-monitor/multi-window**: `tabs.query({active:true})` matches every
+  normal window (first hit may be on another monitor) — always anchor to
+  `windows.getLastFocused({populate:true, windowTypes:["normal"]})` for both
+  capture target and the reported `active` tab.
 - **Selectors go stale after navigation** — tool descriptions force
   `browser_read` before acting.
 - **Content script injection fallback**: pages loaded before install get
