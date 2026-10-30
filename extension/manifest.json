@@ -13,6 +13,9 @@
     "alarms"
   ],
   "host_permissions": ["<all_urls>"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'"
+  },
   "browser_specific_settings": {
     "gecko": {
       "id": "videostorageai-bridge@brixen96",

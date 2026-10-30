@@ -79,6 +79,14 @@ account changes unless explicitly told, `submit=true` only when asked.
 
 ## Gotchas (learned the hard way)
 
+- **Override the default CSP or `ws://` gets force-upgraded to `wss://`.**
+  Firefox MV3's default CSP is `script-src 'self'; upgrade-insecure-requests;`
+  — the latter silently rewrites `ws://127.0.0.1:8080/...` to `wss://...`, our
+  plain-HTTP backend refuses TLS, and the socket dies with **close code 1015**
+  plus console noise `Content-Security-Policy: Upgrading insecure request`.
+  Fix (MDN-documented opt-out): `"content_security_policy":
+  {"extension_pages": "script-src 'self'"}` — a policy that excludes
+  `upgrade-insecure-requests`. Data still only travels to loopback.
 - **Use `127.0.0.1`, NEVER `localhost`, in the bridge URL.** The API binds
   `127.0.0.1:8080` (IPv4 loopback only); `localhost` resolves to `::1` first,
   so WS attempts hit v6 → connection refused → *zero server-side logs* and a
