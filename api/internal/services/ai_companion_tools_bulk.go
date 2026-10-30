@@ -463,7 +463,7 @@ func (s *AICompanionService) registerBatchMoveByPatternTool() {
 	s.registerTool(lmToolDefinition{
 		Type: "function", Function: lmToolFunction{
 			Name:        "batch_move_by_pattern",
-			Description: `Move videos from a source folder into performer-based subfolders automatically. For each video, looks up its performers in the database and places it into 'Performers/<Name>/'. Videos with no performers go to '_Unsorted/'. Processes up to 200 per call. Use dry_run=true first to preview the plan.`,
+			Description: `Move videos from a source folder into performer-based subfolders automatically. For each video, looks up its performers in the database and places it into 'Performers/<Name>/'. Videos with no performers go to '_Unsorted/'. Processes up to 200 per call. Use dry_run=true first — it returns per-video {video_id, title, from, to, confidence} placements plus top_destinations. confidence 1.0 = performer resolved (safe), 0.0 = no performer (would land in _Unsorted). Pass min_confidence=1.0 to move ONLY the sure ones and leave the rest for manual review.`,
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -488,6 +488,10 @@ func (s *AICompanionService) registerBatchMoveByPatternTool() {
 					"dry_run": map[string]interface{}{
 						"type": "boolean", "description": "Simulate only (default: true)",
 					},
+					"min_confidence": map[string]interface{}{
+						"type":        "number",
+						"description": "Only move placements with confidence >= this value (0.0-1.0). Use 1.0 to move ONLY videos with a resolved performer and leave the rest for manual review. Default 0 (move all).",
+					},
 				},
 				"required": []string{"library_name", "source_subfolder"},
 			},
@@ -505,6 +509,8 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 	dryRun := true
 	if v, ok := args["dry_run"].(bool); ok { dryRun = v }
 	if v, ok := args["dry_run"].(string); ok && v == "false" { dryRun = false }
+	minConfidence := 0.0
+	if v, ok := args["min_confidence"].(float64); ok && v > 0 { minConfidence = v }
 	if targetBase == "" { targetBase = "Performers" }
 	if fallbackFolder == "" { fallbackFolder = "_Unsorted" }
 
@@ -550,18 +556,24 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 	s.db.QueryRow("SELECT COUNT(*) FROM videos WHERE library_id = ? AND file_path LIKE ?",
 		libID, "%"+string(filepath.Separator)+srcRel+"%").Scan(&totalCount)
 
-	// Build placement plan
+	// Build placement plan.
+	// JSON tags are MANDATORY here: without them json.Marshal emits NOTHING for
+	// unexported fields — dry-run previews came back as [{},{},...] (empty
+	// objects) while counts survived, which made the AI unable to show
+	// video→destination pairs. Caught from a real chat export 2026-10-30.
 	type placement struct {
-		videoID   int64
-		title     string
-		srcPath   string
-		tgtPath   string
-		performer string
-		status    string
-		error     string
+		VideoID     int64   `json:"video_id"`
+		Title       string  `json:"title"`
+		SrcPath     string  `json:"from"`
+		TgtPath     string  `json:"to"`
+		Performer   string  `json:"performer,omitempty"`
+		Confidence  float64 `json:"confidence"`
+		Status      string  `json:"status,omitempty"`
+		Error       string  `json:"error,omitempty"`
 	}
 	var placements []placement
 	performerCounts := map[string]int{}
+	noPerformerCount := 0
 
 	for _, v := range vids {
 		srcFullPath := v.filePath
@@ -572,6 +584,7 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 
 		var tgtSub string
 		var performer string
+		confidence := 1.0
 		if v.performers != "" {
 			// Use first performer for folder placement
 			parts := strings.Split(v.performers, ",")
@@ -581,48 +594,62 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 		} else {
 			tgtSub = fallbackFolder
 			performerCounts[fallbackFolder]++
+			confidence = 0.0 // no performer resolved → _Unsorted is a guess, not a placement
+			noPerformerCount++
 		}
 		tgtFullPath := filepath.Join(libPath, filepath.FromSlash(tgtSub), filename)
 
 		placements = append(placements, placement{
-			videoID: v.id, title: v.title, srcPath: srcFullPath,
-			tgtPath: tgtFullPath, performer: performer,
+			VideoID: v.id, Title: v.title, SrcPath: srcFullPath,
+			TgtPath: tgtFullPath, Performer: performer, Confidence: confidence,
 		})
 	}
 
 	if dryRun {
 		// Show top performers and what would happen
-		type perfCount struct { name string; count int }
+		type perfCount struct {
+			Name  string `json:"name"`
+			Count int    `json:"count"`
+		}
 		var sorted []perfCount
 		for name, count := range performerCounts {
-			sorted = append(sorted, perfCount{name, count})
+			sorted = append(sorted, perfCount{Name: name, Count: count})
 		}
 		// Simple sort by count desc
 		for i := 0; i < len(sorted); i++ {
 			for j := i + 1; j < len(sorted); j++ {
-				if sorted[j].count > sorted[i].count {
+				if sorted[j].Count > sorted[i].Count {
 					sorted[i], sorted[j] = sorted[j], sorted[i]
 				}
 			}
 		}
 		if len(sorted) > 20 { sorted = sorted[:20] }
 
+		confident := 0
+		for i := range placements {
+			if placements[i].Confidence >= 1.0 { confident++ }
+		}
+
 		return map[string]interface{}{
-			"dry_run":           true,
-			"library":           libName,
-			"source":            srcRel,
-			"target_base":       targetBase,
-			"total_in_source":   totalCount,
-			"processed_this":    len(vids),
-			"would_move":        len(placements),
-			"unique_performers": len(performerCounts),
-			"top_destinations":  sorted,
-			"sample_placements": placements,
+			"dry_run":             true,
+			"library":             libName,
+			"source":              srcRel,
+			"target_base":         targetBase,
+			"total_in_source":     totalCount,
+			"processed_this":      len(vids),
+			"would_move":          len(placements),
+			"confident_moves":     confident,
+			"no_performer_count":  noPerformerCount,
+			"unique_performers":   len(performerCounts),
+			"top_destinations":    sorted,
+			"sample_placements":   placements,
+			"confidence_note":     "confidence 1.0 = resolved performer (safe to move); 0.0 = no performer → _Unsorted (needs metadata first). Execute with min_confidence=1.0 to move only the sure ones.",
 		}, nil
 	}
 
 	// Execute moves — report progress every 25 videos
 	success, fail, skip := 0, 0, 0
+	belowThreshold := 0
 	for i := range placements {
 		p := &placements[i]
 
@@ -641,61 +668,72 @@ func (s *AICompanionService) toolBatchMoveByPattern(args map[string]interface{})
 			})
 		}
 
-		if _, statErr := os.Stat(p.srcPath); os.IsNotExist(statErr) {
-			p.status = "skipped"
-			p.error = "source missing"
+		// Confidence gate: "only move what I'm 100% sure about"
+		if p.Confidence < minConfidence {
+			p.Status = "skipped"
+			p.Error = fmt.Sprintf("confidence %.1f below min_confidence %.1f", p.Confidence, minConfidence)
 			skip++
+			belowThreshold++
 			continue
 		}
-		if _, statErr := os.Stat(p.tgtPath); statErr == nil {
-			p.status = "skipped"
-			p.error = "destination exists"
-			skip++
-			continue
-		}
-		os.MkdirAll(filepath.Dir(p.tgtPath), 0755)
 
-		if err := os.Rename(p.srcPath, p.tgtPath); err != nil {
+		if _, statErr := os.Stat(p.SrcPath); os.IsNotExist(statErr) {
+			p.Status = "skipped"
+			p.Error = "source missing"
+			skip++
+			continue
+		}
+		if _, statErr := os.Stat(p.TgtPath); statErr == nil {
+			p.Status = "skipped"
+			p.Error = "destination exists"
+			skip++
+			continue
+		}
+		os.MkdirAll(filepath.Dir(p.TgtPath), 0755)
+
+		if err := os.Rename(p.SrcPath, p.TgtPath); err != nil {
 			// Fallback: copy + delete
-			data, re := os.ReadFile(p.srcPath)
+			data, re := os.ReadFile(p.SrcPath)
 			if re != nil {
-				p.status = "failed"; p.error = re.Error(); fail++; continue
+				p.Status = "failed"; p.Error = re.Error(); fail++; continue
 			}
-			if we := os.WriteFile(p.tgtPath, data, 0644); we != nil {
-				p.status = "failed"; p.error = we.Error(); fail++; continue
+			if we := os.WriteFile(p.TgtPath, data, 0644); we != nil {
+				p.Status = "failed"; p.Error = we.Error(); fail++; continue
 			}
-			os.Remove(p.srcPath)
+			os.Remove(p.SrcPath)
 		}
 
 		// Update DB
 		s.db.Exec("UPDATE videos SET file_path = ?, updated_at = ? WHERE id = ?",
-			p.tgtPath, time.Now(), p.videoID)
+			p.TgtPath, time.Now(), p.VideoID)
 
 		// Learn placement
-		if p.performer != "" {
-			memKey := "placement_" + strings.ToLower(strings.ReplaceAll(p.performer, " ", "_"))
+		if p.Performer != "" {
+			memKey := "placement_" + strings.ToLower(strings.ReplaceAll(p.Performer, " ", "_"))
 			_ = s.SaveMemory(&models.Memory{
-				Key: memKey, Value: fmt.Sprintf("Performer '%s' → %s/%s", p.performer, targetBase, p.performer),
+				Key: memKey, Value: fmt.Sprintf("Performer '%s' → %s/%s", p.Performer, targetBase, p.Performer),
 				Category: "insight", Importance: 8,
 			})
 		}
 
-		p.status = "success"
+		p.Status = "success"
 		success++
 	}
 
 	return map[string]interface{}{
-		"dry_run":           false,
-		"library":           libName,
-		"source":            srcRel,
-		"target_base":       targetBase,
-		"total_in_source":   totalCount,
-		"processed_this":    len(vids),
-		"success":           success,
-		"failed":            fail,
-		"skipped":           skip,
-		"remaining":         totalCount - len(vids),
-		"performers_used":   len(performerCounts),
-		"summary":           performerCounts,
+		"dry_run":             false,
+		"library":             libName,
+		"source":              srcRel,
+		"target_base":         targetBase,
+		"total_in_source":     totalCount,
+		"processed_this":      len(vids),
+		"success":             success,
+		"failed":              fail,
+		"skipped":             skip,
+		"below_confidence":    belowThreshold,
+		"remaining":           totalCount - len(vids),
+		"performers_used":     len(performerCounts),
+		"summary":             performerCounts,
+		"placements":          placements,
 	}, nil
 }
