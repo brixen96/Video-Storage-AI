@@ -82,14 +82,15 @@ cd /d "%API_DIR%"
 set CGO_ENABLED=1
 set GOOS=windows
 set GOARCH=amd64
-go build -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-API.exe" ./cmd/server
+rem sqlite_fts5 tag is REQUIRED - without it the driver has no FTS5 and migration 56 fails silently
+go build -tags sqlite_fts5 -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-API.exe" ./cmd/server
 if %ERRORLEVEL% neq 0 (
     echo ERROR: API server build failed. See output above.
     pause & exit /b 1
 )
 
 echo [3/5] Building Web server (VideoStorageAI-Web.exe)...
-go build -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-Web.exe" ./cmd/web
+go build -tags sqlite_fts5 -ldflags "%LDFLAGS%" -o "%RELEASE_DIR%\VideoStorageAI-Web.exe" ./cmd/web
 if %ERRORLEVEL% neq 0 (
     echo ERROR: Web server build failed. See output above.
     pause & exit /b 1

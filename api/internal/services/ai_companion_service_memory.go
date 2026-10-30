@@ -198,7 +198,7 @@ func (s *AICompanionService) ExtractMemoriesAfterTurn(userMsg, assistantMsg stri
 	}
 	userMsg = strings.TrimSpace(userMsg)
 	assistantMsg = strings.TrimSpace(assistantMsg)
-	if len(userMsg) < 40 { // trivial exchanges carry nothing durable
+	if len(userMsg) < 20 { // filters "hi"/"ok"/"yes" but keeps short preference statements
 		return
 	}
 	if len(userMsg) > 4000 {
