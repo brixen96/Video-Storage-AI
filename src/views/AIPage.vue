@@ -20,9 +20,9 @@
 					</button>
 				</li>
 				<li class="nav-item">
-					<button class="nav-link" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">
-						<font-awesome-icon :icon="['fas', 'comments']" class="me-2" />
-						Chat
+					<button class="nav-link" :class="{ active: activeTab === 'inspector' }" @click="activeTab = 'inspector'">
+						<font-awesome-icon :icon="['fas', 'sliders-h']" class="me-2" />
+						Inspector
 					</button>
 				</li>
 				<li class="nav-item">
@@ -161,81 +161,9 @@
 				</div>
 			</div>
 
-			<!-- Chat Tab -->
-			<div v-if="activeTab === 'chat'" class="chat-tab">
+			<!-- Inspector Tab (the chat itself lives in the navbar companion modal — one chat only) -->
+			<div v-if="activeTab === 'inspector'" class="chat-tab">
 				<div class="chat-layout">
-					<!-- Chat Section -->
-					<div class="chat-section">
-						<div class="chat-section-header">
-							<h3>
-								<font-awesome-icon :icon="['fas', 'comments']" class="me-2" />
-								Chat with AI Companion
-							</h3>
-							<div class="d-flex gap-2 align-items-center">
-								<span v-if="aiConfig && aiConfig.reasoningEffort && aiConfig.reasoningEffort !== 'none'" class="badge bg-info-subtle text-info border border-info">
-									<font-awesome-icon :icon="['fas', 'brain']" class="me-1" />
-									{{ aiConfig.reasoningEffort }}
-								</span>
-								<button class="btn btn-sm btn-outline-danger" @click="clearChat" :disabled="chatHistory.length === 0 || isStreaming">
-									<font-awesome-icon :icon="['fas', 'trash']" class="me-1" />
-									Clear
-								</button>
-							</div>
-						</div>
-						<div class="chat-container">
-							<div ref="chatMessagesRef" class="chat-messages">
-								<div v-if="chatHistory.length === 0" class="empty-chat">
-									<font-awesome-icon :icon="['fas', 'robot']" size="3x" class="mb-3" />
-									<p>Start a conversation with the AI Companion</p>
-									<p class="text-muted small">Ask about your library, get suggestions, or manage tasks</p>
-								</div>
-								<div v-for="(msg, idx) in chatHistory" :key="idx" class="chat-message" :class="msg.role">
-									<div class="message-avatar">
-										<font-awesome-icon :icon="['fas', msg.role === 'user' ? 'user' : 'robot']" />
-									</div>
-									<div class="message-content">
-										<template v-if="msg.role === 'user'">{{ msg.content }}</template>
-										<!-- Typing dots live INSIDE the streaming bubble (the old standalone isStreaming bubble rendered a 2nd empty one) -->
-										<div v-else-if="msg.streaming && !msg.content" class="message-text">
-											<div class="typing-indicator">
-												<span></span><span></span><span></span>
-											</div>
-										</div>
-										<MarkdownMessage v-else :content="msg.content" />
-										<div class="message-time">{{ formatTime() }}</div>
-									</div>
-								</div>
-							</div>
-
-							<!-- Quick Actions -->
-							<div class="quick-actions mb-2">
-								<button class="btn btn-sm btn-outline-info" @click="sendQuickMessage('What is the current status of my library?')">Library Status</button>
-								<button class="btn btn-sm btn-outline-info" @click="sendQuickMessage('Show me recent activity')">Recent Activity</button>
-								<button class="btn btn-sm btn-outline-info" @click="sendQuickMessage('Any issues I should know about?')">Check Issues</button>
-								<button class="btn btn-sm btn-outline-info" @click="sendQuickMessage('Suggest some improvements')">Suggestions</button>
-							</div>
-
-							<!-- Chat Input -->
-							<div class="chat-input-container">
-								<div class="input-group">
-									<input
-										v-model="chatInput"
-										type="text"
-										class="form-control"
-										placeholder="Type a message..."
-										@keyup.enter="sendMessage"
-										:disabled="isStreaming"
-									/>
-									<button v-if="isStreaming" class="btn btn-danger" @click="stopStreaming" title="Stop generating">
-										<font-awesome-icon :icon="['fas', 'stop']" />
-									</button>
-									<button v-else class="btn btn-primary" @click="sendMessage" :disabled="!chatInput.trim() || isStreaming">
-										<font-awesome-icon :icon="['fas', 'paper-plane']" />
-									</button>
-								</div>
-							</div>
-						</div>
-					</div>
 
 					<!-- Inspector Sidebar -->
 					<div class="inspector-panel">
@@ -642,7 +570,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { aiAPI } from '@/services/api'
 
 // Import all AI feature components
@@ -657,17 +585,16 @@ import AISuggestNaming from '@/components/ai/AISuggestNaming.vue'
 import AILibraryAnalytics from '@/components/ai/AILibraryAnalytics.vue'
 import AIAnalyzeThumbnails from '@/components/ai/AIAnalyzeThumbnails.vue'
 import AIMonitorDashboard from '@/components/ai/AIMonitorDashboard.vue'
-import MarkdownMessage from '@/components/MarkdownMessage.vue'
 import TaskBoard from '@/components/TaskBoard.vue'
 import BannerlordPanel from '@/components/BannerlordPanel.vue'
 
 // Shared composables — same state as the floating widget
 import { useChatHistory } from '@/composables/ai/useChatHistory'
-import { useChatStreaming } from '@/composables/ai/useChatStreaming'
+import { useChatStreaming, streamDiagnostics } from '@/composables/ai/useChatStreaming'
 import { useBrowserView } from '@/composables/ai/useBrowserView'
 
-const { chatHistory, pushMessage, clearHistory, loadHistory } = useChatHistory()
-const { isStreaming, streamMessage, stopStreaming, toolLabel } = useChatStreaming()
+const { chatHistory, loadHistory } = useChatHistory()
+const { isStreaming, toolLabel } = useChatStreaming()
 
 // Tab state
 const activeTab = ref('companion')
@@ -702,17 +629,11 @@ const aiConfig = ref(null)
 const testingConnection = ref(false)
 const connectionTestResult = ref(null)
 
-// Chat state (local UI helpers only — messages live in chatHistory)
-const chatInput = ref('')
-const chatMessagesRef = ref(null)
-
 // ── Inspector state (right panel) ──
+// lastRun reads the SHARED streamDiagnostics (fed by the navbar modal chat's
+// stream in useChatStreaming) — the page no longer runs its own chat stream.
 const inspectorTab = ref('session')
-const lastRun = ref({
-	tokens: { prompt: 0, completion: 0, reasoning: 0, total: 0 },
-	requests: [],
-	toolCalls: [],
-})
+const lastRun = streamDiagnostics
 const effortOptions = [
 	{ value: 'none', label: 'None', icon: 'ban' },
 	{ value: 'low', label: 'Low', icon: 'bolt' },
@@ -768,12 +689,6 @@ const saveProfile = async () => {
 		savingProfile.value = false
 	}
 }
-
-const emptyRun = () => ({
-	tokens: { prompt: 0, completion: 0, reasoning: 0, total: 0 },
-	requests: [],
-	toolCalls: [],
-})
 
 // Analysis tools refs
 const linkPerformersRef = ref(null)
@@ -875,112 +790,15 @@ const testConnection = async () => {
 	}
 }
 
-// Chat methods
-const formatTime = () => {
-	return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-const scrollToBottom = async () => {
-	await nextTick()
-	if (chatMessagesRef.value) {
-		chatMessagesRef.value.scrollTop = chatMessagesRef.value.scrollHeight
-	}
-}
-
-const sendMessage = async () => {
-	const text = chatInput.value.trim()
-	if (!text || isStreaming.value) return
-
-	chatInput.value = ''
-
-	// Push user message
-	pushMessage({ role: 'user', content: text, timestamp: new Date() })
-	await nextTick()
-	scrollToBottom()
-
-	// Prepare history for context
-	const historyPayload = chatHistory.value
-		.filter((m) => m.role === 'user' || m.role === 'assistant')
-		.slice(-10)
-		.map((m) => ({ role: m.role, content: m.content }))
-
-	// Create placeholder for streaming response
-	const msgIndex = chatHistory.value.length
-	pushMessage({
-		role: 'assistant', content: '', timestamp: new Date(),
-		source: 'llm', streaming: true,
-	})
-	await nextTick()
-	scrollToBottom()
-
-	// Reset per-exchange inspector state
-	lastRun.value = emptyRun()
-
-	// Stream the response
-	streamMessage(text, historyPayload, {
-		onTextChunk: (chunk) => {
-			chatHistory.value[msgIndex].content += chunk
+// Bannerlord NPC journal → open the ONE companion chat (navbar modal) with a
+// prefilled session-recap request — 'open-ai-chat' is the shared open+prefill+
+// send pattern (same as ScraperPage's Ask AI button).
+const handleBannerlordJournal = ({ name, stringId }) => {
+	window.dispatchEvent(new CustomEvent('open-ai-chat', {
+		detail: {
+			message: `📋 Session recap for ${name} (${stringId}): summarize our recent dialogue — what happened, her current mood and relation to me, and where the scene stands right now.`,
 		},
-		onTokenUsage: (usage) => {
-			lastRun.value.tokens = {
-				prompt: usage.prompt_tokens || 0,
-				completion: usage.completion_tokens || 0,
-				reasoning: usage.reasoning_tokens || 0,
-				total: usage.total_tokens || 0,
-			}
-		},
-		onToolCall: (tool) => {
-			lastRun.value.toolCalls.push({ name: tool, at: new Date().toLocaleTimeString() })
-		},
-		onRequestInfo: (info) => {
-			lastRun.value.requests.push(info)
-		},
-		scrollFn: async () => { await nextTick(); scrollToBottom() },
-		onDone: (toolSteps) => {
-			chatHistory.value[msgIndex].streaming = false
-			if (toolSteps.length > 0) chatHistory.value[msgIndex].toolSteps = toolSteps
-		},
-		onError: (error) => {
-			if (error.name === 'AbortError') {
-				const lastMsg = chatHistory.value[chatHistory.value.length - 1]
-				if (lastMsg?.streaming) {
-					lastMsg.streaming = false
-					if (lastMsg.content.length === 0) chatHistory.value.splice(-1, 1)
-				}
-				return
-			}
-			const lastMsg = chatHistory.value[chatHistory.value.length - 1]
-			if (lastMsg?.streaming) lastMsg.streaming = false
-			if (lastMsg?.content && lastMsg.content.length > 0) {
-				lastMsg.content += '\n\n⚠️ *Stream interrupted*'
-			} else {
-				pushMessage({
-					role: 'assistant', content: 'Sorry, I encountered an error. Please check your OpenRouter connection.',
-					timestamp: new Date(), source: 'error',
-				})
-			}
-		},
-	})
-}
-
-const sendQuickMessage = (text) => {
-	chatInput.value = text
-	sendMessage()
-}
-
-// Bannerlord NPC journal → jump to chat with a prefilled session-recap request
-const handleBannerlordJournal = async ({ name, stringId }) => {
-	activeTab.value = 'chat'
-	await nextTick() // let the tab watcher fire and start the history reload
-	if (historyLoadPromise) {
-		try { await historyLoadPromise } catch { /* fallback to current state */ }
-	}
-	chatInput.value = `📋 Session recap for ${name} (${stringId}): summarize our recent dialogue — what happened, her current mood and relation to me, and where the scene stands right now.`
-	sendMessage()
-}
-
-const clearChat = async () => {
-	await clearHistory()
+	}))
 }
 
 // ── Inspector methods ──
@@ -1101,20 +919,14 @@ const resetCompanion = async () => {
 	try {
 		await aiAPI.resetChat()
 		chatHistory.value = []
-		lastRun.value = emptyRun()
+		lastRun.tokens = { prompt: 0, completion: 0, reasoning: 0, total: 0 }
+		lastRun.requests = []
+		lastRun.toolCalls = []
 		await loadMemories()
 	} catch { /* ignore */ } finally {
 		resetting.value = false
 	}
 }
-
-// Reload chat history when switching to chat tab
-let historyLoadPromise = null
-watch(activeTab, (newTab) => {
-	if (newTab === 'chat') {
-		historyLoadPromise = loadHistory()
-	}
-})
 
 // Load memories when the Memory sub-tab opens
 watch(inspectorTab, (tab) => {
@@ -1328,6 +1140,15 @@ onMounted(async () => {
 	border: 1px solid rgba(255, 255, 255, 0.1);
 	border-radius: 12px;
 	overflow: hidden;
+}
+
+/* The chat lives in the navbar companion modal now (one chat only) — the
+   Inspector tab hosts only the sidebar, centered and readable at full height */
+.chat-layout .inspector-panel {
+	flex: 1;
+	width: auto;
+	max-width: 1000px;
+	margin: 0 auto;
 }
 
 .inspector-tabs {

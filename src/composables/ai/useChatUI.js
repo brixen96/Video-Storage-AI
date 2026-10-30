@@ -4,14 +4,18 @@
 import { ref, computed, nextTick } from 'vue'
 import { aiAPI, librariesAPI, activityAPI } from '@/services/api'
 
+// ── Shared singleton state ──
+// Module-scoped so NavBar (status dot, unread badge, open button) and the
+// widget read the SAME refs — mirrors useChatHistory's singleton pattern.
+const isOpen = ref(false)
+const unreadCount = ref(0)
+const companionConnected = ref(false)
+
 export function useChatUI() {
 	// --- Core UI state ---
-	const isOpen = ref(false)
-	const unreadCount = ref(0)
 	const chatMessages = ref(null)
 	const showStats = ref(false)
 	const proactiveEnabled = ref(localStorage.getItem('ai_companion_proactive') !== 'false')
-	const companionConnected = ref(false)
 
 	// --- Memory panel ---
 	const showMemoryPanel = ref(false)

@@ -1,10 +1,7 @@
 <template>
-	<div class="ai-companion-float">
-		<!-- Floating Chat Button -->
-		<button v-if="!isOpen" class="chat-toggle-button" @click="toggleChat" :class="{ 'has-notification': unreadCount > 0 }" title="Open AI Companion (Ctrl+Shift+A)">
-			<font-awesome-icon :icon="['fas', 'robot']" class="chat-icon" />
-			<span v-if="unreadCount > 0" class="notification-badge">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
-		</button>
+	<div class="ai-companion-float" :class="{ 'modal-open': isOpen }">
+		<!-- Backdrop: the chat is a big modal opened from the navbar section -->
+		<div v-if="isOpen" class="companion-backdrop" @click="closeChat"></div>
 
 		<!-- Chat Window -->
 		<transition name="slide-up">
@@ -621,7 +618,7 @@ const {
 	showMemoryPanel, memories, memoriesLoading, memoryCategory, memorySearch,
 	memoryCounts, filteredMemories, toggleMemoryPanel, deleteMemory, formatMemoryDate,
 	contextStats, contextStatsLoading, contextStatsDismissed, loadContextStats,
-	scrollToBottom, toggleProactive, toggleChat,
+	scrollToBottom, toggleProactive,
 	setupShortcuts, cleanupShortcuts,
 } = useChatUI({ chatHistory, toggleChat: null }) // wired up below
 

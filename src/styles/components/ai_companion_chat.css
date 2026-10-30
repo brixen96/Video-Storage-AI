@@ -75,6 +75,29 @@
 	overflow: hidden;
 }
 
+/* ── Modal mode: opened from the navbar section (the ONE chat) ── */
+.companion-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.65);
+	z-index: 1;
+}
+
+.ai-companion-float.modal-open {
+	/* above the sticky navbar (z 1020) */
+	z-index: 1080;
+}
+
+.ai-companion-float.modal-open .chat-window {
+	position: fixed;
+	inset: 0;
+	margin: auto;
+	width: min(1500px, 96vw);
+	height: 94vh;
+	max-width: none;
+	z-index: 2;
+}
+
 /* Transitions */
 .slide-up-enter-active,
 .slide-up-leave-active {

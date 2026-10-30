@@ -1,5 +1,39 @@
 # AI Companion — Architecture Reference
 
+## Navbar Companion Modal — THE one chat (2026-10-30 makeover)
+
+Emil's rule: **only ONE chat** — the big modal opened from the navbar. The
+floating bottom-right bubble and the AI page Chat tab are GONE.
+
+- **NavBar brand zone**: `Video Storage AI` text + logo removed; kept = version
+  badge + WS dot + new **AI Companion section** (status dot polling
+  `aiAPI.getStatus()` every 120s + on WS reconnect, unread badge, `Chat`
+  button → `toggleChat({open:true})`).
+- **Modal presentation**: `AICompanionChat` root gets `:class="modal-open"` when
+  open — a `.companion-backdrop` overlay + CSS recentering (`.chat-window` →
+  fixed inset-center, `min(1500px, 96vw) × 94vh`, z-index 1080 above the sticky
+  navbar). Backdrop click closes. Floating toggle button removed from template.
+- **useChatUI is now a real singleton**: `isOpen`/`unreadCount`/
+  `companionConnected` moved to MODULE scope (mirrors useChatHistory) so the
+  navbar badge/status and widget share the same refs; `toggleChat` still resets
+  the unread count on open.
+- **Openers**: navbar button, `Ctrl+Shift+A`, and the shared
+  `window.dispatchEvent(new CustomEvent('open-ai-chat', {detail:{message}}))`
+  pattern (ScraperPage Ask AI + Bannerlord journal recap both use it — open +
+  prefill + auto-send, handled inside the component).
+- **AI page Chat tab → `Inspector` tab** (key `activeTab = 'inspector'`): the
+  chat section was deleted; the sidebar (Session / Controls / Memory /
+  RP watcher) survives, centered at `max-width: 1000px`. The Memory sub-tab
+  still hosts the **Core Profile** editor.
+- **Session diagnostics survive**: new shared reactive `streamDiagnostics`
+  (exported from `useChatStreaming.js`) — `streamMessage` records tokens,
+  request_info and tool_calls UNCONDITIONALLY (not via caller hooks), reset per
+  stream. Inspector reads it as `lastRun`; the widget's stream feeds it.
+- **Superseded approaches:**
+  - Floating chat bubble (bottom-right robot button + 450×700 window)
+  - AI page Chat tab conversation UI (and its page-local `lastRun`/`sendMessage`)
+  - Per-page `useChatUI` refs (state was per-call → navbar could never see it)
+
 ## 3-Layer Memory System ("Know Brix", 2026-10-30)
 
 All local SQLite — nothing leaves the PC. NSFW-aware by design: this is an adult

@@ -1,16 +1,27 @@
 <template>
 	<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow-lg">
 		<div class="container-fluid">
-			<!-- Brand -->
-			<router-link to="/" class="navbar-brand d-flex align-items-center">
-				<font-awesome-icon :icon="['fas', 'video']" class="me-2 brand-icon" />
-				<span class="brand-text">Video Storage AI</span>
-				<span v-if="appVersion" class="badge bg-secondary ms-2" style="font-size:0.6rem;vertical-align:middle;">v{{ appVersion }}</span>
+			<!-- Brand zone: version + AI Companion section (text/logo removed — the companion IS the brand now) -->
+			<div class="navbar-brand d-flex align-items-center gap-2">
+				<span v-if="appVersion" class="badge bg-secondary" style="font-size:0.6rem;vertical-align:middle;">v{{ appVersion }}</span>
 				<!-- WebSocket Status Indicator -->
-				<span class="ws-status-indicator ms-3" :class="{ connected: wsConnected, disconnected: !wsConnected }" :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'">
+				<span class="ws-status-indicator" :class="{ connected: wsConnected, disconnected: !wsConnected }" :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected'">
 					<font-awesome-icon :icon="['fas', 'circle']" class="status-dot" />
 				</span>
-			</router-link>
+
+				<!-- AI Companion: status + open button -->
+				<div class="nav-companion d-flex align-items-center gap-2">
+					<span class="nav-companion-status" :class="{ online: apiOnline }" :title="apiOnline ? 'Companion online' : 'Companion offline — is the API service running?'">
+						<font-awesome-icon :icon="['fas', 'circle']" class="status-dot" />
+						<span class="d-none d-md-inline">Companion</span>
+					</span>
+					<button class="btn btn-sm btn-primary nav-chat-btn" @click="openCompanion" title="Open AI Companion (Ctrl+Shift+A)">
+						<font-awesome-icon :icon="['fas', 'robot']" class="me-1" />
+						Chat
+						<span v-if="unreadCount > 0" class="badge bg-danger ms-1">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
+					</button>
+				</div>
+			</div>
 
 			<!-- Mobile toggle button -->
 			<button
@@ -150,6 +161,8 @@
 import ActivityStatusWidget from './ActivityStatusWidget.vue'
 import NotificationBell from './NotificationBell.vue'
 import websocketService from '@/services/websocket'
+import { useChatUI } from '@/composables/ai/useChatUI'
+import { aiAPI } from '@/services/api'
 
 export default {
 	name: 'NavBar',
@@ -162,12 +175,25 @@ export default {
 			wsConnected: false,
 			unsubscribeConnection: null,
 			appVersion: '',
+			apiOnline: false,
+			statusTimer: null,
+			chatUI: null,
 		}
+	},
+	computed: {
+		// Shared singleton state (useChatUI is module-scoped — same refs as the widget)
+		unreadCount() {
+			return this.chatUI ? this.chatUI.unreadCount.value : 0
+		},
+	},
+	created() {
+		this.chatUI = useChatUI()
 	},
 	mounted() {
 		// Subscribe to WebSocket connection status
 		this.unsubscribeConnection = websocketService.on('connected', (data) => {
 			this.wsConnected = data.connected
+			if (data.connected) this.checkCompanionStatus()
 		})
 
 		// Check initial connection status
@@ -180,15 +206,33 @@ export default {
 
 		// Use build-time version injected by web server (window.VSAI_VERSION)
 		this.appVersion = window.VSAI_VERSION || 'dev'
+
+		// Companion status: poll the local backend (cheap, no LLM call)
+		this.checkCompanionStatus()
+		this.statusTimer = setInterval(this.checkCompanionStatus, 120000)
 	},
 	beforeUnmount() {
 		if (this.unsubscribeConnection) {
 			this.unsubscribeConnection()
 		}
+		if (this.statusTimer) {
+			clearInterval(this.statusTimer)
+		}
 	},
 	methods: {
 		openGlobalSearch() {
 			document.dispatchEvent(new CustomEvent('open-global-search'))
+		},
+		openCompanion() {
+			this.chatUI.toggleChat({ open: true })
+		},
+		async checkCompanionStatus() {
+			try {
+				await aiAPI.getStatus()
+				this.apiOnline = true
+			} catch {
+				this.apiOnline = false
+			}
 		},
 	},
 }

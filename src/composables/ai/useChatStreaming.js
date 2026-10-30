@@ -1,9 +1,20 @@
 /**
  * useChatStreaming — SSE streaming, tool progress, abort control.
  */
-import { ref } from 'vue'
+import { ref, reactive } from 'vue'
 import { API_ORIGIN } from '@/services/api'
 import { TOOL_LABELS, FOLLOW_UP_RULES } from './constants'
+
+// ── Shared per-exchange stream diagnostics ──
+// Recorded by streamMessage regardless of caller hooks. The AI page Inspector
+// tab (Session: tokens / LLM requests / tool calls) reads these — module-scoped
+// so they survive whichever surface ran the stream (only the navbar modal chat
+// exists now).
+export const streamDiagnostics = reactive({
+	tokens: { prompt: 0, completion: 0, reasoning: 0, total: 0 },
+	requests: [],
+	toolCalls: [],
+})
 
 export function useChatStreaming() {
 	const isStreaming = ref(false)
@@ -42,6 +53,11 @@ export function useChatStreaming() {
 		isStreaming.value = true
 		activeToolCall.value = ''
 		streamToolSteps.value = []
+
+		// Fresh diagnostics for this exchange (Inspector Session tab reads these)
+		streamDiagnostics.tokens = { prompt: 0, completion: 0, reasoning: 0, total: 0 }
+		streamDiagnostics.requests = []
+		streamDiagnostics.toolCalls = []
 
 		streamAbortController.value = new AbortController()
 
@@ -96,6 +112,7 @@ export function useChatStreaming() {
 								const { tool } = JSON.parse(data)
 								activeToolCall.value = tool
 								streamToolSteps.value.push(tool)
+								streamDiagnostics.toolCalls.push({ name: tool, at: new Date().toLocaleTimeString() })
 								onToolCall?.(tool)
 							} catch { /* ignore */ }
 							currentEventType = ''
@@ -105,6 +122,12 @@ export function useChatStreaming() {
 						if (currentEventType === 'token_usage') {
 							try {
 								const usage = JSON.parse(data)
+								streamDiagnostics.tokens = {
+									prompt: usage.prompt_tokens || 0,
+									completion: usage.completion_tokens || 0,
+									reasoning: usage.reasoning_tokens || 0,
+									total: usage.total_tokens || 0,
+								}
 								onTokenUsage?.(usage)
 							} catch { /* ignore */ }
 							currentEventType = ''
@@ -123,6 +146,7 @@ export function useChatStreaming() {
 						if (currentEventType === 'request_info') {
 							try {
 								const info = JSON.parse(data)
+								streamDiagnostics.requests.push(info)
 								onRequestInfo?.(info)
 							} catch { /* ignore */ }
 							currentEventType = ''
