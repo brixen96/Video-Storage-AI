@@ -1,5 +1,44 @@
 # AI Companion — Architecture Reference
 
+## 3-Layer Memory System ("Know Brix", 2026-10-30)
+
+All local SQLite — nothing leaves the PC. NSFW-aware by design: this is an adult
+content library app, so tastes/boundaries are first-class profile sections and
+both extraction prompts are told to capture them honestly.
+
+1. **Core profile** — `user_profile` memory (category `profile`, importance 10,
+   source `profile`), seeded with a section skeleton (Tastes / Favorite
+   performers / Go-to sites / Boundaries / Communication style / Projects).
+   Rendered by `GetProfileBlock()` as `## About Brix` in EVERY system prompt
+   (both `ChatLLM` and `ChatLLMStream`), capped at 6000 chars. Editable in
+   AIPage → Memory tab (dedicated card, PUT `/ai/memories/:id`).
+2. **Relevant recall** — `GetRelevantMemoriesBlock(message)` runs on every
+   turn: sanitizes the message into a safe FTS5 OR-query (raw text would be
+   implicit AND → recall would silently die), takes top 5 by rank+importance,
+   injects `## Relevant memories`, bumps `hit_count`/`last_used_at`.
+   Excludes `app_profile`/`user_profile` (already injected separately).
+3. **Auto-capture** — `ExtractMemoriesAfterTurn(user, assistant)` fires async
+   after EVERY main-scope turn (handler, post-persist; RP scope never
+   extracted — roleplay dialogue ≠ real taste). Lightweight LLM pass returns
+   compact JSON facts → rows with `source:'auto'`, keys slugged `auto_*` so
+   repeats refresh instead of duplicating. Skips exchanges < 40 chars.
+
+**Consolidation** (`runMemoryConsolidation`, every 6h, independent of
+supervisor autonomy mode): decays importance −1 for memories unused 30d
+(floor 1, never `app_profile`/`user_profile`/importance ≥ 8); promotes
+memories with `hit_count ≥ 3` into the profile via LLM merge; distills recent
+browser downloads/history (via the bridge) into a `browser_patterns` memory
+(`source:'browser'`, distilled sentences — never raw URL dumps).
+
+**Migration 70**: `memories` += `source` (manual/auto/browser/profile),
+`hit_count`, `last_used_at`. New file: `ai_companion_service_memory.go`.
+
+**Superseded approaches:**
+- Passive-only memory (model must call `recall_memories` to remember anything)
+  — replaced by automatic per-turn injection; the tool still exists for deep search.
+- Raw FTS match on user text — implicit-AND semantics broke recall; replaced by
+  sanitized OR-query (`ftsOrQuery`).
+
 ## Composable Map (`src/composables/ai/`)
 | File | Responsibility |
 |---|---|

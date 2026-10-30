@@ -168,6 +168,13 @@ func aiCompanionChatStream(c *gin.Context) {
 			toolStepsJSON = string(b)
 		}
 		aiCompanionService.SaveChatMessageScoped("assistant", fullResponse.String(), source, toolStepsJSON, scope)
+
+		// Auto-capture (memory layer 3): extract durable facts after every MAIN
+		// turn. RP scope is roleplay dialogue, not real taste — never extracted.
+		// Runs async so it never delays the stream or the next message.
+		if scope == "main" {
+			go aiCompanionService.ExtractMemoriesAfterTurn(request.Message, fullResponse.String())
+		}
 	}
 
 	// Send video cards event before [DONE] so frontend can render inline cards

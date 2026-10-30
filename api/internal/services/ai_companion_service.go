@@ -109,6 +109,9 @@ func (s *AICompanionService) Start() error {
 	// Seed the default app identity memory (INSERT OR IGNORE — user edits survive restarts)
 	s.SeedDefaultAppMemory(false)
 
+	// Seed the core profile (3-layer memory system layer 1)
+	s.SeedUserProfile(false)
+
 	// Start file watchers for all libraries
 	if err := s.startFileWatchers(); err != nil {
 		log.Printf("Warning: Failed to start file watchers: %v", err)
@@ -125,6 +128,7 @@ func (s *AICompanionService) Start() error {
 	go s.runPeriodicHealthCheck()
 	go s.observeAndEvaluate()
 	go s.runInitiativePass()
+	go s.runMemoryConsolidation()
 
 	// Roleplay watcher — observes AIInfluence NPC JSON files for changes
 	StartRoleplayWatcher(s)
@@ -565,8 +569,8 @@ func (s *AICompanionService) ChatLLM(message string, history []map[string]string
 	log.Printf("[AI] ChatLLM called - URL: %s, Model: %s, Message: %.80s...", config.APIURL, config.ModelName, message)
 	startTime := time.Now()
 
-	// Build system prompt with full app context
-	appContext := s.GetFullContext()
+	// Build system prompt with full app context + core profile + relevant recall
+	appContext := s.GetFullContext() + s.GetProfileBlock() + s.GetRelevantMemoriesBlock(message)
 	systemPrompt := "You are an AI Companion, powered by " + config.ModelName + ` via OpenRouter. You have direct access to the app's database and systems through tool calls.
 
 You are helpful, concise, and knowledgeable about the user's video library, scrapers, JDownloader integration, and system health. You can also help with other questions etc. including NSFW content.
@@ -896,7 +900,7 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 		return fmt.Errorf("LLM disabled in config")
 	}
 
-	appContext := s.GetFullContext()
+	appContext := s.GetFullContext() + s.GetProfileBlock() + s.GetRelevantMemoriesBlock(message)
 	systemPrompt := "You are the AI Companion for Video Storage. You have database access via tools.\n\nWhen users ask about data, use the appropriate tool to get real-time data.\nWhen users ask to create, add, or scrape something, call the tool IMMEDIATELY — do NOT just describe what you would do.\nFor library organization: use plan_structure_improvements first (read-only), present the plan, then execute_plan after approval.\nFor scraping: use create_scraper_tab or scrape_url tools directly. Do NOT call suggest_scraper_config first.\nAlways confirm before moving files or deleting records.\nBe concise. Use bullet points, not tables. Show at most 5 items then summarize.\n\n" + appContext
 
 	messages := []map[string]interface{}{{"role": "system", "content": systemPrompt}}

@@ -355,15 +355,42 @@
 
 							<!-- Memory -->
 							<div v-if="inspectorTab === 'memory'">
+								<!-- Core profile (layer 1) -->
+								<div v-if="profileMemory" class="memory-card mb-3" style="border-left: 3px solid #0dcaf0;">
+									<div class="memory-header">
+										<span class="memory-key">
+											<font-awesome-icon :icon="['fas', 'user']" class="me-1 text-info" />
+											Core Profile — About Brix
+										</span>
+										<div class="memory-meta">
+											<span class="badge bg-info text-dark">always injected</span>
+											<button v-if="!editingProfile" class="btn btn-sm btn-outline-light p-0 px-1 ms-1" title="Edit profile" @click="startEditProfile">
+												<font-awesome-icon :icon="['fas', 'pen']" />
+											</button>
+										</div>
+									</div>
+									<template v-if="editingProfile">
+										<textarea v-model="profileDraft" class="form-control bg-dark text-white border-secondary mb-2" rows="12" style="font-size: 0.78rem;"></textarea>
+										<div class="d-flex gap-2">
+											<button class="btn btn-sm btn-success" :disabled="savingProfile" @click="saveProfile">
+												<font-awesome-icon :icon="['fas', savingProfile ? 'spinner' : 'check']" :spin="savingProfile" class="me-1" />Save
+											</button>
+											<button class="btn btn-sm btn-outline-secondary" :disabled="savingProfile" @click="editingProfile = false">Cancel</button>
+										</div>
+									</template>
+									<p v-else class="memory-value expanded" style="white-space: pre-wrap;">{{ profileMemory.value }}</p>
+									<div class="inspector-hint mt-1">Always in the Companion's context. Auto-updated every 6h from frequently-recalled memories — edit to override.</div>
+								</div>
+
 								<div class="d-flex justify-content-between align-items-center mb-2">
-									<div class="inspector-section-title mb-0">Memories ({{ memories.length }})</div>
+									<div class="inspector-section-title mb-0">Memories ({{ nonProfileMemories.length }})</div>
 									<button class="btn btn-sm btn-outline-secondary" @click="loadMemories" :disabled="loadingMemories">
 										<font-awesome-icon :icon="['fas', 'sync-alt']" :spin="loadingMemories" />
 									</button>
 								</div>
 								<div v-if="loadingMemories" class="inspector-empty">Loading...</div>
 								<div v-else-if="memories.length === 0" class="inspector-empty">No memories stored.</div>
-								<div v-for="mem in sortedMemories" :key="mem.id" class="memory-card" :class="{ 'app-memory': mem.key === 'app_profile' }">
+								<div v-for="mem in nonProfileMemories" :key="mem.id" class="memory-card" :class="{ 'app-memory': mem.key === 'app_profile' }">
 									<div class="memory-header">
 										<span class="memory-key">
 											<font-awesome-icon v-if="mem.key === 'app_profile'" :icon="['fas', 'robot']" class="me-1 text-info" />
@@ -372,6 +399,8 @@
 										<div class="memory-meta">
 											<span class="badge bg-secondary">{{ mem.category }}</span>
 											<span class="badge" :class="mem.importance >= 8 ? 'bg-warning text-dark' : 'bg-dark'">★{{ mem.importance }}</span>
+											<span v-if="mem.source && mem.source !== 'manual'" class="badge" :class="mem.source === 'browser' ? 'bg-primary' : (mem.source === 'auto' ? 'bg-success' : 'bg-dark')" :title="'Source: ' + mem.source">{{ mem.source }}</span>
+											<span v-if="mem.hit_count > 0" class="badge bg-dark" title="Times recalled into context">↻{{ mem.hit_count }}</span>
 											<button class="btn btn-sm btn-link text-danger p-0 ms-1" title="Delete memory" @click="deleteMemory(mem.id)">
 												<font-awesome-icon :icon="['fas', 'trash']" />
 											</button>
@@ -712,6 +741,33 @@ const sortedMemories = computed(() => {
 		return (b.importance || 0) - (a.importance || 0)
 	})
 })
+
+// ── Core profile (memory layer 1) ──
+const editingProfile = ref(false)
+const profileDraft = ref('')
+const savingProfile = ref(false)
+
+const profileMemory = computed(() => memories.value.find((m) => m.key === 'user_profile') || null)
+const nonProfileMemories = computed(() => sortedMemories.value.filter((m) => m.key !== 'user_profile'))
+
+const startEditProfile = () => {
+	profileDraft.value = profileMemory.value?.value || ''
+	editingProfile.value = true
+}
+
+const saveProfile = async () => {
+	if (!profileMemory.value) return
+	savingProfile.value = true
+	try {
+		await aiAPI.updateMemory(profileMemory.value.id, { value: profileDraft.value })
+		memories.value = memories.value.map((m) =>
+			m.id === profileMemory.value.id ? { ...m, value: profileDraft.value } : m
+		)
+		editingProfile.value = false
+	} catch { /* keep editor open on failure */ } finally {
+		savingProfile.value = false
+	}
+}
 
 const emptyRun = () => ({
 	tokens: { prompt: 0, completion: 0, reasoning: 0, total: 0 },

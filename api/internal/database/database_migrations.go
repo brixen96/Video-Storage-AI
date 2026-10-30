@@ -1160,6 +1160,29 @@ func runMigrations() error {
 	}
 	DB.Exec(`CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_scope ON ai_chat_messages(scope, created_at DESC)`)
 
+	// Migration 70: Memory provenance + usage tracking for the 3-layer memory
+	// system (core profile / relevant recall / auto-capture). source tells us
+	// where a memory came from (manual, auto, browser, profile); hit_count and
+	// last_used_at drive decay in the consolidation pass.
+	for _, col := range []struct {
+		name string
+		ddl  string
+	}{
+		{"source", `ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`},
+		{"hit_count", `ALTER TABLE memories ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 0`},
+		{"last_used_at", `ALTER TABLE memories ADD COLUMN last_used_at DATETIME`},
+	} {
+		var exists int
+		DB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name = ?`, col.name).Scan(&exists)
+		if exists == 0 {
+			if _, err := DB.Exec(col.ddl); err != nil && !isColumnExistsError(err) {
+				log.Printf("Migration 70 (memories.%s): %v", col.name, err)
+			} else {
+				log.Printf("Migration 70: Added memories.%s", col.name)
+			}
+		}
+	}
+
 	return nil
 }
 
