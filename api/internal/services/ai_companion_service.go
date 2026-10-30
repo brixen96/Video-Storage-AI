@@ -1353,7 +1353,7 @@ func (s *AICompanionService) SaveMemory(memory *models.Memory) error {
 
 // GetMemories retrieves memories with optional filters
 func (s *AICompanionService) GetMemories(category string, limit int) ([]models.Memory, error) {
-	query := `SELECT id, key, value, category, importance, created_at, updated_at FROM memories`
+	query := `SELECT id, key, value, category, importance, source, hit_count, last_used_at, created_at, updated_at FROM memories`
 	args := []interface{}{}
 
 	if category != "" && category != "all" {
@@ -1377,7 +1377,7 @@ func (s *AICompanionService) GetMemories(category string, limit int) ([]models.M
 	memories := []models.Memory{}
 	for rows.Next() {
 		var m models.Memory
-		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.Source, &m.HitCount, &m.LastUsedAt, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		memories = append(memories, m)
@@ -1396,7 +1396,7 @@ func (s *AICompanionService) SearchMemories(query string) ([]models.Memory, erro
 	}
 
 	// Try FTS5 search first with BM25 ranking
-	searchQuery := `SELECT m.id, m.key, m.value, m.category, m.importance, m.created_at, m.updated_at
+	searchQuery := `SELECT m.id, m.key, m.value, m.category, m.importance, m.source, m.hit_count, m.last_used_at, m.created_at, m.updated_at
 	                FROM memories m
 	                INNER JOIN memories_fts f ON m.id = f.rowid
 	                WHERE memories_fts MATCH ?
@@ -1414,7 +1414,7 @@ func (s *AICompanionService) SearchMemories(query string) ([]models.Memory, erro
 	memories := []models.Memory{}
 	for rows.Next() {
 		var m models.Memory
-		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.Source, &m.HitCount, &m.LastUsedAt, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		memories = append(memories, m)
@@ -1430,7 +1430,7 @@ func (s *AICompanionService) SearchMemories(query string) ([]models.Memory, erro
 
 // searchMemoriesLike is a LIKE-based fallback when FTS5 is unavailable or returns no results.
 func (s *AICompanionService) searchMemoriesLike(query string) ([]models.Memory, error) {
-	searchQuery := `SELECT id, key, value, category, importance, created_at, updated_at FROM memories
+	searchQuery := `SELECT id, key, value, category, importance, source, hit_count, last_used_at, created_at, updated_at FROM memories
 	                WHERE key LIKE ? OR value LIKE ?
 	                ORDER BY importance DESC, updated_at DESC
 	                LIMIT 20`
@@ -1445,7 +1445,7 @@ func (s *AICompanionService) searchMemoriesLike(query string) ([]models.Memory, 
 	memories := []models.Memory{}
 	for rows.Next() {
 		var m models.Memory
-		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.Key, &m.Value, &m.Category, &m.Importance, &m.Source, &m.HitCount, &m.LastUsedAt, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, err
 		}
 		memories = append(memories, m)
