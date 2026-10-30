@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 func (s *AICompanionService) registerPerformerTools() {
@@ -280,6 +281,64 @@ func (s *AICompanionService) registerPerformerTools() {
 			"video_id":       videoID,
 			"performer_name": performerName,
 			"unlinked":       true,
+		}, nil
+	})
+
+	// ── create_performers ──────────────────────────────────────────────────────
+	// Registers NEW performers by name (batch). The resolver can only match
+	// against performers that EXIST in the DB — when filenames clearly contain
+	// unregistered names (e.g. a fresh download folder full of new stars), the
+	// Companion reads them itself and registers them here first, then re-runs
+	// link_performers_from_filenames / batch_move_by_pattern.
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name: "create_performers",
+			Description: "Register one or more NEW performers by name (case-insensitive dedupe against existing). " +
+				"Use when filenames clearly contain performer names that are NOT in the database yet — the filename resolver can only match against known performers. " +
+				"Only pass names you are CONFIDENT are real performer names from filenames/titles (e.g. 'Marsha May', 'Madison Ivy'). " +
+				"Never invent names. After creating, re-run link_performers_from_filenames to link them to videos.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"names": map[string]interface{}{
+					"type":        "array",
+					"items":       map[string]interface{}{"type": "string"},
+					"description": "Performer names to create (e.g. ['Marsha May', 'Madison Ivy'])",
+				},
+			}, "required": []string{"names"}},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		rawNames, _ := args["names"].([]interface{})
+		if len(rawNames) == 0 {
+			return map[string]interface{}{"error": "names array required"}, nil
+		}
+
+		created := []map[string]interface{}{}
+		skipped := []string{}
+		for _, n := range rawNames {
+			name, _ := n.(string)
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			// Case-insensitive dedupe
+			var existingID int64
+			if err := s.db.QueryRow(`SELECT id FROM performers WHERE LOWER(name) = LOWER(?)`, name).Scan(&existingID); err == nil {
+				skipped = append(skipped, name+" (exists)")
+				continue
+			}
+			res, err := s.db.Exec(`INSERT INTO performers (name, video_count) VALUES (?, 0)`, name)
+			if err != nil {
+				skipped = append(skipped, name+" (error: "+err.Error()+")")
+				continue
+			}
+			id, _ := res.LastInsertId()
+			created = append(created, map[string]interface{}{"name": name, "id": id})
+		}
+
+		return map[string]interface{}{
+			"created_count": len(created),
+			"created":       created,
+			"skipped":       skipped,
+			"note":          "Now re-run link_performers_from_filenames — these names will resolve against the new entries.",
 		}, nil
 	})
 

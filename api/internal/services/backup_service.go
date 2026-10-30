@@ -55,9 +55,12 @@ func (s *BackupService) CreateBackup(backupType string) (*BackupInfo, error) {
 
 	log.Printf("Creating %s backup: %s", backupType, filename)
 
-	// Get the database file path
+	// Get the database file path (PRAGMA database_list returns seq, name, file —
+	// all three Scan destinations must be real pointers, nil panics the driver)
 	var dbPath string
-	err := s.db.QueryRow("PRAGMA database_list").Scan(nil, nil, &dbPath)
+	var seq int
+	var dbName string
+	err := s.db.QueryRow("PRAGMA database_list").Scan(&seq, &dbName, &dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database path: %w", err)
 	}
@@ -179,9 +182,11 @@ func (s *BackupService) RestoreBackup(filename string) error {
 
 	log.Printf("Restoring database from backup: %s", filename)
 
-	// Get the current database path
+	// Get the current database path (all Scan destinations must be real pointers)
 	var dbPath string
-	err := s.db.QueryRow("PRAGMA database_list").Scan(nil, nil, &dbPath)
+	var seq int
+	var dbName string
+	err := s.db.QueryRow("PRAGMA database_list").Scan(&seq, &dbName, &dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to get database path: %w", err)
 	}

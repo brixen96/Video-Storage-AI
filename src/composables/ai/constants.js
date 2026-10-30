@@ -216,6 +216,7 @@ export const TOOL_LABELS = {
 	get_running_tasks: 'Checking running tasks',
 	get_recent_activity: 'Loading recent activity',
 	get_recent_errors: 'Checking errors',
+	create_performers: 'Creating performers',
 	resolve_performer_from_filename: 'Resolving performer from filename',
 	link_performers_from_filenames: 'Linking performers from filenames',
 	jd_get_queue: 'Checking JDownloader queue',

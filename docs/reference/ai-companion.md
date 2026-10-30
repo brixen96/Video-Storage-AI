@@ -32,6 +32,17 @@ services with zero tool surface). All registered via `buildToolRegistry`:
 Frontend labels for all 15 new tools in `src/composables/ai/constants.js`
 (TOOL_LABELS). Tool count: 87 → 102.
 
+**Follow-up (same day, from first E2E test):**
+- `create_performers` (16th tool, count → 103): batch-register new performers
+  with case-insensitive dedupe. The E2E test revealed the resolver can only
+  match against EXISTING performers — a fresh folder full of unregistered
+  names (Marsha May, Madison Ivy, …) resolves to nothing. The Companion reads
+  names from filenames itself, registers them, then re-runs link + move.
+- **Backup bug fixed**: `PRAGMA database_list` was scanned with
+  `Scan(nil, nil, &dbPath)` — untyped nil destinations → `sql: Scan error …
+  destination not a pointer`. Both occurrences (CreateBackup + Restore) now
+  scan into real `(&seq, &dbName, &dbPath)` pointers.
+
 ## Navbar Companion Modal — THE one chat (2026-10-30 makeover)
 
 Emil's rule: **only ONE chat** — the big modal opened from the navbar. The
