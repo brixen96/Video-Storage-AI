@@ -17,6 +17,15 @@ var schedulerService *services.SchedulerService
 
 // ensureSchedulerService initializes the scheduler service if needed
 func ensureSchedulerService() *services.SchedulerService {
+	// Expose the running scheduler to AI Companion tools (list/create/manage/run).
+	// The closure reads the package var at call time, so it always sees the
+	// current instance; returns a nil interface when not yet initialized.
+	services.SetSchedulerAccess(func() services.SchedulerAccess {
+		if schedulerService == nil {
+			return nil
+		}
+		return schedulerService
+	})
 	if schedulerService == nil {
 		dbInstance := database.GetDB()
 		if dbInstance != nil {

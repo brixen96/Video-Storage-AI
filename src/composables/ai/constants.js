@@ -216,6 +216,19 @@ export const TOOL_LABELS = {
 	get_running_tasks: 'Checking running tasks',
 	get_recent_activity: 'Loading recent activity',
 	get_recent_errors: 'Checking errors',
+	resolve_performer_from_filename: 'Resolving performer from filename',
+	link_performers_from_filenames: 'Linking performers from filenames',
+	jd_get_queue: 'Checking JDownloader queue',
+	jd_control: 'Controlling JDownloader',
+	jd_send_links: 'Sending links to JDownloader',
+	jd_linkgrabber_action: 'Managing linkgrabber',
+	create_backup: 'Creating database backup',
+	list_backups: 'Listing backups',
+	get_backup_stats: 'Checking backup stats',
+	list_scheduled_jobs: 'Listing scheduled jobs',
+	create_scheduled_job: 'Creating scheduled job',
+	manage_scheduled_job: 'Managing scheduled job',
+	get_new_imports: 'Checking new imports',
 }
 
 // Welcome message shown on first open

@@ -226,6 +226,23 @@ func (s *SchedulerService) checkAndExecuteJobs() {
 	}
 }
 
+// RunJobNow executes a job immediately, regardless of its schedule.
+// Returns an error if the job does not exist or is already running.
+func (s *SchedulerService) RunJobNow(id int64) error {
+	job, err := s.GetJobByID(id)
+	if err != nil {
+		return fmt.Errorf("job not found: %d", id)
+	}
+	s.mu.RLock()
+	_, isRunning := s.runningJobs[id]
+	s.mu.RUnlock()
+	if isRunning {
+		return fmt.Errorf("job %d is already running", id)
+	}
+	go s.executeJob(job)
+	return nil
+}
+
 // executeJob executes a scheduled job
 func (s *SchedulerService) executeJob(job *models.ScheduledJob) {
 	jobCtx, cancel := context.WithCancel(s.ctx)

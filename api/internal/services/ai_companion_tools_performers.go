@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 func (s *AICompanionService) registerPerformerTools() {
@@ -281,4 +282,213 @@ func (s *AICompanionService) registerPerformerTools() {
 			"unlinked":       true,
 		}, nil
 	})
+
+	// ── resolve_performer_from_filename ────────────────────────────────────────
+	// The Companion's requested #4: an AGGRESSIVE filename→performer resolver.
+	// Normalizes separators (Crystal.Rush → crystal rush), matches whole words,
+	// falls back to Levenshtein for typos, and returns scored candidates so the
+	// AI can decide what is "100% sure" vs needs human review.
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name: "resolve_performer_from_filename",
+			Description: "Score every known performer against a filename (or folder name) and return ranked candidates. " +
+				"Normalizes dots/underscores/dashes, matches whole words, and tolerates typos (Levenshtein). " +
+				"Use before batch moves to know which videos can be placed with confidence: score 1.0 = all name tokens present (safe), " +
+				"0.95 = first+last present, <0.9 = ambiguous or partial. Check 'ambiguous' — if true, do NOT auto-link, ask Brix.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"filename":  map[string]interface{}{"type": "string", "description": "Filename or folder name to resolve (e.g. 'Crystal.Rush.2024.1080p.mp4')"},
+				"min_score": map[string]interface{}{"type": "number", "description": "Only return candidates at or above this score (default: 0.6)"},
+				"limit":     map[string]interface{}{"type": "number", "description": "Max candidates to return (default: 5)"},
+			}, "required": []string{"filename"}},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		filename, _ := args["filename"].(string)
+		if filename == "" {
+			return map[string]interface{}{"error": "filename required"}, nil
+		}
+		minScore := floatArg(args, "min_score", 0.6)
+		limit := intArg(args, "limit", 5)
+
+		var performers []pathEntity
+		rows, err := s.db.Query(`SELECT id, name FROM performers ORDER BY video_count DESC`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p pathEntity
+			if rows.Scan(&p.id, &p.name) == nil {
+				performers = append(performers, p)
+			}
+		}
+
+		cands := rankPerformersForFilename(filename, performers, minScore)
+		if len(cands) > limit {
+			cands = cands[:limit]
+		}
+		return map[string]interface{}{
+			"filename":          filename,
+			"normalized":        normalizeForMatch(filename),
+			"candidates":        cands,
+			"match_count":       len(cands),
+			"ambiguous":         isAmbiguous(cands),
+			"performers_known":  len(performers),
+			"note":              "ambiguous=true means top 2 candidates are within 0.05 — do not auto-link, ask Brix which one.",
+		}, nil
+	})
+
+	// ── link_performers_from_filenames ─────────────────────────────────────────
+	// Batch version: scans a folder's videos, resolves performers from filenames,
+	// and links ONLY high-confidence, unambiguous matches. Dry-run by default.
+	s.registerTool(lmToolDefinition{
+		Type: "function", Function: lmToolFunction{
+			Name: "link_performers_from_filenames",
+			Description: "Scan videos in a folder and link performers resolved from their filenames. Only links matches at or above min_score that are NOT ambiguous (top-2 within 0.05 = skipped). " +
+				"Safe: only ADDS links, never removes. Run dry_run=true first to see per-video candidates. " +
+				"This is the missing step before batch_move_by_pattern — once performers are linked, move previews resolve to real destinations.",
+			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
+				"library_name":     map[string]interface{}{"type": "string", "description": "Library name or partial name (required)"},
+				"source_subfolder": map[string]interface{}{"type": "string", "description": "Restrict to a relative subfolder (optional, e.g. 'New folder')"},
+				"min_score":        map[string]interface{}{"type": "number", "description": "Minimum confidence to auto-link (default: 0.9 — first+last or all tokens present)"},
+				"max_videos":       map[string]interface{}{"type": "number", "description": "Max videos to process per call (default: 200, max: 500)"},
+				"dry_run":          map[string]interface{}{"type": "boolean", "description": "Preview only, no writes (default: true)"},
+			}, "required": []string{"library_name"}},
+		},
+	}, func(args map[string]interface{}) (interface{}, error) {
+		libName, _ := args["library_name"].(string)
+		srcRel, _ := args["source_subfolder"].(string)
+		minScore := floatArg(args, "min_score", 0.9)
+		maxVids := intArg(args, "max_videos", 200)
+		if maxVids > 500 {
+			maxVids = 500
+		}
+		dryRun := true
+		if v, ok := args["dry_run"].(bool); ok {
+			dryRun = v
+		}
+
+		var libID int64
+		if err := s.db.QueryRow("SELECT id FROM libraries WHERE name LIKE ?", "%"+libName+"%").Scan(&libID); err != nil {
+			return map[string]interface{}{"error": "library not found: " + libName}, nil
+		}
+
+		// Performers ranked by video_count (popular names first)
+		var performers []pathEntity
+		if pRows, err := s.db.Query(`SELECT id, name FROM performers ORDER BY video_count DESC`); err == nil {
+			for pRows.Next() {
+				var p pathEntity
+				if pRows.Scan(&p.id, &p.name) == nil {
+					performers = append(performers, p)
+				}
+			}
+			pRows.Close()
+		}
+		if len(performers) == 0 {
+			return map[string]interface{}{"error": "no performers in database to match against"}, nil
+		}
+
+		// Videos in scope, skipping ones that already have performers
+		query := `SELECT v.id, v.title, v.file_path FROM videos v
+			WHERE v.library_id = ? AND v.file_path LIKE ?
+			AND NOT EXISTS (SELECT 1 FROM video_performers vp WHERE vp.video_id = v.id)
+			ORDER BY v.title LIMIT ?`
+		like := "%" + string(filepath.Separator) + srcRel + "%"
+		if srcRel == "" {
+			like = "%"
+		}
+		rows, err := s.db.Query(query, libID, like, maxVids)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		type videoRow2 struct {
+			id    int64
+			title string
+			path  string
+		}
+		var vids []videoRow2
+		for rows.Next() {
+			var v videoRow2
+			if rows.Scan(&v.id, &v.title, &v.path) == nil {
+				vids = append(vids, v)
+			}
+		}
+
+		linked := 0
+		skippedAmbiguous := 0
+		skippedLow := 0
+		alreadyLinked := 0
+		results := []map[string]interface{}{}
+
+		for _, v := range vids {
+			filename := filepath.Base(v.path)
+			cands := rankPerformersForFilename(filename, performers, minScore)
+			if len(cands) == 0 {
+				skippedLow++
+				continue
+			}
+			if isAmbiguous(cands) {
+				skippedAmbiguous++
+				if dryRun {
+					results = append(results, map[string]interface{}{
+						"video_id": v.id, "title": v.title, "filename": filename,
+						"status": "ambiguous", "candidates": topN(cands, 3),
+					})
+				}
+				continue
+			}
+			best := cands[0]
+
+			// Already linked?
+			var exists int
+			s.db.QueryRow(`SELECT 1 FROM video_performers WHERE video_id = ? AND performer_id = ?`, v.id, best.PerformerID).Scan(&exists)
+			if exists == 1 {
+				alreadyLinked++
+				continue
+			}
+
+			if dryRun {
+				results = append(results, map[string]interface{}{
+					"video_id": v.id, "title": v.title, "filename": filename,
+					"status": "would_link", "performer": best.Name,
+					"score": best.Score, "match_type": best.MatchType,
+				})
+				linked++
+				continue
+			}
+
+			if _, err := s.db.Exec(`INSERT OR IGNORE INTO video_performers (video_id, performer_id) VALUES (?, ?)`, v.id, best.PerformerID); err == nil {
+				s.db.Exec(`UPDATE performers SET video_count = (SELECT COUNT(*) FROM video_performers WHERE performer_id = ?) WHERE id = ?`, best.PerformerID, best.PerformerID)
+				linked++
+				results = append(results, map[string]interface{}{
+					"video_id": v.id, "title": v.title, "filename": filename,
+					"status": "linked", "performer": best.Name,
+					"score": best.Score, "match_type": best.MatchType,
+				})
+			}
+		}
+
+		return map[string]interface{}{
+			"dry_run":           dryRun,
+			"library":           libName,
+			"source":            srcRel,
+			"videos_scanned":    len(vids),
+			"linked":            linked,
+			"skipped_ambiguous": skippedAmbiguous,
+			"skipped_low_score": skippedLow,
+			"already_linked":    alreadyLinked,
+			"min_score":         minScore,
+			"results":           results,
+			"note":              "After linking, re-run batch_move_by_pattern dry_run — destinations will now resolve to real performers.",
+		}, nil
+	})
+}
+
+// topN returns the first n candidates (already sorted best-first).
+func topN(cands []performerCandidate, n int) []performerCandidate {
+	if len(cands) > n {
+		return cands[:n]
+	}
+	return cands
 }

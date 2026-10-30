@@ -1,5 +1,37 @@
 # AI Companion — Architecture Reference
 
+## Tool Expansion Wave (2026-10-30, after chat-export review)
+
+Five gaps identified from Emil's real chat export + service inventory (rich
+services with zero tool surface). All registered via `buildToolRegistry`:
+
+1. **Performer resolver** (`ai_companion_tools_performers.go` + shared
+   `performer_match.go`): `resolve_performer_from_filename` (scored candidates,
+   `ambiguous` flag when top-2 within 0.05) and `link_performers_from_filenames`
+   (batch, dry-run default, min_score 0.9, skips ambiguous). The shared scorer
+   `scorePerformerMatch` normalizes separators (Crystal.Rush → crystal rush),
+   matches whole words, Levenshtein fallback ≥0.85 — also the intended scorer
+   for `AIService.calculateMatch` (not yet refactored onto it).
+2. **JDownloader control** (`ai_companion_tools_jdownloader.go`): `jd_get_queue`
+   (packages/links/speed/state), `jd_control` (start/stop/pause/resume/
+   speed-limit/cleanup), `jd_send_links` (uses model `AutoStart`),
+   `jd_linkgrabber_action` (move/remove/clear). Service had 17+ methods, only
+   status was exposed before.
+3. **Backups** (`ai_companion_tools_backup.go`): `create_backup` (pairs with
+   bulk moves — "back it up first"), `list_backups`, `get_backup_stats`.
+4. **Scheduler** (`ai_companion_tools_scheduler.go`): `list_scheduled_jobs`,
+   `create_scheduled_job` (8 valid job types, interval/cron/once),
+   `manage_scheduled_job` (enable/disable/delete/run_now). Reaches the api-layer
+   singleton via `SetSchedulerAccess` closure (registered in
+   `ensureSchedulerService`); new public `SchedulerService.RunJobNow`.
+5. **New imports** (`ai_companion_tools_imports.go`): `get_new_imports` —
+   videos added in the last N hours with performer resolution + scored
+   `suggested_dest` per file (ready_to_file / ambiguous / needs_metadata).
+   Closes the download→organize loop with #1 and `batch_move_by_pattern`.
+
+Frontend labels for all 15 new tools in `src/composables/ai/constants.js`
+(TOOL_LABELS). Tool count: 87 → 102.
+
 ## Navbar Companion Modal — THE one chat (2026-10-30 makeover)
 
 Emil's rule: **only ONE chat** — the big modal opened from the navbar. The
