@@ -44,11 +44,15 @@
 				<p>Chat with the Companion normally — or switch on an add-on below for roleplay help.</p>
 			</div>
 			<div v-for="(msg, i) in visibleMessages" :key="i" class="mini-msg" :class="msg.role">
-				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}</div>
+				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}<span v-if="msg.reviewed" class="mini-reviewed" title="Reviewed by DeepSeek V3.2 Exp — POV, length floor, focus, scene fit">✦</span></div>
 				<div class="mini-content">
 					<!-- Single bubble: typing dots live INSIDE the streaming message (a standalone second bubble used to appear alongside it) -->
 					<span v-if="msg.role === 'assistant' && msg.streaming && !msg.content" class="typing-indicator"><span></span><span></span><span></span></span>
 					<template v-else>{{ msg.content }}</template>
+					<div v-if="msg.reviewing" class="mini-reviewing">
+						<font-awesome-icon :icon="['fas', 'sparkles']" spin class="me-1" />
+						V3.2 reviewing draft…
+					</div>
 				</div>
 			</div>
 		</div>
@@ -77,6 +81,32 @@
 				<font-awesome-icon :icon="['fas', m.icon]" class="me-1" />
 				{{ m.label }}
 			</button>
+		</div>
+
+		<!-- Focus: elements to weave into generated drafts (scene-fitting) -->
+		<div v-if="contextNpc" class="mini-modes mini-focus" title="Focus — active chips are woven into generated drafts where the scene fits. Never forced.">
+			<span class="mini-modes-label">Focus</span>
+			<button
+				v-for="c in focusChips"
+				:key="c"
+				class="mini-mode-chip focus-chip"
+				:class="{ active: focusActive.includes(c) }"
+				@click="toggleFocus(c)"
+				:title="focusActive.includes(c) ? 'Active — click to deactivate' : 'Click to weave this into drafts'"
+			>
+				{{ c }}
+				<span v-if="isCustomFocus(c)" class="focus-x" title="Remove chip" @click.stop="removeFocusChip(c)">×</span>
+			</button>
+			<input
+				v-if="showFocusAdd"
+				ref="focusAddRef"
+				v-model="focusAddText"
+				class="mini-focus-add"
+				placeholder="add chip…"
+				@keyup.enter="addFocusChip"
+				@keyup.esc="showFocusAdd = false"
+			/>
+			<button v-else class="mini-focus-plus" title="Add your own focus chip" @click="openFocusAdd">＋</button>
 		</div>
 
 		<div class="mini-chat-input">
@@ -168,6 +198,44 @@ const toggleAddOn = (id) => {
 	addOn.value = addOn.value === id ? '' : id
 }
 
+// ── Focus chips: elements the Companion weaves into generated drafts ──
+// Multi-select, persisted. Interpretation is scene-driven (the FOCUS line in
+// buildContextBlock explains how to use each naturally). Custom chips editable.
+const DEFAULT_FOCUS = ['Tits', 'High Heels', 'Eyes', 'Legs', 'Lips']
+const loadJSON = (key, fallback) => {
+	try {
+		const v = JSON.parse(localStorage.getItem(key))
+		return Array.isArray(v) ? v : fallback
+	} catch { return fallback }
+}
+const focusChips = ref(loadJSON('rp_focus_chips', DEFAULT_FOCUS))
+const focusActive = ref(loadJSON('rp_focus_active', []))
+watch(focusChips, (v) => localStorage.setItem('rp_focus_chips', JSON.stringify(v)), { deep: true })
+watch(focusActive, (v) => localStorage.setItem('rp_focus_active', JSON.stringify(v)), { deep: true })
+const toggleFocus = (chip) => {
+	focusActive.value = focusActive.value.includes(chip)
+		? focusActive.value.filter((x) => x !== chip)
+		: [...focusActive.value, chip]
+}
+const isCustomFocus = (chip) => !DEFAULT_FOCUS.includes(chip)
+const removeFocusChip = (chip) => {
+	focusChips.value = focusChips.value.filter((x) => x !== chip)
+	focusActive.value = focusActive.value.filter((x) => x !== chip)
+}
+const showFocusAdd = ref(false)
+const focusAddText = ref('')
+const focusAddRef = ref(null)
+const openFocusAdd = () => {
+	showFocusAdd.value = true
+	nextTick(() => focusAddRef.value?.focus())
+}
+const addFocusChip = () => {
+	const t = focusAddText.value.trim()
+	if (t && !focusChips.value.includes(t)) focusChips.value.push(t)
+	focusAddText.value = ''
+	showFocusAdd.value = false
+}
+
 const modePlaceholder = computed(() => {
 	const npcName = props.contextNpc?.name || 'the NPC'
 	switch (addOn.value) {
@@ -178,13 +246,14 @@ const modePlaceholder = computed(() => {
 	}
 })
 
-// Response length: DYNAMIC only (min-len input + toggle were removed). The
-// Companion picks a natural length per moment, but we give it an explicit
-// TARGET so it doesn't default to ~400-char stubs. Hard cap = 2048 chars (the
-// in-game text input limit) — scoped to in-game Bannerlord responses only
-// (see buildContextBlock).
+// Response length: DYNAMIC only (min-len input + toggle were removed), now with
+// an explicit TARGET plus a FLOOR — drafts were stalling at a uniform short
+// length, so generated in-game responses must land in [MIN, MAX] aiming at
+// TARGET. Hard cap = 2048 chars (the in-game text input limit) — scoped to
+// in-game Bannerlord responses only (see buildContextBlock).
 const MAX_RESPONSE_LENGTH = 2048
 const TARGET_RESPONSE_LENGTH = 1800
+const MIN_RESPONSE_LENGTH = 1600
 
 // ── Manual NPC-responded trigger (replaced auto-react) ──
 // Auto-react used to fire on EVERY file change; now nothing runs on its own.
@@ -288,6 +357,9 @@ const buildContextBlock = (opts = {}) => {
 			break
 	}
 
+	// POV — the standing rule: the mini companion writes ONLY for the player.
+	lines.push(`POV: You write ONLY for Emil (the player character). You never write AS an NPC, never draft NPC dialogue for the game — NPCs speak through the game itself — and every piece of in-game text you draft is from Emil's first-person perspective. Telling Brix what an NPC is likely to do or say next (prediction) is fine; writing their reply FOR the game is not.`)
+
 	lines.push(`FACTS: The conversation(s) below are the ONLY source of what has been said and what the NPC(s) know or have heard. Do NOT invent or reference backstory, rumors, personality traits, or world facts. Nothing exists except what is in the dialogue and the mechanical states below.`)
 
 	// Length — DYNAMIC only (min-len input + toggle were removed), but with an
@@ -295,12 +367,21 @@ const buildContextBlock = (opts = {}) => {
 	// limit is 2048: the companion's MESSAGE to Brix is always uncapped; only
 	// each individual piece of in-game text is capped.
 	if (!isChat && ['improve', 'autoreact', 'ooc'].includes(frameMode)) {
-		lines.push(`LENGTH: your reply to Brix is NOT limited as a whole — explain, give feedback, and draft freely. But EVERY individual piece of in-game text he will paste into the game (each drafted response, each OOC message) must aim for ${TARGET_RESPONSE_LENGTH} characters and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. If you draft several options or responses for multiple NPCs, apply that to EACH. Rich, detailed, immersive responses — no padding, but never skimp either.`)
+		if (frameMode === 'ooc') {
+			lines.push(`LENGTH: your reply to Brix is NOT limited as a whole — explain, give feedback, and draft freely. But EVERY OOC message he will paste into the game must aim for ${TARGET_RESPONSE_LENGTH} characters and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. Rich and complete — no padding, but never skimp either.`)
+		} else {
+			lines.push(`LENGTH: your reply to Brix is NOT limited as a whole — explain, give feedback, and draft freely. But EVERY in-game response you draft for him must aim for ${TARGET_RESPONSE_LENGTH} characters, NEVER fall below ${MIN_RESPONSE_LENGTH}, and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. If you draft several options or responses for multiple NPCs, apply that to EACH. Rich, detailed, immersive responses — expand beats and detail to reach the floor naturally, never pad.`)
+		}
 	} else if (isChat) {
 		// In plain chat the Companion may still be asked to draft a response —
-		// give it the same target so a "write my next response" ask doesn't come
-		// back as a stunted 400-char stub.
-		lines.push(`LENGTH: any in-game response or OOC text you draft for Brix (even in plain chat) must aim for ${TARGET_RESPONSE_LENGTH} characters and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. Your casual chat replies themselves have no length limit. Rich, detailed, immersive responses — never skimp.`)
+		// give it the same target + floor so a "write my next response" ask
+		// doesn't come back as a stunted stub.
+		lines.push(`LENGTH: any in-game response you draft for Brix (even in plain chat) must aim for ${TARGET_RESPONSE_LENGTH} characters, NEVER fall below ${MIN_RESPONSE_LENGTH}, and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. OOC messages and your casual chat replies have no minimum. Rich, detailed, immersive responses — expand to reach the floor naturally, never pad.`)
+	}
+
+	// Focus chips — elements to weave into drafts where the scene fits
+	if (focusActive.value.length) {
+		lines.push(`FOCUS: when drafting in-game text, weave in 1-3 natural touches of ${focusActive.value.join(', ')} — only where the scene supports it, never forced. Interpret each to fit the moment: e.g. 'Tits' could be his gaze landing there, a touch, a massage; 'Eyes' could be eye contact or a look exchanged. Fitting the scene beats forcing the list.`)
 	}
 
 	// RP rules govern IN-GAME responses — excluded from normal chat so casual
@@ -386,12 +467,25 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 	]
 
 	const msgIndex = rpHistory.value.length
-	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true })
+	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true, reviewing: false, reviewed: false })
 	await scrollDown()
 
 	streamMessage(text, historyPayload, {
 		onTextChunk: (chunk) => {
 			rpHistory.value[msgIndex].content += chunk
+			scrollDown()
+		},
+		onReviewStarted: () => {
+			rpHistory.value[msgIndex].reviewing = true
+			scrollDown()
+		},
+		onReviewDone: (reviewedText) => {
+			const m = rpHistory.value[msgIndex]
+			m.reviewing = false
+			if (reviewedText) {
+				m.content = reviewedText
+				m.reviewed = true
+			}
 			scrollDown()
 		},
 		onDone: () => {
@@ -419,7 +513,7 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 				})
 			}
 		},
-	}, { scope: 'rp' }) // persist to the RP thread, not the main companion chat
+	}, { scope: 'rp', focus: focusActive.value }) // persist to the RP thread, not the main companion chat
 }
 
 const quickAction = (text) => {
@@ -738,5 +832,65 @@ const onNpcResponded = () => {
 	background: rgba(0, 217, 255, 0.12);
 	border-color: #00d9ff;
 	color: #00d9ff;
+}
+
+/* ── Focus chips (woven into generated drafts) ── */
+.mini-focus {
+	margin-top: 0.3rem;
+}
+
+.focus-chip {
+	font-size: 0.72rem;
+}
+
+.focus-x {
+	margin-left: 0.35rem;
+	opacity: 0.6;
+	font-weight: 700;
+}
+
+.focus-x:hover {
+	opacity: 1;
+	color: #ff6b6b;
+}
+
+.mini-focus-add {
+	width: 90px;
+	font-size: 0.72rem;
+	padding: 0.15rem 0.45rem;
+	border-radius: 10px;
+	border: 1px dashed rgba(0, 217, 255, 0.4);
+	background: rgba(0, 0, 0, 0.25);
+	color: #fff;
+}
+
+.mini-focus-plus {
+	border: 1px dashed rgba(255, 255, 255, 0.25);
+	background: transparent;
+	color: rgba(255, 255, 255, 0.5);
+	border-radius: 10px;
+	font-size: 0.72rem;
+	padding: 0.15rem 0.5rem;
+	cursor: pointer;
+}
+
+.mini-focus-plus:hover {
+	color: #00d9ff;
+	border-color: rgba(0, 217, 255, 0.4);
+}
+
+/* ── V3.2 review layer indicators ── */
+.mini-reviewed {
+	color: #b197fc;
+	margin-left: 0.4rem;
+	font-size: 0.7rem;
+	cursor: help;
+}
+
+.mini-reviewing {
+	margin-top: 0.35rem;
+	font-size: 0.72rem;
+	color: #b197fc;
+	opacity: 0.9;
 }
 </style>
