@@ -45,6 +45,7 @@ func (s *AICompanionService) buildToolRegistry() {
 	s.registerBackupTools()
 	s.registerSchedulerTools()
 	s.registerImportTools()
+	s.registerModelTools()
 }
 
 // getLMToolDefinitions returns all registered tool definitions, sorted by name

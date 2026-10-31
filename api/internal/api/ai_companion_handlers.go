@@ -55,7 +55,6 @@ func aiCompanionChatStream(c *gin.Context) {
 		Message string              `json:"message"`
 		History []map[string]string `json:"history"`
 		Scope   string              `json:"scope"`
-		Focus   []string            `json:"focus"` // mini-chat focus chips woven into draft review
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, models.ErrorResponseMsg("Invalid request", err.Error()))
@@ -159,28 +158,10 @@ func aiCompanionChatStream(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	// RP review layer (scope 'rp' only): DeepSeek V3.2 Exp makes one final pass
-	// over the mini-chat reply — POV check (drafts are always Emil's), min-length
-	// fill on generated drafts, focus chips, scene fit. Non-draft commentary
-	// passes through unchanged. review_started/review_done let the mini-chat show
-	// a "reviewing" state and swap in the final text — the PERSISTED message is
-	// always the reviewed version (single source of truth).
-	if scope == "rp" && fullResponse.Len() > 0 {
-		fmt.Fprintf(c.Writer, "event: review_started\ndata: {}\n\n")
-		flusher.Flush()
-		reviewed, rerr := aiCompanionService.ReviewRPDraft(fullResponse.String(), request.History, request.Focus)
-		revPayload := map[string]string{"text": ""}
-		if rerr == nil && reviewed != "" {
-			fullResponse.Reset()
-			fullResponse.WriteString(reviewed)
-			revPayload["text"] = reviewed
-		} else {
-			log.Printf("[AI] RP review skipped: %v", rerr)
-		}
-		revEvt, _ := json.Marshal(revPayload)
-		fmt.Fprintf(c.Writer, "event: review_done\ndata: %s\n\n", string(revEvt))
-		flusher.Flush()
-	}
+	// NOTE: the V3.2 draft review is NO LONGER a hardcoded post-stream pass.
+	// The master model (configured V4-Flash) orchestrates it itself via the
+	// review_rp_draft / ask_model tools inside the tool loop — generate →
+	// review → revise, per draft. See ai_companion_tools_models.go.
 
 	// Persist the exchange to the database
 	if fullResponse.Len() > 0 {

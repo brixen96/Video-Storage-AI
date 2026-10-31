@@ -44,15 +44,11 @@
 				<p>Chat with the Companion normally — or switch on an add-on below for roleplay help.</p>
 			</div>
 			<div v-for="(msg, i) in visibleMessages" :key="i" class="mini-msg" :class="msg.role">
-				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}<span v-if="msg.reviewed" class="mini-reviewed" title="Reviewed by DeepSeek V3.2 Exp — POV, length floor, focus, scene fit">✦</span></div>
+				<div class="mini-role">{{ msg.role === 'user' ? 'Emil' : 'Companion' }}</div>
 				<div class="mini-content">
 					<!-- Single bubble: typing dots live INSIDE the streaming message (a standalone second bubble used to appear alongside it) -->
 					<span v-if="msg.role === 'assistant' && msg.streaming && !msg.content" class="typing-indicator"><span></span><span></span><span></span></span>
 					<template v-else>{{ msg.content }}</template>
-					<div v-if="msg.reviewing" class="mini-reviewing">
-						<font-awesome-icon :icon="['fas', 'sparkles']" spin class="me-1" />
-						V3.2 reviewing draft…
-					</div>
 				</div>
 			</div>
 		</div>
@@ -384,6 +380,12 @@ const buildContextBlock = (opts = {}) => {
 		lines.push(`FOCUS: when drafting in-game text, weave in 1-3 natural touches of ${focusActive.value.join(', ')} — only where the scene supports it, never forced. Interpret each to fit the moment: e.g. 'Tits' could be his gaze landing there, a touch, a massage; 'Eyes' could be eye contact or a look exchanged. Fitting the scene beats forcing the list.`)
 	}
 
+	// Review workflow — the master (V4-Flash) orchestrates the V3.2 Exp review
+	// itself via the review_rp_draft tool: generate → review → revise, per draft.
+	if (frameMode === 'autoreact' || frameMode === 'improve' || isChat) {
+		lines.push(`REVIEW WORKFLOW: for EVERY in-game response draft you write, after drafting it call the review_rp_draft tool with the draft (plus focus chips and a one-line scene summary), then revise the draft using the returned feedback before presenting it. Do this per draft option (e.g. for 3 options: draft 1 → review → revise → draft 2 → ...). Present only the reviewed, revised versions — never the raw first drafts, and never mention the review step to Brix.`)
+	}
+
 	// RP rules govern IN-GAME responses — excluded from normal chat so casual
 	// conversation is never constrained by response formatting rules.
 	if (primaryCtx?.rp_rules && !isChat) {
@@ -467,25 +469,12 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 	]
 
 	const msgIndex = rpHistory.value.length
-	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true, reviewing: false, reviewed: false })
+	pushMessage({ role: 'assistant', content: '', timestamp: new Date(), source: 'llm', streaming: true })
 	await scrollDown()
 
 	streamMessage(text, historyPayload, {
 		onTextChunk: (chunk) => {
 			rpHistory.value[msgIndex].content += chunk
-			scrollDown()
-		},
-		onReviewStarted: () => {
-			rpHistory.value[msgIndex].reviewing = true
-			scrollDown()
-		},
-		onReviewDone: (reviewedText) => {
-			const m = rpHistory.value[msgIndex]
-			m.reviewing = false
-			if (reviewedText) {
-				m.content = reviewedText
-				m.reviewed = true
-			}
 			scrollDown()
 		},
 		onDone: () => {
@@ -513,7 +502,7 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 				})
 			}
 		},
-	}, { scope: 'rp', focus: focusActive.value }) // persist to the RP thread, not the main companion chat
+	}, { scope: 'rp' }) // persist to the RP thread, not the main companion chat
 }
 
 const quickAction = (text) => {
@@ -877,20 +866,5 @@ const onNpcResponded = () => {
 .mini-focus-plus:hover {
 	color: #00d9ff;
 	border-color: rgba(0, 217, 255, 0.4);
-}
-
-/* ── V3.2 review layer indicators ── */
-.mini-reviewed {
-	color: #b197fc;
-	margin-left: 0.4rem;
-	font-size: 0.7rem;
-	cursor: help;
-}
-
-.mini-reviewing {
-	margin-top: 0.35rem;
-	font-size: 0.72rem;
-	color: #b197fc;
-	opacity: 0.9;
 }
 </style>

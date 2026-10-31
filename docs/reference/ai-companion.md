@@ -30,7 +30,15 @@ services with zero tool surface). All registered via `buildToolRegistry`:
    Closes the download→organize loop with #1 and `batch_move_by_pattern`.
 
 Frontend labels for all 15 new tools in `src/composables/ai/constants.js`
-(TOOL_LABELS). Tool count: 87 → 102.
+(TOOL_LABELS). Tool count: 87 → 102 → **105** (create_performers,
+review_rp_draft, ask_model).
+
+**Tool truncation fix (2026-10-31)**: both tool loops truncated the sorted
+tool list to **40** — with 100+ tools, everything alphabetically after
+`get_library_videos` (jd_*, list_scheduled_jobs, resolve_performer…,
+save_memory, scrape_url, suggest_*, update_*) was INVISIBLE to the model.
+Cap raised to 150 (safety valve only) with a loud warning log. This likely
+explained assorted "why didn't it use X tool" mysteries.
 
 **Follow-up (same day, from first E2E test):**
 - `create_performers` (16th tool, count → 103): batch-register new performers
@@ -142,7 +150,11 @@ Component: `AICompanionChat.vue` — 919 lines (refactored down from 1,830; temp
 - **Modes → Add-ons**: `addOn` ref (`''` = normal chat, the default; fresh localStorage key `rp_companion_addon`). Chips: Improve / OOC / Plan — **NO "Write" chip and NO "Chat" chip** (both Emil decisions): writing the next in-game response is the DEFAULT plain-chat behavior — the default framing tells the model to switch into RP style when asked; nothing highlighted = normal chat.
 - **Length**: dynamic only — min-len input + Dynamic toggle removed. Cap is **per paste-able in-game text unit**: `MAX_RESPONSE_LENGTH=2048` hard cap + `TARGET_RESPONSE_LENGTH=1800` target (fixes drafts stalling at ~400 chars — verified in DB data, it was model default not a stale setting). Target line emitted for improve/autoreact/ooc AND for plain chat (chat replies uncapped, drafted in-game text targeted).
 - **Single streaming bubble**: typing dots render INSIDE the empty streaming placeholder (`msg.streaming && !msg.content`) — the old standalone `v-if="isStreaming"` bubble caused a duplicate header-only bubble (same bug fixed in `AIPage.vue` chat tab).
-- **V3.2 draft review layer (2026-10-31)**: after every `scope='rp'` stream the backend runs `ReviewRPDraft` (new file `ai_companion_rp_review.go`, model `deepseek/deepseek-v3.2-exp` — Emil's pick, most NSFW-capable, $0.27/$0.41 per 1M) BEFORE persisting: POV check, length floor fill, focus chips, scene fit; non-draft commentary passes through. SSE events `review_started`/`review_done` (handled in `useChatStreaming`) let the bubble show "V3.2 reviewing…" then swap in the final text; a ✦ badge marks reviewed messages. The PERSISTED message is always the reviewed version (single source of truth). On failure the original streams through untouched (review is a layer, never a failure point).
+- **Master-orchestrated model calls (2026-10-31, v2)**: the configured chat model (`deepseek/deepseek-v4-flash-0731` in App settings) is the MASTER — it generates drafts itself and calls other models as TOOLS inside the tool loop (synchronous: it waits, or does other work between calls). New file `ai_companion_tools_models.go`:
+  - `review_rp_draft(draft, focus, scene)` → V3.2 Exp (`deepseek/deepseek-v3.2-exp`, Emil's pick — most NSFW-capable, $0.27/$0.41 per 1M) returns structured JSON feedback (verdict/feedback/length_ok/pov_ok/focus_used). The mini-chat's REVIEW WORKFLOW context line instructs: draft → review → revise, per option, present only revised versions, never mention the review step.
+  - `ask_model(model, prompt, system, max_tokens)` → generic cross-model call — the future vision/image path plugs in here (image_url content parts) with no new plumbing.
+  - `callModel()` shared helper: synchronous, 90s timeout, non-streaming, returns first choice.
+  - **Superseded**: the hardcoded post-stream `ReviewRPDraft` pass + `review_started`/`review_done` SSE events + ✦/reviewing UI (removed — review now happens mid-loop before the final text streams).
 - **Focus chips**: multi-select row under Add-ons (`Tits, High Heels, Eyes, Legs, Lips` defaults + custom `＋` adder, persisted `rp_focus_chips`/`rp_focus_active`). Active chips ride the stream request (`focus: []`) → FOCUS line in context (weave 1-3 touches WHERE THE SCENE FITS, interpretation examples) + the review pass re-checks them.
 - **Min length**: `MIN_RESPONSE_LENGTH=1600` — generated drafts (autoreact + plain-chat drafting + improve) aim 1800 / floor 1600 / cap 2048; **OOC messages excluded** (natural length, target-only) — they're 1-2 sentences by nature. Revived from Emil's original ask after drafts kept stalling at a uniform short length.
 - **POV standing line**: every context block (all add-ons + plain chat) now states — writes ONLY for Emil, never AS an NPC, never NPC dialogue FOR THE GAME (prediction of NPC behavior is fine). Enforced again in the review prompt.

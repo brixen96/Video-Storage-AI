@@ -711,10 +711,13 @@ When the user asks to scrape a site:
 
 	// Tool calling loop (max 10 iterations)
 	for iteration := 0; iteration < 10; iteration++ {
-		// Limit tools to avoid exceeding OpenRouter's payload size limit
+		// Safety valve only — 150 fits OpenRouter/DeepSeek payloads fine. The old
+		// cap of 40 silently hid HALF the toolset (alphabetical truncation), making
+		// everything after get_library_videos unreachable to the model.
 		toolDefs := tools
-		if len(toolDefs) > 40 {
-			toolDefs = toolDefs[:40]
+		if len(toolDefs) > 150 {
+			toolDefs = toolDefs[:150]
+			log.Printf("[AI] WARNING: truncated tools from %d to %d", len(tools), len(toolDefs))
 		}
 
 		reqBody := map[string]interface{}{
@@ -946,11 +949,12 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 	}
 
 	for iteration := 0; iteration < 10; iteration++ {
-		// Limit tools to avoid exceeding OpenRouter's payload size limit
+		// Safety valve only — see ChatLLM: the old cap of 40 silently hid half the
+		// toolset (alphabetical truncation). 150 fits the payload comfortably.
 		toolDefs := tools
-		if len(toolDefs) > 40 {
-			toolDefs = toolDefs[:40]
-			log.Printf("[AI] Truncated tools from %d to %d to fit payload limits", len(tools), len(toolDefs))
+		if len(toolDefs) > 150 {
+			toolDefs = toolDefs[:150]
+			log.Printf("[AI] WARNING: truncated tools from %d to %d", len(tools), len(toolDefs))
 		}
 
 		reqBody := map[string]interface{}{

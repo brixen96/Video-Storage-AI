@@ -48,7 +48,7 @@ export function useChatStreaming() {
 	 * @param {object} opts - { scope } — 'rp' persists to the Bannerlord RP thread, 'main' (default) to the companion chat
 	 */
 	const streamMessage = (fullMessage, historyPayload, hooks = {}, opts = {}) => {
-		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage, onToolProgress, onRequestInfo, onReviewStarted, onReviewDone } = hooks
+		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage, onToolProgress, onRequestInfo } = hooks
 
 		isStreaming.value = true
 		activeToolCall.value = ''
@@ -149,22 +149,6 @@ export function useChatStreaming() {
 								streamDiagnostics.requests.push(info)
 								onRequestInfo?.(info)
 							} catch { /* ignore */ }
-							currentEventType = ''
-							continue
-						}
-
-						// RP review layer (mini-chat): backend runs the V3.2 pass
-						// between stream end and [DONE] — show state, swap final text.
-						if (currentEventType === 'review_started') {
-							onReviewStarted?.()
-							currentEventType = ''
-							continue
-						}
-						if (currentEventType === 'review_done') {
-							try {
-								const { text } = JSON.parse(data)
-								onReviewDone?.(text || '')
-							} catch { onReviewDone?.('') }
 							currentEventType = ''
 							continue
 						}
