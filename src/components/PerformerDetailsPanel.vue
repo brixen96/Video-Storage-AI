@@ -376,8 +376,21 @@ export default {
 		getPreviewUrl(path) {
 			if (!path) return ''
 			if (path.startsWith('http://') || path.startsWith('https://')) return path
-			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
-			return `${API_ORIGIN}${pathParts.join('/')}`
+			if (path.startsWith('/assets/')) return `${API_ORIGIN}${path}`
+			if (path.startsWith('assets/')) return `${API_ORIGIN}/${path}`
+			// Absolute filesystem paths → rebuild a proper /assets/ URL
+			// (same fix as PerformersPage.getPreviewUrl)
+			const norm = path.replace(/\\/g, '/')
+			let rel = ''
+			const assetsIdx = norm.indexOf('/assets/')
+			if (assetsIdx >= 0) {
+				rel = norm.slice(assetsIdx + 1)
+			} else {
+				const perfIdx = norm.indexOf('/performers/')
+				if (perfIdx >= 0) rel = 'assets' + norm.slice(perfIdx)
+			}
+			if (!rel) rel = 'assets/' + norm.replace(/^\/+/, '')
+			return `${API_ORIGIN}/${rel.split('/').map((p) => encodeURIComponent(p)).join('/')}`
 		},
 		getPerformerPreviews(performer) {
 			if (this.performerPreviews[performer.id]) {

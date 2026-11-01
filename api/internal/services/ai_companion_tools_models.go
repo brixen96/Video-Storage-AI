@@ -118,7 +118,8 @@ func (s *AICompanionService) registerModelTools() {
 	s.registerTool(lmToolDefinition{
 		Type: "function", Function: lmToolFunction{
 			Name: "review_rp_draft",
-			Description: "Send a generated RP response draft to the V3.2 Exp reviewer model and get structured feedback (POV violations, length fixes, focus-chip weaving, scene-fit notes). " +
+			Description: "Send a generated RP response draft to the review model and get structured feedback (POV violations, length fixes, focus-chip weaving, scene-fit notes). " +
+				"V3.2 Exp is RESERVED for NSFW: pass nsfw=true only for explicit adult drafts; non-explicit drafts review on your own model. " +
 				"WORKFLOW: after you generate each draft option, call this with it, then revise the draft using the feedback before presenting it. " +
 				"Use for every in-game response draft you write for Brix. Do NOT use for casual chat replies or OOC messages.",
 			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{
@@ -135,6 +136,10 @@ func (s *AICompanionService) registerModelTools() {
 					"type":        "string",
 					"description": "Short scene context: who is present, what just happened (helps the reviewer judge fit)",
 				},
+				"nsfw": map[string]interface{}{
+					"type":        "boolean",
+					"description": "true = the draft contains explicit adult content → reviewed by V3.2 Exp (NSFW-fluent). false/omit = non-explicit → reviewed with your own model. V3.2 Exp is RESERVED for NSFW drafts.",
+				},
 			}, "required": []string{"draft"}},
 		},
 	}, func(args map[string]interface{}) (interface{}, error) {
@@ -147,6 +152,16 @@ func (s *AICompanionService) registerModelTools() {
 		}
 		focus := bArgStrList(args, "focus")
 		scene := bArgStr(args, "scene", "")
+		nsfw := false
+		if v, ok := args["nsfw"].(bool); ok {
+			nsfw = v
+		}
+		// V3.2 Exp is reserved for NSFW drafts — everything else reviews on the
+		// master's own model (cheaper, and keeps the specialist on its strength).
+		reviewer := s.GetAIConfig().ModelName
+		if nsfw {
+			reviewer = rpReviewModel
+		}
 
 		var user strings.Builder
 		if len(focus) > 0 {
@@ -159,7 +174,7 @@ func (s *AICompanionService) registerModelTools() {
 		user.WriteString(`Return JSON ONLY:
 {"feedback":["short actionable point", "..."],"length_ok":true|false,"pov_ok":true|false,"focus_used":["chip", "..."],"verdict":"pass|revise"}`)
 
-		raw, err := s.callModel(rpReviewModel, rpReviewSystemPrompt(), user.String(), 1500, 0.4)
+		raw, err := s.callModel(reviewer, rpReviewSystemPrompt(), user.String(), 1500, 0.4)
 		if err != nil {
 			return nil, err
 		}
@@ -179,7 +194,8 @@ func (s *AICompanionService) registerModelTools() {
 			parsed.Verdict = "revise"
 		}
 		return map[string]interface{}{
-			"reviewer":    rpReviewModel,
+			"reviewer":    reviewer,
+			"nsfw":        nsfw,
 			"verdict":     parsed.Verdict,
 			"feedback":    parsed.Feedback,
 			"length_ok":   parsed.LengthOK,

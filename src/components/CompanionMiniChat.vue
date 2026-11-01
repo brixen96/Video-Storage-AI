@@ -33,6 +33,9 @@
 				<font-awesome-icon :icon="['fas', 'bolt']" class="me-1" />
 				NPC Responded!
 			</button>
+			<span v-if="ctxTokens > 0" class="mini-ctx-pill" :title="`Context window: the last request carried ${ctxTokens.toLocaleString()} tokens`">
+				🧠 {{ fmtCtx(ctxTokens) }}
+			</span>
 			<span v-if="isStreaming" class="mini-thinking">
 				<font-awesome-icon :icon="['fas', 'spinner']" spin class="me-1" />
 				thinking...
@@ -171,6 +174,14 @@ onMounted(() => {
 
 const input = ref('')
 const msgsRef = ref(null)
+
+// ── Context window usage (from the last request's token_usage event) ──
+const ctxTokens = ref(0)
+const fmtCtx = (n) => {
+	if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+	if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+	return String(n)
+}
 
 // ── Add-ons: optional roleplay behavior layered on NORMAL CHAT ──
 // '' (no add-on) = plain conversation — no RP framing, no character limits.
@@ -375,15 +386,15 @@ const buildContextBlock = (opts = {}) => {
 		lines.push(`LENGTH: any in-game response you draft for Brix (even in plain chat) must aim for ${TARGET_RESPONSE_LENGTH} characters, NEVER fall below ${MIN_RESPONSE_LENGTH}, and NEVER exceed ${MAX_RESPONSE_LENGTH} — the game's text input limit. OOC messages and your casual chat replies have no minimum. Rich, detailed, immersive responses — expand to reach the floor naturally, never pad.`)
 	}
 
-	// Focus chips — elements to weave into drafts where the scene fits
+	// Focus chips — DELIBERATE content requests from Brix: every draft must include them
 	if (focusActive.value.length) {
-		lines.push(`FOCUS: when drafting in-game text, weave in 1-3 natural touches of ${focusActive.value.join(', ')} — only where the scene supports it, never forced. Interpret each to fit the moment: e.g. 'Tits' could be his gaze landing there, a touch, a massage; 'Eyes' could be eye contact or a look exchanged. Fitting the scene beats forcing the list.`)
+		lines.push(`FOCUS (Brix's active chips — deliberate content requests): ${focusActive.value.join(', ')}. EVERY in-game response you draft MUST work in EACH active focus at least once — adapting HOW it appears to the scene (e.g. 'Tits' → his gaze landing there, a touch, a massage; 'Eyes' → eye contact or a lingering look), never WHETHER it appears. Only a genuinely impossible scene justifies skipping one. Casual chat replies can ignore this.`)
 	}
 
 	// Review workflow — the master (V4-Flash) orchestrates the V3.2 Exp review
 	// itself via the review_rp_draft tool: generate → review → revise, per draft.
 	if (frameMode === 'autoreact' || frameMode === 'improve' || isChat) {
-		lines.push(`REVIEW WORKFLOW: for EVERY in-game response draft you write, after drafting it call the review_rp_draft tool with the draft (plus focus chips and a one-line scene summary), then revise the draft using the returned feedback before presenting it. Do this per draft option (e.g. for 3 options: draft 1 → review → revise → draft 2 → ...). Present only the reviewed, revised versions — never the raw first drafts, and never mention the review step to Brix.`)
+		lines.push(`REVIEW WORKFLOW: for EVERY in-game response draft you write, after drafting it call the review_rp_draft tool with the draft (plus the focus chips, a one-line scene summary, and nsfw=true when the draft contains explicit adult content — nsfw=false otherwise, V3.2 Exp is RESERVED for NSFW), then revise the draft using the returned feedback before presenting it. Do this per draft option (e.g. for 3 options: draft 1 → review → revise → draft 2 → ...). Present only the reviewed, revised versions — never the raw first drafts, and never mention the review step to Brix.`)
 	}
 
 	// RP rules govern IN-GAME responses — excluded from normal chat so casual
@@ -476,6 +487,10 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 		onTextChunk: (chunk) => {
 			rpHistory.value[msgIndex].content += chunk
 			scrollDown()
+		},
+		onTokenUsage: (usage) => {
+			// request_prompt_tokens = THIS request's prompt size (true context usage)
+			ctxTokens.value = usage.request_prompt_tokens || usage.prompt_tokens || 0
 		},
 		onDone: () => {
 			rpHistory.value[msgIndex].streaming = false
@@ -821,6 +836,18 @@ const onNpcResponded = () => {
 	background: rgba(0, 217, 255, 0.12);
 	border-color: #00d9ff;
 	color: #00d9ff;
+}
+
+/* ── Context window usage pill ── */
+.mini-ctx-pill {
+	font-size: 0.68rem;
+	font-weight: 600;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	color: rgba(255, 255, 255, 0.65);
+	border-radius: 9px;
+	padding: 0.1rem 0.45rem;
+	white-space: nowrap;
 }
 
 /* ── Focus chips (woven into generated drafts) ── */

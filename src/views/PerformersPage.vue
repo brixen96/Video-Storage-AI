@@ -220,7 +220,7 @@
 							loop
 							muted
 							playsinline
-							@error="handleVideoError"
+							@error="handleVideoError(performer, $event)"
 						></video>
 						<!-- Fallback for No Preview -->
 						<div v-if="!performer.preview_path && !performer.thumbnail_path && !hoveredPerformer[performer.id]" class="no-preview">
@@ -297,7 +297,7 @@
 							loop
 							muted
 							playsinline
-							@error="handleVideoError"
+							@error="handleVideoError(performer, $event)"
 						></video>
 						<!-- Fallback for No Preview -->
 						<div v-if="!performer.preview_path && !performer.thumbnail_path && !hoveredPerformer[performer.id]" class="no-preview-small">
@@ -566,8 +566,22 @@ export default {
 		getPreviewUrl(path) {
 			if (!path) return ''
 			if (path.startsWith('http://') || path.startsWith('https://')) return path
-			const pathParts = path.split('/').map((part) => encodeURIComponent(part))
-			return `${API_ORIGIN}${pathParts.join('/')}`
+			if (path.startsWith('/assets/')) return `${API_ORIGIN}${path}`
+			if (path.startsWith('assets/')) return `${API_ORIGIN}/${path}`
+			// Absolute filesystem paths (Windows C:\... or POSIX-style /Users/...)
+			// were passed through raw and produced http://host/Users/... URLs
+			// (OpaqueResponseBlocking). Rebuild a proper /assets/ URL instead.
+			const norm = path.replace(/\\/g, '/')
+			let rel = ''
+			const assetsIdx = norm.indexOf('/assets/')
+			if (assetsIdx >= 0) {
+				rel = norm.slice(assetsIdx + 1) // keep 'assets/...'
+			} else {
+				const perfIdx = norm.indexOf('/performers/')
+				if (perfIdx >= 0) rel = 'assets' + norm.slice(perfIdx)
+			}
+			if (!rel) rel = 'assets/' + norm.replace(/^\/+/, '')
+			return `${API_ORIGIN}/${rel.split('/').map((p) => encodeURIComponent(p)).join('/')}`
 		},
 		startVideoPreview(performer) {
 			this.hoveredPerformer[performer.id] = true
@@ -575,9 +589,13 @@ export default {
 		stopVideoPreview(performer) {
 			this.hoveredPerformer[performer.id] = false
 		},
-		handleVideoError(event) {
+		handleVideoError(performer, event) {
 			const video = event.target
-			console.error('Video failed to load:', { src: video.src, error: video.error })
+			// Previews are HEVC (H.265) MKV — Firefox cannot decode them without the
+			// platform HEVC extension. Revert the hover so the thumbnail stays
+			// instead of a black broken video element.
+			console.warn('Performer preview not playable (likely HEVC — Firefox cannot decode it):', video.src)
+			this.hoveredPerformer[performer.id] = false
 		},
 		async loadPerformers() {
 			this.loading = true

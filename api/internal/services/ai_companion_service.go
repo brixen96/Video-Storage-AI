@@ -998,6 +998,7 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 		var accContent strings.Builder
 		var accCalls []accToolCall
 		hasToolCalls := false
+		lastReqPromptTokens := 0 // this request's prompt size = true context-window usage
 
 		scanner := bufio.NewScanner(resp)
 		scanner.Buffer(make([]byte, 512*1024), 512*1024) // 512KB per line — handles large tool result chunks
@@ -1044,6 +1045,7 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 			if chunk.Usage != nil {
 				totalPromptTokens += chunk.Usage.PromptTokens
 				totalCompletionTokens += chunk.Usage.CompletionTokens
+				lastReqPromptTokens = chunk.Usage.PromptTokens // per-request, NOT cumulative
 				if chunk.Usage.CompletionTokensDetails != nil {
 					totalReasoningTokens += chunk.Usage.CompletionTokensDetails.ReasoningTokens
 				}
@@ -1093,10 +1095,11 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 		// Emit accumulated token usage after each LLM call
 		if onTokenUsage != nil && totalPromptTokens > 0 {
 			usage := map[string]interface{}{
-				"prompt_tokens":     totalPromptTokens,
-				"completion_tokens": totalCompletionTokens,
-				"reasoning_tokens":  totalReasoningTokens,
-				"total_tokens":      totalPromptTokens + totalCompletionTokens,
+				"prompt_tokens":          totalPromptTokens,
+				"completion_tokens":      totalCompletionTokens,
+				"reasoning_tokens":       totalReasoningTokens,
+				"total_tokens":           totalPromptTokens + totalCompletionTokens,
+				"request_prompt_tokens":  lastReqPromptTokens,
 			}
 			log.Printf("[AI] Token usage: prompt=%d completion=%d reasoning=%d total=%d", totalPromptTokens, totalCompletionTokens, totalReasoningTokens, totalPromptTokens+totalCompletionTokens)
 			onTokenUsage(usage)
