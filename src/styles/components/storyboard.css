@@ -1,0 +1,193 @@
+/* Storyboard: AI image-generation prompt cards (ComfyUI/Voxta).
+   Shared by CompanionMiniChat (chat responses) and BannerlordPanel
+   (conversation history entries). Imported into scoped style blocks. */
+
+.mini-storyboard-zone {
+	margin-top: 0.4rem;
+}
+
+.mini-storyboard-btn {
+	background: rgba(0, 217, 255, 0.08);
+	border: 1px solid rgba(0, 217, 255, 0.35);
+	color: #00d9ff;
+	border-radius: 7px;
+	padding: 0.22rem 0.55rem;
+	font-size: 0.68rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.15s ease;
+}
+
+.mini-storyboard-btn:hover:not(:disabled) {
+	background: rgba(0, 217, 255, 0.18);
+}
+
+.mini-storyboard-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.sb-error {
+	font-size: 0.68rem;
+	color: #ff8080;
+	margin-top: 0.3rem;
+}
+
+.mini-storyboard {
+	margin-top: 0.4rem;
+	border: 1px solid rgba(0, 217, 255, 0.25);
+	border-radius: 10px;
+	padding: 0.5rem;
+	background: rgba(0, 217, 255, 0.04);
+}
+
+.sb-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 0.4rem;
+}
+
+.sb-title {
+	font-size: 0.72rem;
+	font-weight: 700;
+	color: #00d9ff;
+}
+
+.sb-copy-all {
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	color: rgba(255, 255, 255, 0.7);
+	border-radius: 6px;
+	padding: 0.15rem 0.5rem;
+	font-size: 0.65rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.sb-copy-all.copied,
+.sb-copy-mini.copied {
+	color: #4ade80;
+	border-color: rgba(74, 222, 128, 0.5);
+}
+
+.sb-sheet {
+	margin-bottom: 0.4rem;
+}
+
+.sb-sheet-label {
+	font-size: 0.58rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: rgba(255, 255, 255, 0.45);
+	font-weight: 700;
+	margin-bottom: 0.25rem;
+}
+
+/* Identity lock: stable character sheet generator row */
+.sb-sheet-gen {
+	margin-bottom: 0.45rem;
+}
+
+.sb-sheet-gen-row {
+	display: flex;
+	gap: 0.35rem;
+	align-items: center;
+	margin-bottom: 0.3rem;
+}
+
+.sb-sheet-input {
+	flex: 1;
+	min-width: 0;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	color: #fff;
+	border-radius: 7px;
+	padding: 0.22rem 0.5rem;
+	font-size: 0.68rem;
+}
+
+.sb-sheet-input::placeholder {
+	color: rgba(255, 255, 255, 0.35);
+}
+
+.sb-sheet-input:focus {
+	outline: none;
+	border-color: rgba(0, 217, 255, 0.4);
+}
+
+.sb-shot {
+	border-top: 1px dashed rgba(255, 255, 255, 0.12);
+	padding-top: 0.45rem;
+	margin-top: 0.45rem;
+}
+
+.sb-shot-head {
+	display: flex;
+	gap: 0.4rem;
+	align-items: center;
+	margin-bottom: 0.3rem;
+}
+
+.sb-shot-id {
+	background: rgba(0, 217, 255, 0.15);
+	color: #00d9ff;
+	border-radius: 5px;
+	padding: 0 0.35rem;
+	font-size: 0.65rem;
+	font-weight: 700;
+}
+
+.sb-shot-title {
+	font-size: 0.72rem;
+	font-weight: 600;
+	color: rgba(255, 255, 255, 0.8);
+}
+
+.sb-prompt {
+	position: relative;
+	margin-bottom: 0.35rem;
+}
+
+.sb-prompt-label {
+	font-size: 0.56rem;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: rgba(255, 255, 255, 0.4);
+	font-weight: 700;
+	margin-bottom: 0.15rem;
+}
+
+.sb-prompt.neg .sb-prompt-label {
+	color: rgba(255, 128, 128, 0.65);
+}
+
+.sb-prompt-text {
+	font-size: 0.7rem;
+	line-height: 1.45;
+	color: rgba(255, 255, 255, 0.75);
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 7px;
+	padding: 0.35rem 2.7rem 0.35rem 0.5rem;
+	word-break: break-word;
+}
+
+.sb-copy-mini {
+	position: absolute;
+	right: 0.35rem;
+	bottom: 0.35rem;
+	background: rgba(255, 255, 255, 0.07);
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	color: rgba(255, 255, 255, 0.7);
+	border-radius: 5px;
+	padding: 0.1rem 0.4rem;
+	font-size: 0.6rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.sb-copy-mini:hover {
+	color: #00d9ff;
+	border-color: rgba(0, 217, 255, 0.4);
+}

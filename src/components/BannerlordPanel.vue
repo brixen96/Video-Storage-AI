@@ -69,6 +69,79 @@
 									<span v-else>{{ seg.text }}</span>
 								</template>
 							</div>
+
+							<!-- Storyboard: 🎬 image prompts for this entry (it actually happened) -->
+							<div class="mini-storyboard-zone">
+								<button
+									class="mini-storyboard-btn"
+									:disabled="sbBusy === i"
+									:title="storyboards[i] ? 'Regenerate storyboard for this entry' : 'Generate image prompts for this entry'"
+									@click="generateStoryboardFor(i, m.content)"
+								>
+									<font-awesome-icon :icon="['fas', 'film']" />
+									{{ sbBusy === i ? 'storyboarding…' : (storyboards[i] ? 'Storyboard ↻' : 'Storyboard') }}
+								</button>
+								<div v-if="sbErrors[i]" class="sb-error">⚠️ {{ sbErrors[i] }}</div>
+
+								<div v-if="storyboards[i]" class="mini-storyboard">
+									<div class="sb-header">
+										<span class="sb-title">🎬 {{ (storyboards[i].shots || []).length }} shots</span>
+										<button class="sb-copy-all" :class="{ copied: sbCopied === 'all' + i }" @click="copyStoryboardAll(i, storyboards[i])">
+											{{ sbCopied === 'all' + i ? '✓ copied' : 'copy all' }}
+										</button>
+									</div>
+
+									<div v-if="storyboards[i].character_sheet" class="sb-sheet">
+										<div class="sb-sheet-label">Character sheet — repeated in every shot (keeps faces consistent)</div>
+										<div class="sb-prompt">
+											<div class="sb-prompt-text">{{ storyboards[i].character_sheet }}</div>
+											<button class="sb-copy-mini" :class="{ copied: sbCopied === 'sheet' + i }" @click="copySbText('sheet' + i, storyboards[i].character_sheet)">
+												{{ sbCopied === 'sheet' + i ? '✓' : 'copy' }}
+											</button>
+										</div>
+									</div>
+
+									<!-- Identity lock: stable character sheet (Pony format) -->
+									<div class="sb-sheet-gen">
+										<div class="sb-sheet-label">Identity lock — stable character sheet (same face every image)</div>
+										<div class="sb-sheet-gen-row">
+											<input v-model="sheetName" class="sb-sheet-input" placeholder="character name (optional)" @keyup.enter="generateSheet(i, m.content)" />
+											<button class="mini-storyboard-btn" :disabled="sheetBusy === i" @click="generateSheet(i, m.content)">
+												<font-awesome-icon :icon="['fas', 'user']" />
+												{{ sheetBusy === i ? 'generating…' : 'Generate sheet' }}
+											</button>
+										</div>
+										<div v-if="sbSheetErrors[i]" class="sb-error">⚠️ {{ sbSheetErrors[i] }}</div>
+										<div v-if="characterSheets[i]" class="sb-prompt">
+											<div class="sb-prompt-text">{{ characterSheets[i].sheet }}</div>
+											<button class="sb-copy-mini" :class="{ copied: sbCopied === 'csheet' + i }" @click="copySbText('csheet' + i, characterSheets[i].sheet)">
+												{{ sbCopied === 'csheet' + i ? '✓' : 'copy' }}
+											</button>
+										</div>
+									</div>
+
+									<div v-for="shot in (storyboards[i].shots || [])" :key="shot.id" class="sb-shot">
+										<div class="sb-shot-head">
+											<span class="sb-shot-id">{{ shot.id }}</span>
+											<span class="sb-shot-title">{{ shot.title }}</span>
+										</div>
+										<div class="sb-prompt">
+											<div class="sb-prompt-label">positive</div>
+											<div class="sb-prompt-text">{{ shot.positive }}</div>
+											<button class="sb-copy-mini" :class="{ copied: sbCopied === 'p' + i + '_' + shot.id }" @click="copySbText('p' + i + '_' + shot.id, shot.positive)">
+												{{ sbCopied === 'p' + i + '_' + shot.id ? '✓' : 'copy' }}
+											</button>
+										</div>
+										<div class="sb-prompt neg">
+											<div class="sb-prompt-label">negative</div>
+											<div class="sb-prompt-text">{{ shot.negative }}</div>
+											<button class="sb-copy-mini" :class="{ copied: sbCopied === 'n' + i + '_' + shot.id }" @click="copySbText('n' + i + '_' + shot.id, shot.negative)">
+												{{ sbCopied === 'n' + i + '_' + shot.id ? '✓' : 'copy' }}
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -399,6 +472,75 @@ const openDialogue = async (npc) => {
 const closeDialogue = () => {
 	selectedNpc.value = null
 	dialogue.value = []
+	storyboards.value = {}
+	sbErrors.value = {}
+	sbBusy.value = null
+	characterSheets.value = {}
+	sbSheetErrors.value = {}
+	sheetBusy.value = null
+}
+
+// ── Storyboard: image-gen prompts per conversation entry ──
+// Same backend as the mini-chat 🎬 button (POST /ai/storyboard) — storyboards
+// the entry that ACTUALLY happened in-game. Keyed by entry index; not
+// persisted (regenerated after reopening the conversation).
+const storyboards = ref({})
+const sbErrors = ref({})
+const sbBusy = ref(null)
+const sbCopied = ref('')
+
+const copySbText = async (key, text) => {
+	try {
+		await navigator.clipboard.writeText(text)
+		sbCopied.value = key
+		setTimeout(() => { if (sbCopied.value === key) sbCopied.value = '' }, 1300)
+	} catch { /* clipboard denied — text stays selectable manually */ }
+}
+
+const copyStoryboardAll = (idx, sb) => {
+	const parts = []
+	if (sb.character_sheet) parts.push('CHARACTER SHEET:\n' + sb.character_sheet)
+	;(sb.shots || []).forEach((s) => parts.push(`SHOT ${s.id} — ${s.title}\nPOSITIVE: ${s.positive}\nNEGATIVE: ${s.negative}`))
+	copySbText('all' + idx, parts.join('\n\n'))
+}
+
+const generateStoryboardFor = async (idx, content) => {
+	if (!content || sbBusy.value !== null) return
+	sbBusy.value = idx
+	sbErrors.value = { ...sbErrors.value, [idx]: '' }
+	try {
+		// Focus chips ride the mini-chat's persisted selection (shared taste)
+		let focus = []
+		try { focus = JSON.parse(localStorage.getItem('rp_focus_active') || '[]') } catch { /* no chips */ }
+		const res = await aiAPI.generateStoryboard({ scene: content, focus, shots: 0 })
+		if (res?.data?.shots?.length) storyboards.value = { ...storyboards.value, [idx]: res.data }
+		else sbErrors.value = { ...sbErrors.value, [idx]: 'No shots returned — try again' }
+	} catch (e) {
+		sbErrors.value = { ...sbErrors.value, [idx]: 'Storyboard failed: ' + (e?.message || 'unknown error') }
+	} finally {
+		sbBusy.value = null
+	}
+}
+
+// ── Identity lock: stable character sheet (anti face-drift) ──
+const sheetName = ref('')
+const sheetBusy = ref(null)
+const sbSheetErrors = ref({})
+const characterSheets = ref({})
+
+const generateSheet = async (idx, content) => {
+	if (!content || sheetBusy.value !== null) return
+	sheetBusy.value = idx
+	sbSheetErrors.value = { ...sbSheetErrors.value, [idx]: '' }
+	try {
+		const res = await aiAPI.generateCharacterSheet({ name: sheetName.value, description: content })
+		if (res?.data?.sheet) characterSheets.value = { ...characterSheets.value, [idx]: res.data }
+		else sbSheetErrors.value = { ...sbSheetErrors.value, [idx]: 'No sheet returned — try again' }
+	} catch (e) {
+		sbSheetErrors.value = { ...sbSheetErrors.value, [idx]: 'Sheet failed: ' + (e?.message || 'unknown error') }
+	} finally {
+		sheetBusy.value = null
+	}
 }
 
 // Live refresh: when the watcher detects a change to the OPEN NPC's file,
@@ -1074,4 +1216,7 @@ watch(selectedCampaign, (id) => {
 	color: #ff8a8a;
 	font-weight: 700;
 }
+
+/* Storyboard prompt cards — shared with CompanionMiniChat */
+@import '@/styles/components/storyboard.css';
 </style>

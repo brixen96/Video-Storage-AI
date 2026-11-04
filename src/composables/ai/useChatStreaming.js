@@ -48,7 +48,7 @@ export function useChatStreaming() {
 	 * @param {object} opts - { scope } — 'rp' persists to the Bannerlord RP thread, 'main' (default) to the companion chat
 	 */
 	const streamMessage = (fullMessage, historyPayload, hooks = {}, opts = {}) => {
-		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage, onToolProgress, onRequestInfo } = hooks
+		const { onTextChunk, onToolCall, onVideoCards, onDone, onError, scrollFn, onTokenUsage, onToolProgress, onRequestInfo, onStoryboard } = hooks
 
 		isStreaming.value = true
 		activeToolCall.value = ''
@@ -137,7 +137,12 @@ export function useChatStreaming() {
 						if (currentEventType === 'tool_progress') {
 							try {
 								const progress = JSON.parse(data)
-								onToolProgress?.(progress)
+								// Storyboard = full shot list from generate_image_prompts — render as cards
+								if (progress?.type === 'storyboard' && progress.storyboard) {
+									onStoryboard?.(progress.storyboard)
+								} else {
+									onToolProgress?.(progress)
+								}
 							} catch { /* ignore */ }
 							currentEventType = ''
 							continue

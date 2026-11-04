@@ -167,6 +167,7 @@ export const FOLLOW_UP_RULES = [
 
 // Friendly labels for tool names shown during streaming
 export const TOOL_LABELS = {
+	generate_image_prompts: 'Storyboarding image prompts',
 	search_videos: 'Searching videos',
 	get_video_details: 'Fetching video details',
 	update_video_metadata: 'Updating video metadata',

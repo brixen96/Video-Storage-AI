@@ -34,6 +34,16 @@ const (
 // callModel is the shared synchronous cross-model request. Returns the first
 // choice's content. Non-streaming — the tool loop blocks until it answers.
 func (s *AICompanionService) callModel(model, system, user string, maxTokens int, temperature float64) (string, error) {
+	return s.callModelEffort(model, system, user, maxTokens, temperature, "")
+}
+
+// callModelEffort is callModel with an explicit reasoning-effort override.
+// effort="" sends no reasoning param (provider default); "none" disables
+// reasoning entirely — REQUIRED for structured-output calls: reasoning tokens
+// count against max_tokens, so a thinking pass can eat the whole budget and
+// return empty/truncated JSON (observed ~2/3 failure rate on storyboard calls
+// without it).
+func (s *AICompanionService) callModelEffort(model, system, user string, maxTokens int, temperature float64, effort string) (string, error) {
 	config := s.GetAIConfig()
 	if !config.Enabled {
 		return "", fmt.Errorf("llm disabled")
@@ -41,7 +51,7 @@ func (s *AICompanionService) callModel(model, system, user string, maxTokens int
 	if model == "" {
 		model = config.ModelName
 	}
-	body, err := json.Marshal(map[string]interface{}{
+	reqBody := map[string]interface{}{
 		"model": model,
 		"messages": []map[string]string{
 			{"role": "system", "content": system},
@@ -50,7 +60,18 @@ func (s *AICompanionService) callModel(model, system, user string, maxTokens int
 		"max_tokens":  maxTokens,
 		"temperature": temperature,
 		"stream":      false,
-	})
+	}
+	if effort != "" {
+		// "none" must be sent EXPLICITLY — reasoningParam("none") returns nil
+		// (omit = provider default = reasoning ON), which is the exact failure
+		// mode this override exists to prevent.
+		if effort == "none" {
+			reqBody["reasoning"] = map[string]interface{}{"effort": "none"}
+		} else if rp := reasoningParam(effort); rp != nil {
+			reqBody["reasoning"] = rp
+		}
+	}
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
 	}
@@ -174,7 +195,10 @@ func (s *AICompanionService) registerModelTools() {
 		user.WriteString(`Return JSON ONLY:
 {"feedback":["short actionable point", "..."],"length_ok":true|false,"pov_ok":true|false,"focus_used":["chip", "..."],"verdict":"pass|revise"}`)
 
-		raw, err := s.callModel(reviewer, rpReviewSystemPrompt(), user.String(), 1500, 0.4)
+		// effort=none: structured JSON output — reasoning tokens would eat the
+		// 1500 budget and return empty/truncated JSON (same failure mode as
+		// storyboard calls, fixed there first).
+		raw, err := s.callModelEffort(reviewer, rpReviewSystemPrompt(), user.String(), 1500, 0.4, "none")
 		if err != nil {
 			return nil, err
 		}

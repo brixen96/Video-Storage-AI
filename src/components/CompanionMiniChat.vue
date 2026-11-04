@@ -53,6 +53,79 @@
 					<span v-if="msg.role === 'assistant' && msg.streaming && !msg.content" class="typing-indicator"><span></span><span></span><span></span></span>
 					<template v-else>{{ msg.content }}</template>
 				</div>
+
+				<!-- Storyboard: 🎬 button per response + generated shot cards (ComfyUI/Voxta prompts) -->
+				<div v-if="msg.role === 'assistant' && msg.content && !msg.streaming" class="mini-storyboard-zone">
+					<button
+						class="mini-storyboard-btn"
+						:disabled="storyboardBusy"
+						:title="msg.storyboard ? 'Regenerate storyboard for this response' : 'Generate image prompts for this response'"
+						@click="generateStoryboardFor(msg)"
+					>
+						<font-awesome-icon :icon="['fas', 'film']" />
+						{{ storyboardBusy && storyboardTarget === msg ? 'storyboarding…' : (msg.storyboard ? 'Storyboard ↻' : 'Storyboard') }}
+					</button>
+					<div v-if="msg.storyboardError" class="sb-error">⚠️ {{ msg.storyboardError }}</div>
+
+					<div v-if="msg.storyboard" class="mini-storyboard">
+						<div class="sb-header">
+							<span class="sb-title">🎬 {{ (msg.storyboard.shots || []).length }} shots</span>
+							<button class="sb-copy-all" :class="{ copied: copiedKey === 'all' }" @click="copyStoryboardAll(msg.storyboard)">
+								{{ copiedKey === 'all' ? '✓ copied' : 'copy all' }}
+							</button>
+						</div>
+
+						<div v-if="msg.storyboard.character_sheet" class="sb-sheet">
+							<div class="sb-sheet-label">Character sheet — repeated in every shot (keeps faces consistent)</div>
+							<div class="sb-prompt">
+								<div class="sb-prompt-text">{{ msg.storyboard.character_sheet }}</div>
+								<button class="sb-copy-mini" :class="{ copied: copiedKey === 'sheet' }" @click="copyText('sheet', msg.storyboard.character_sheet)">
+									{{ copiedKey === 'sheet' ? '✓' : 'copy' }}
+								</button>
+							</div>
+						</div>
+
+						<!-- Identity lock: stable character sheet (Pony format) -->
+						<div class="sb-sheet-gen">
+							<div class="sb-sheet-label">Identity lock — stable character sheet (same face every image)</div>
+							<div class="sb-sheet-gen-row">
+								<input v-model="sheetName" class="sb-sheet-input" placeholder="character name (optional)" @keyup.enter="generateSheet(msg)" />
+								<button class="mini-storyboard-btn" :disabled="sheetBusy" @click="generateSheet(msg)">
+									<font-awesome-icon :icon="['fas', 'user']" />
+									{{ sheetBusy ? 'generating…' : 'Generate sheet' }}
+								</button>
+							</div>
+							<div v-if="sheetError" class="sb-error">⚠️ {{ sheetError }}</div>
+							<div v-if="msg.characterSheet" class="sb-prompt">
+								<div class="sb-prompt-text">{{ msg.characterSheet.sheet }}</div>
+								<button class="sb-copy-mini" :class="{ copied: copiedKey === 'csheet' }" @click="copyText('csheet', msg.characterSheet.sheet)">
+									{{ copiedKey === 'csheet' ? '✓' : 'copy' }}
+								</button>
+							</div>
+						</div>
+
+						<div v-for="shot in (msg.storyboard.shots || [])" :key="shot.id" class="sb-shot">
+							<div class="sb-shot-head">
+								<span class="sb-shot-id">{{ shot.id }}</span>
+								<span class="sb-shot-title">{{ shot.title }}</span>
+							</div>
+							<div class="sb-prompt">
+								<div class="sb-prompt-label">positive</div>
+								<div class="sb-prompt-text">{{ shot.positive }}</div>
+								<button class="sb-copy-mini" :class="{ copied: copiedKey === 'p' + shot.id }" @click="copyText('p' + shot.id, shot.positive)">
+									{{ copiedKey === 'p' + shot.id ? '✓' : 'copy' }}
+								</button>
+							</div>
+							<div class="sb-prompt neg">
+								<div class="sb-prompt-label">negative</div>
+								<div class="sb-prompt-text">{{ shot.negative }}</div>
+								<button class="sb-copy-mini" :class="{ copied: copiedKey === 'n' + shot.id }" @click="copyText('n' + shot.id, shot.negative)">
+									{{ copiedKey === 'n' + shot.id ? '✓' : 'copy' }}
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 
@@ -64,6 +137,7 @@
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('Summarize the scene so far in 3-4 sentences')">📜 Scene summary</button>
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('Suggest the next beat of this scene — where could it go from here?')">🗺️ Next beat</button>
 			<button class="mini-quick-chip" :disabled="isStreaming" @click="quickAction('What is this NPC likely to do or say next, and why?')">🔮 Predict</button>
+			<button class="mini-quick-chip" :disabled="isStreaming || storyboardBusy" title="Storyboard the latest response into image prompts" @click="storyboardLatest">🎬 Storyboard</button>
 		</div>
 
 		<!-- Add-ons: optional roleplay behavior on top of normal chat. Nothing highlighted = plain conversation. -->
@@ -488,6 +562,10 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 			rpHistory.value[msgIndex].content += chunk
 			scrollDown()
 		},
+		onStoryboard: (storyboard) => {
+			// generate_image_prompts fired mid-stream — attach shot cards to this message
+			rpHistory.value[msgIndex].storyboard = storyboard
+		},
 		onTokenUsage: (usage) => {
 			// request_prompt_tokens = THIS request's prompt size (true context usage)
 			ctxTokens.value = usage.request_prompt_tokens || usage.prompt_tokens || 0
@@ -518,6 +596,74 @@ const sendMessageWithHistory = async (text, contextEntry) => {
 			}
 		},
 	}, { scope: 'rp' }) // persist to the RP thread, not the main companion chat
+}
+
+// ── Storyboard: image-generation prompts (ComfyUI/Voxta) ──
+// Two paths: (1) the generate_image_prompts tool fires mid-stream → onStoryboard
+// attaches the shot list to the streaming message; (2) the 🎬 button per
+// response calls POST /ai/storyboard directly (no tool loop, cheaper).
+// Storyboards are NOT persisted — after a reload the 🎬 button regenerates.
+const storyboardBusy = ref(false)
+const storyboardTarget = ref(null)
+const copiedKey = ref('')
+
+const copyText = async (key, text) => {
+	try {
+		await navigator.clipboard.writeText(text)
+		copiedKey.value = key
+		setTimeout(() => { if (copiedKey.value === key) copiedKey.value = '' }, 1300)
+	} catch { /* clipboard denied — text stays selectable manually */ }
+}
+
+const copyStoryboardAll = (sb) => {
+	const parts = []
+	if (sb.character_sheet) parts.push('CHARACTER SHEET:\n' + sb.character_sheet)
+	;(sb.shots || []).forEach((s) => parts.push(`SHOT ${s.id} — ${s.title}\nPOSITIVE: ${s.positive}\nNEGATIVE: ${s.negative}`))
+	copyText('all', parts.join('\n\n'))
+}
+
+const generateStoryboardFor = async (msg) => {
+	if (!msg?.content || storyboardBusy.value) return
+	storyboardBusy.value = true
+	storyboardTarget.value = msg
+	msg.storyboardError = ''
+	try {
+		const res = await aiAPI.generateStoryboard({ scene: msg.content, focus: focusActive.value, shots: 0 })
+		if (res?.data?.shots?.length) msg.storyboard = res.data
+		else msg.storyboardError = 'No shots returned — try again'
+	} catch (e) {
+		msg.storyboardError = 'Storyboard failed: ' + (e?.message || 'unknown error')
+	} finally {
+		storyboardBusy.value = false
+		storyboardTarget.value = null
+	}
+}
+
+const storyboardLatest = () => {
+	const msgs = rpHistory.value.filter((m) => m.role === 'assistant' && m.content && !m.streaming)
+	if (msgs.length) generateStoryboardFor(msgs[msgs.length - 1])
+}
+
+// ── Identity lock: stable character sheet (anti face-drift) ──
+// Generates a Pony-format identity line from the response's character facts;
+// stored on the message so it survives alongside the storyboard.
+const sheetName = ref('')
+const sheetBusy = ref(false)
+const sheetError = ref('')
+
+const generateSheet = async (msg) => {
+	if (!msg?.content || sheetBusy.value) return
+	sheetBusy.value = true
+	sheetError.value = ''
+	try {
+		const res = await aiAPI.generateCharacterSheet({ name: sheetName.value, description: msg.content })
+		if (res?.data?.sheet) msg.characterSheet = res.data
+		else sheetError.value = 'No sheet returned — try again'
+	} catch (e) {
+		sheetError.value = 'Sheet failed: ' + (e?.message || 'unknown error')
+	} finally {
+		sheetBusy.value = false
+	}
 }
 
 const quickAction = (text) => {
@@ -894,4 +1040,7 @@ const onNpcResponded = () => {
 	color: #00d9ff;
 	border-color: rgba(0, 217, 255, 0.4);
 }
+
+/* Storyboard prompt cards — shared with BannerlordPanel */
+@import '@/styles/components/storyboard.css';
 </style>

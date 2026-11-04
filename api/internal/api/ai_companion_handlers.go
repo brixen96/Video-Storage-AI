@@ -434,6 +434,67 @@ func aiCompanionChat(c *gin.Context) {
 	})
 }
 
+// aiStoryboard generates image-generation prompts (a storyboard) for a scene
+// directly — the 🎬 button path in the mini companion. Same prompt logic as
+// the generate_image_prompts tool, but without the tool loop.
+func aiStoryboard(c *gin.Context) {
+	if aiCompanionService == nil {
+		respondBadRequest(c, "AI Companion not initialized", nil)
+		return
+	}
+
+	var request struct {
+		Scene string   `json:"scene"`
+		Focus []string `json:"focus"`
+		Shots int      `json:"shots"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondBadRequest(c, "Invalid request", err)
+		return
+	}
+	if strings.TrimSpace(request.Scene) == "" {
+		respondBadRequest(c, "Scene text is required", nil)
+		return
+	}
+
+	storyboard, err := aiCompanionService.GenerateImagePrompts(request.Scene, request.Focus, request.Shots)
+	if err != nil {
+		respondInternalError(c, "Storyboard generation failed", err)
+		return
+	}
+	respondSuccess(c, storyboard, "Storyboard generated")
+}
+
+// aiCharacterSheet generates a STABLE Pony-format identity line for one
+// character — the "don't change into another person" fix. Reused verbatim as
+// the character_sheet in storyboards.
+func aiCharacterSheet(c *gin.Context) {
+	if aiCompanionService == nil {
+		respondBadRequest(c, "AI Companion not initialized", nil)
+		return
+	}
+
+	var request struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondBadRequest(c, "Invalid request", err)
+		return
+	}
+	if strings.TrimSpace(request.Description) == "" {
+		respondBadRequest(c, "Character description is required", nil)
+		return
+	}
+
+	sheet, err := aiCompanionService.GenerateCharacterSheet(request.Name, request.Description)
+	if err != nil {
+		respondInternalError(c, "Character sheet generation failed", err)
+		return
+	}
+	respondSuccess(c, sheet, "Character sheet generated")
+}
+
 // getAICompanionStatus returns the AI Companion status
 func getAICompanionStatus(c *gin.Context) {
 	if aiCompanionService == nil {

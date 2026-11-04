@@ -269,6 +269,11 @@ export const aiAPI = {
 	deleteMemory: (id) => api.delete(`/ai/memories/${id}`),
 	updateMemory: (id, data) => api.put(`/ai/memories/${id}`, data),
 
+	// Storyboard — image-generation prompts for a scene (🎬 button)
+	generateStoryboard: (data) => api.post('/ai/storyboard', data),
+	// Character sheet — stable identity line (anti face-drift)
+	generateCharacterSheet: (data) => api.post('/ai/storyboard/character-sheet', data),
+
 	// Companion status
 	getStatus: () => api.get('/ai/status'),
 
