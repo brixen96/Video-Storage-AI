@@ -27,8 +27,10 @@ const (
 	rpReviewMaxLen    = 2048
 
 	// modelCallTimeout bounds every cross-model call so a hung provider can
-	// never stall the chat loop.
-	modelCallTimeout = 90 * time.Second
+	// never stall the chat loop. 180s: detailed storyboards request up to 12000
+	// output tokens — at ~50 tok/s that's 80-120s of generation alone, which
+	// blew the old 90s cap and killed long storyboard calls mid-flight.
+	modelCallTimeout = 180 * time.Second
 )
 
 // callModel is the shared synchronous cross-model request. Returns the first

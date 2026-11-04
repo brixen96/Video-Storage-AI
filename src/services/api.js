@@ -270,11 +270,13 @@ export const aiAPI = {
 	updateMemory: (id, data) => api.put(`/ai/memories/${id}`, data),
 
 	// Storyboard — image-generation prompts for a scene (🎬 button)
-	generateStoryboard: (data) => api.post('/ai/storyboard', data),
+	// 200s timeout: detailed storyboards request up to 12000 output tokens —
+	// the backend allows 180s, so the client must wait at least that long.
+	generateStoryboard: (data) => api.post('/ai/storyboard', data, { timeout: 200000 }),
 	// Character sheet — stable identity line (anti face-drift)
-	generateCharacterSheet: (data) => api.post('/ai/storyboard/character-sheet', data),
+	generateCharacterSheet: (data) => api.post('/ai/storyboard/character-sheet', data, { timeout: 200000 }),
 	// Scene list — AI breakdown of scenes found in a scraped thread
-	generateThreadScenes: (data) => api.post('/ai/thread-scenes', data),
+	generateThreadScenes: (data) => api.post('/ai/thread-scenes', data, { timeout: 200000 }),
 
 	// Companion status
 	getStatus: () => api.get('/ai/status'),
