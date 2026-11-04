@@ -297,8 +297,10 @@ func (s *LinkVerificationService) UpdateLinkStatus(linkID int64, status string) 
 	return err
 }
 
-// VerifyThreadLinks verifies all links for a specific thread
-func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
+// VerifyThreadLinks verifies links for a specific thread. staleDays > 0 limits
+// verification to links never checked or checked more than staleDays ago
+// (auto-verify on page open); staleDays == 0 verifies every link.
+func (s *LinkVerificationService) VerifyThreadLinks(threadID int64, staleDays int) error {
 	// Create activity log
 	activity, err := s.activityService.StartTask("link_verification",
 		fmt.Sprintf("Verifying download links for thread %d", threadID),
@@ -309,17 +311,22 @@ func (s *LinkVerificationService) VerifyThreadLinks(threadID int64) error {
 		return fmt.Errorf("failed to create activity: %w", err)
 	}
 
-	// Get all links for the thread
-	rows, err := s.db.Query(`
+	// Get links for the thread (optionally only stale ones)
+	query := `
 		SELECT id, url, provider, status
 		FROM scraped_download_links
 		WHERE thread_id = ?
-	`, threadID)
+	`
+	args := []interface{}{threadID}
+	if staleDays > 0 {
+		query += ` AND (last_checked_at IS NULL OR last_checked_at < datetime('now', ?))`
+		args = append(args, fmt.Sprintf("-%d days", staleDays))
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		s.activityService.FailTask(activity.ID, fmt.Sprintf("Failed to query links: %v", err))
 		return err
 	}
-	defer rows.Close()
 
 	var links []struct {
 		ID       int64

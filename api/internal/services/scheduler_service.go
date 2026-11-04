@@ -366,7 +366,7 @@ func (s *SchedulerService) executeVerifyLinks(ctx context.Context, job *models.S
 	}
 
 	threadID := *job.TargetID
-	if err := s.linkVerificationService.VerifyThreadLinks(threadID); err != nil {
+	if err := s.linkVerificationService.VerifyThreadLinks(threadID, 0); err != nil {
 		return &models.JobResult{
 			Success: false,
 			Message: fmt.Sprintf("Link verification failed for thread %d: %v", threadID, err),

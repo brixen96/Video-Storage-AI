@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -29,7 +30,9 @@ func ensureLinkVerificationService() *services.LinkVerificationService {
 	return linkVerificationService
 }
 
-// verifyThreadLinks verifies all download links for a specific thread
+// verifyThreadLinks verifies download links for a specific thread.
+// Optional ?stale_days=N limits verification to links never checked or checked
+// more than N days ago (used by the thread page's auto-verify on open).
 func verifyThreadLinks(c *gin.Context) {
 	svc := ensureLinkVerificationService()
 	if svc == nil {
@@ -50,9 +53,33 @@ func verifyThreadLinks(c *gin.Context) {
 		return
 	}
 
+	staleDays := 0
+	if v := c.Query("stale_days"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil && d > 0 {
+			staleDays = d
+		}
+	}
+
+	// Stale-only mode: skip entirely when nothing needs checking (avoids
+	// spamming activity logs on every thread page open)
+	if staleDays > 0 {
+		var staleCount int
+		db := database.GetDB()
+		if db != nil {
+			db.QueryRow(`
+				SELECT COUNT(*) FROM scraped_download_links
+				WHERE thread_id = ? AND (last_checked_at IS NULL OR last_checked_at < datetime('now', ?))
+			`, threadID, fmt.Sprintf("-%d days", staleDays)).Scan(&staleCount)
+		}
+		if staleCount == 0 {
+			c.JSON(http.StatusOK, models.SuccessResponse(nil, "All links verified recently"))
+			return
+		}
+	}
+
 	// Start verification in background
 	go func() {
-		if err := svc.VerifyThreadLinks(threadID); err != nil {
+		if err := svc.VerifyThreadLinks(threadID, staleDays); err != nil {
 			log.Printf("Error verifying thread %d links: %v", threadID, err)
 		}
 	}()

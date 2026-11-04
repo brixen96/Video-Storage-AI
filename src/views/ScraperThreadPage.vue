@@ -30,6 +30,9 @@
 						<button class="btn-icon btn-success" @click="createPerformer" :disabled="loading || creatingPerformer" title="Create Performer">
 							<font-awesome-icon :icon="['fas', creatingPerformer ? 'spinner' : 'user-plus']" :spin="creatingPerformer" />
 						</button>
+						<button class="btn-icon btn-ai" @click="generateScenes" :disabled="loading || scenesBusy" title="AI Scene List">
+							<font-awesome-icon :icon="['fas', scenesBusy ? 'spinner' : 'clipboard-list']" :spin="scenesBusy" />
+						</button>
 						<button class="btn-icon btn-ai" @click="enhanceThread" :disabled="loading || enhancing" title="AI Enhance Thread">
 							<font-awesome-icon :icon="['fas', enhancing ? 'spinner' : 'magic']" :spin="enhancing" />
 						</button>
@@ -58,6 +61,15 @@
 					>
 						<font-awesome-icon :icon="['fas', 'filter']" class="me-1" />
 						BBC
+					</button>
+					<button
+						class="keyword-toggle-btn"
+						:class="{ active: hideImages }"
+						@click="hideImages = !hideImages"
+						title="Hide all images in posts"
+					>
+						<font-awesome-icon :icon="['fas', hideImages ? 'eye-slash' : 'eye']" class="me-1" />
+						{{ hideImages ? 'Images Hidden' : 'Hide Images' }}
 					</button>
 					<select v-model="filterProvider" class="filter-select">
 						<option value="">All Providers</option>
@@ -153,6 +165,7 @@
 					:key="post.id"
 					:post="post"
 					:links="getPostLinks(post.id)"
+					:hide-images="hideImages"
 					@mark-downloaded="markAsDownloaded"
 					@mark-failed="markAsFailed"
 					@reset-status="resetDownloadStatus"
@@ -242,6 +255,51 @@
 			</div>
 		</div>
 
+		<!-- AI Scene List Modal -->
+		<div v-if="showScenesModal" class="modal-overlay" @click.self="showScenesModal = false">
+			<div class="modal-content scenes-modal">
+				<div class="modal-header">
+					<h3>
+						<font-awesome-icon :icon="['fas', 'clipboard-list']" class="me-2" />
+						Scene List
+					</h3>
+					<button class="btn-close" @click="showScenesModal = false">
+						<font-awesome-icon :icon="['fas', 'times']" />
+					</button>
+				</div>
+				<div class="modal-body">
+					<div v-if="scenesBusy" class="scenes-loading">
+						<font-awesome-icon :icon="['fas', 'spinner']" spin size="2x" />
+						<p>Analyzing {{ posts.length }} posts for scenes...</p>
+					</div>
+					<div v-else-if="scenesError" class="alert alert-danger">
+						{{ scenesError }}
+						<button class="btn btn-sm btn-secondary ms-2" @click="generateScenes">Retry</button>
+					</div>
+					<div v-else-if="sceneList?.scenes?.length" class="scenes-list">
+						<div v-for="scene in sceneList.scenes" :key="scene.id" class="scene-entry">
+							<div class="scene-entry-header">
+								<span class="scene-id">{{ scene.id }}</span>
+								<strong class="scene-title">{{ scene.title }}</strong>
+								<span class="scene-posts">Post{{ (scene.posts || []).length === 1 ? '' : 's' }} {{ (scene.posts || []).join(', ') }}</span>
+							</div>
+							<p class="scene-desc">{{ scene.description }}</p>
+						</div>
+					</div>
+					<div v-else class="alert alert-info">No scenes found in this thread.</div>
+				</div>
+				<div class="modal-footer">
+					<button v-if="sceneList?.scenes?.length" class="btn btn-secondary" @click="copyScenes">
+						<font-awesome-icon :icon="['fas', 'copy']" class="me-2" />
+						Copy List
+					</button>
+					<button class="btn btn-ai" @click="generateScenes" :disabled="scenesBusy">
+						<font-awesome-icon :icon="['fas', 'sync']" class="me-2" />
+						Regenerate
+					</button>
+				</div>
+			</div>
+		</div>
 		<!-- Send to JDownloader Modal -->
 		<ThreadJDModal
 			v-if="showJDModal"
@@ -257,7 +315,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, getCurrentInstance } from 'vue'
 import { useRoute } from 'vue-router'
 import { SearchBox } from '@/components/shared'
-import { API_ORIGIN } from '@/services/api'
+import { API_ORIGIN, aiAPI } from '@/services/api'
 import websocketService from '@/services/websocket'
 import ThreadPostCard from '@/components/ThreadPostCard.vue'
 import ThreadJDModal from '@/components/ThreadJDModal.vue'
@@ -300,6 +358,16 @@ const enhanceOptions = ref({
 
 // Export state
 const exportFormat = ref('txt')
+
+// Hide-images toggle (persisted per user)
+const hideImages = ref(localStorage.getItem('thread_hide_images') === '1')
+watch(hideImages, (v) => localStorage.setItem('thread_hide_images', v ? '1' : '0'))
+
+// AI Scene List state
+const showScenesModal = ref(false)
+const scenesBusy = ref(false)
+const scenesError = ref('')
+const sceneList = ref(null)
 
 // Filter state
 const searchQuery = ref('')
@@ -744,6 +812,48 @@ const getPostLinks = (postId) => {
 	return downloadLinks.value.filter((link) => link.post_id === postId)
 }
 
+// AI Scene List — generate + show the scene breakdown for this thread
+const generateScenes = async () => {
+	if (scenesBusy.value) return
+	showScenesModal.value = true
+	scenesBusy.value = true
+	scenesError.value = ''
+	try {
+		const res = await aiAPI.generateThreadScenes({ thread_id: parseInt(route.params.id) })
+		if (res?.data) sceneList.value = res.data
+		else scenesError.value = 'No scenes returned — try again'
+	} catch (e) {
+		scenesError.value = 'Scene list failed: ' + (e?.message || 'unknown error')
+	} finally {
+		scenesBusy.value = false
+	}
+}
+
+const copyScenes = async () => {
+	const scenes = sceneList.value?.scenes || []
+	const text = scenes.map((s) => `${s.id}. ${s.title} (posts ${Array.isArray(s.posts) ? s.posts.join(', ') : ''})\n${s.description}`).join('\n\n')
+	try {
+		await navigator.clipboard.writeText(text)
+		toast.success('Scene list copied')
+	} catch (e) {
+		toast.error('Copy failed: ' + e.message)
+	}
+}
+
+// Auto-verify stale links on open — dead/expired links are then hidden from
+// the display automatically (nothing is deleted from the DB)
+const autoVerifyStaleLinks = async () => {
+	try {
+		const response = await fetch(`${API_ORIGIN}/api/v1/scraper/threads/${route.params.id}/verify-links?stale_days=7`)
+		const data = await response.json()
+		if (data.success && data.message !== 'All links verified recently') {
+			verifying.value = true // spinner + WS events take over from here
+		}
+	} catch (error) {
+		console.error('Error auto-verifying links:', error)
+	}
+}
+
 const getPostImages = (post) => post.metadata?.attachments || []
 
 // JDownloader modal - open
@@ -770,6 +880,7 @@ onMounted(() => {
 	loadThread()
 	loadLinkStats()
 	loadDownloadStats()
+	autoVerifyStaleLinks()
 
 	const threadId = parseInt(route.params.id)
 
@@ -1432,6 +1543,81 @@ watch(
 .btn-ai:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
+}
+
+/* AI Scene List Modal */
+.scenes-modal {
+	max-width: 700px;
+}
+
+.scenes-loading {
+	text-align: center;
+	padding: 2.5rem 1rem;
+	color: rgba(255, 255, 255, 0.6);
+}
+
+.scenes-loading p {
+	margin-top: 1rem;
+}
+
+.scenes-list {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	max-height: 55vh;
+	overflow-y: auto;
+	padding-right: 0.25rem;
+}
+
+.scene-entry {
+	background: rgba(255, 255, 255, 0.05);
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 12px;
+	padding: 0.9rem 1.1rem;
+}
+
+.scene-entry-header {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+}
+
+.scene-id {
+	width: 26px;
+	height: 26px;
+	border-radius: 8px;
+	background: rgba(159, 122, 234, 0.25);
+	border: 1px solid rgba(159, 122, 234, 0.5);
+	color: #d0bfff;
+	font-size: 0.8rem;
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+
+.scene-title {
+	color: #fff;
+	font-size: 0.95rem;
+}
+
+.scene-posts {
+	margin-left: auto;
+	font-size: 0.78rem;
+	color: rgba(255, 255, 255, 0.5);
+	background: rgba(255, 255, 255, 0.06);
+	padding: 0.2rem 0.55rem;
+	border-radius: 6px;
+	white-space: nowrap;
+}
+
+.scene-desc {
+	margin: 0.5rem 0 0;
+	color: rgba(255, 255, 255, 0.75);
+	font-size: 0.9rem;
+	line-height: 1.55;
 }
 
 @media (max-width: 768px) {

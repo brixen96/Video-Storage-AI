@@ -26,10 +26,10 @@
 		</div>
 
 		<!-- Post Content -->
-		<div v-if="post.content" class="post-content" v-html="sanitizeHTML(post.content)"></div>
+		<div v-if="post.content" class="post-content" :class="{ 'hide-inline-images': hideImages }" v-html="sanitizeHTML(post.content)"></div>
 
 		<!-- Images and Links Combined -->
-		<div v-if="visibleImages.length > 0 || links.length > 0" class="post-media">
+		<div v-if="visibleImages.length > 0 || visibleLinks.length > 0" class="post-media">
 			<!-- Image Gallery -->
 			<div v-if="visibleImages.length > 0" class="media-grid">
 				<div v-for="(image, idx) in visibleImages" :key="idx" class="media-item">
@@ -42,15 +42,15 @@
 				</div>
 			</div>
 
-			<!-- Download Links -->
-			<div v-if="links.length > 0" class="download-section">
+			<!-- Download Links (dead/expired links are removed automatically) -->
+			<div v-if="visibleLinks.length > 0" class="download-section">
 				<div class="download-header">
 					<font-awesome-icon :icon="['fas', 'download']" />
-					<span>Download Links ({{ links.length }})</span>
+					<span>Download Links ({{ visibleLinks.length }})</span>
 				</div>
 				<div class="download-links">
 					<div
-						v-for="link in links"
+						v-for="link in visibleLinks"
 						:key="link.id"
 						class="download-link-wrapper"
 						:class="[`status-${link.download_status || 'pending'}`, `health-${link.status || 'unknown'}`]"
@@ -93,6 +93,7 @@ import { openInFirefox } from '@/services/api'
 const props = defineProps({
 	post: { type: Object, required: true },
 	links: { type: Array, default: () => [] },
+	hideImages: { type: Boolean, default: false },
 })
 defineEmits(['mark-downloaded', 'mark-failed', 'reset-status'])
 
@@ -101,8 +102,15 @@ const postImages = computed(() => props.post.metadata?.attachments || [])
 // Track broken images by index - hidden by default once error is detected
 const brokenImages = ref(new Set())
 
-const visibleImages = computed(() =>
-	postImages.value.filter((_, idx) => !brokenImages.value.has(idx))
+const visibleImages = computed(() => {
+	if (props.hideImages) return []
+	return postImages.value.filter((_, idx) => !brokenImages.value.has(idx))
+})
+
+// Dead/expired links are removed from the display automatically — only
+// active/unknown links remain (nothing is deleted from the DB)
+const visibleLinks = computed(() =>
+	props.links.filter((l) => l.status !== 'dead' && l.status !== 'expired')
 )
 
 const onImageError = (idx) => {
@@ -112,6 +120,9 @@ const onImageError = (idx) => {
 const hasVerifiedLinks = computed(() =>
 	props.links.some((l) => l.status === 'active' || l.status === 'dead' || l.status === 'expired')
 )
+
+// NOTE: health badges above intentionally use ALL links (incl. dead) so the
+// post header still shows link health even though dead links are hidden below.
 
 const postHealthSummary = computed(() => {
 	if (props.links.length === 0) return ''
@@ -307,6 +318,11 @@ const openImage = (url) => openInFirefox(url)
 .post-content :deep(img) {
 	max-width: 100%;
 	border-radius: 8px;
+}
+
+/* Hide-images toggle: hide inline content images */
+.post-content.hide-inline-images :deep(img) {
+	display: none;
 }
 
 .post-content :deep(img[src=""]),

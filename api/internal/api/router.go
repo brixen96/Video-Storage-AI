@@ -239,6 +239,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			ai.POST("/chat/reset", resetChat)                // Reset chat + memories to defaults
 			ai.POST("/storyboard", aiStoryboard)             // Generate image-gen prompts (Storyboard 🎬 button)
 			ai.POST("/storyboard/character-sheet", aiCharacterSheet) // Stable identity line (anti face-drift)
+			ai.POST("/thread-scenes", aiThreadScenes)     // AI scene list for a scraped thread
 			ai.POST("/companion/actions", recordUserAction)  // Record UI actions for supervisor observation
 			ai.GET("/companion/evaluations", getCompanionEvaluations) // Supervisor evaluations for Monitor tab
 			ai.POST("/companion/proposals/:id/approve", approveProposal) // Execute an approved supervisor proposal

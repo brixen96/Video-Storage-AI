@@ -273,6 +273,8 @@ export const aiAPI = {
 	generateStoryboard: (data) => api.post('/ai/storyboard', data),
 	// Character sheet — stable identity line (anti face-drift)
 	generateCharacterSheet: (data) => api.post('/ai/storyboard/character-sheet', data),
+	// Scene list — AI breakdown of scenes found in a scraped thread
+	generateThreadScenes: (data) => api.post('/ai/thread-scenes', data),
 
 	// Companion status
 	getStatus: () => api.get('/ai/status'),

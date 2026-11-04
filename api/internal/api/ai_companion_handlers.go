@@ -495,6 +495,35 @@ func aiCharacterSheet(c *gin.Context) {
 	respondSuccess(c, sheet, "Character sheet generated")
 }
 
+// aiThreadScenes generates an AI scene list for a scraped thread — the
+// "Scenes" button on the thread page. Same prompt logic as the
+// list_thread_scenes tool, but without the tool loop.
+func aiThreadScenes(c *gin.Context) {
+	if aiCompanionService == nil {
+		respondBadRequest(c, "AI Companion not initialized", nil)
+		return
+	}
+
+	var request struct {
+		ThreadID int64 `json:"thread_id"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		respondBadRequest(c, "Invalid request", err)
+		return
+	}
+	if request.ThreadID <= 0 {
+		respondBadRequest(c, "thread_id is required", nil)
+		return
+	}
+
+	scenes, err := aiCompanionService.GenerateThreadScenes(request.ThreadID)
+	if err != nil {
+		respondInternalError(c, "Scene list generation failed", err)
+		return
+	}
+	respondSuccess(c, scenes, "Scene list generated")
+}
+
 // getAICompanionStatus returns the AI Companion status
 func getAICompanionStatus(c *gin.Context) {
 	if aiCompanionService == nil {
