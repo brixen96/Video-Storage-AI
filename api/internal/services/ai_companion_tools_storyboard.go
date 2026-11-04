@@ -45,10 +45,27 @@ Rules:
 2. "shots" — a cinematic sequence covering the scene in order: establishing/wide → mid shots → close-ups → key moments. Each shot has:
    - "id": sequential number starting at 1
    - "title": 3-6 word shot label (e.g. "Close-up — her eyes")
-   - "positive": comma-separated danbooru tags: score prefix, shot type/camera, setting, characters present (each with the verbatim character_sheet), action/pose/expression, lighting, mood, style tags. Include EVERY active focus element given to you in at least one shot where the scene supports it.
-   - "negative": the quality baseline PLUS shot-specific undesired elements.
+   - "positive": a DETAILED, SPECIFIC, fully self-contained prompt — see DETAIL REQUIREMENTS below.
+   - "negative": the quality baseline PLUS at least 6 shot-specific undesired elements (concrete things that would ruin THIS shot: wrong pose, wrong object, extra people, wrong setting, etc.).
 3. Prompts are descriptive tag lists — subject, action, camera, light, mood. No narrative prose, no story text, no dialogue.
-4. 6-12 shots for a full scene; fewer if the scene is short. Order them so they cut together like a movie.
+
+DETAIL REQUIREMENTS — every positive prompt MUST contain ALL of these, concretely and specifically (never vague, never generic):
+   - Quality prefix (score_9, score_8_up, score_7_up)
+   - Every visible character with their VERBATIM character_sheet line
+   - Shot type + camera + lens + angle: e.g. extreme_close_up, low_angle, over_shoulder_shot, 85mm_lens, dutch_angle, pov_shot, shallow_depth_of_field
+   - Setting/environment with specific props and materials: room type, furniture, bedding/fabric textures, surfaces, background objects — name them
+   - Exact pose and body positioning: which limbs where, weight distribution, orientation to camera, contact points
+   - Facial detail: expression, gaze direction, eye state, mouth/lips state
+   - Action detail: the specific movement/act, pace, tension — concrete verbs
+   - Lighting: source (window, lamp, candle, overhead), direction (backlit, rim_light, side_light), quality (soft, harsh, volumetric), color temperature
+   - Color palette / mood tags: e.g. warm_tones, cool_blue_shadows, intimate_mood, tense_atmosphere
+   - Style/render tags: film_grain_cinematic, 8k_photoreal, high_detail_textures, realistic_skin_flaws etc.
+   - EVERY active focus element given to you in at least one shot where the scene supports it
+   Target 45-90 tags per positive prompt. Longer and more specific beats short and generic.
+
+FULL-PROMPT RULE: every positive prompt must be COMPLETE and paste-ready on its own — never abbreviate, never write "same as above", never omit the character sheet, never truncate. Whoever uses the prompt gets ONLY this text, so everything needed must be in it, every time.
+
+4. 8-14 shots for a full scene; fewer if the scene is short. Order them so they cut together like a movie.
 
 ` + ponyStyleBlock()
 }
@@ -157,7 +174,9 @@ func (s *AICompanionService) GenerateImagePrompts(scene string, focus []string, 
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		var err error
-		raw, err = s.callModelEffort("", storyboardSystemPrompt(), storyboardUserPrompt(scene, focus, shots), 4000, 0.7, "none")
+		// 12000: detailed prompts (45-90 tags × 8-14 shots) overflow the old
+		// 4000 budget → truncated JSON → parse failure.
+		raw, err = s.callModelEffort("", storyboardSystemPrompt(), storyboardUserPrompt(scene, focus, shots), 12000, 0.7, "none")
 		if err != nil {
 			lastErr = err
 			continue
@@ -250,7 +269,7 @@ func (s *AICompanionService) registerStoryboardTools() {
 		})
 		return map[string]interface{}{
 			"storyboard": parsed,
-			"note":       "Present the storyboard to Brix: mention the character sheet and the shot count, and tell him each shot has a positive and a negative prompt ready to paste into ComfyUI/Voxta. Do not dump all prompts raw unless he asks.",
+			"note":       "Present the storyboard to Brix: state the character sheet and shot count, then for EVERY shot post the FULL positive prompt and FULL negative prompt verbatim (no summarizing, no truncating, no 'same as above'). Each prompt must be complete and paste-ready into ComfyUI/Voxta.",
 		}, nil
 	})
 }
