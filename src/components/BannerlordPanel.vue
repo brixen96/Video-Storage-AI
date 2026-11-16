@@ -593,9 +593,13 @@ const refresh = async () => {
 	}
 }
 
-watch(selectedCampaign, (id) => {
+watch(selectedCampaign, (id, prevId) => {
 	if (id) {
 		localStorage.setItem('bannerlord_selected_campaign', id)
+		// Switching campaigns invalidates the open conversation — it belongs to
+		// the PREVIOUS campaign's roster, and an NPC with the SAME NAME can exist
+		// in both (Empress Rhagaea), so the header alone can't tell them apart.
+		if (prevId && prevId !== id && selectedNpc.value) closeDialogue()
 		loadOverview()
 	}
 })

@@ -382,23 +382,36 @@ const removeLinked = (npc) => {
 }
 
 // ── Full RP context cache (per NPC file path) ──
+// The cache is DISPLAY-ONLY (instant header/chips). The context actually SENT
+// to the model is force-refreshed before every send — the in-game conversation
+// grows between sends, and a frozen cache made the Companion answer from an
+// old thread while the panel showed the new one.
 const npcContexts = ref({})
+
+const fetchNpcContext = async (npc, force = false) => {
+	if (!force && npcContexts.value[npc.file_path]) return
+	try {
+		const res = await bannerlordAPI.getRpContext(npc.file_path)
+		if (res?.data) {
+			npcContexts.value = { ...npcContexts.value, [npc.file_path]: res.data }
+		}
+	} catch { /* NPC stays context-less; block degrades gracefully */ }
+}
 
 watch(
 	() => allNpcs.value.map((n) => n.file_path).join('|'),
 	async () => {
-		for (const npc of allNpcs.value) {
-			if (npcContexts.value[npc.file_path]) continue
-			try {
-				const res = await bannerlordAPI.getRpContext(npc.file_path)
-				if (res?.data) {
-					npcContexts.value = { ...npcContexts.value, [npc.file_path]: res.data }
-				}
-			} catch { /* NPC stays context-less; block degrades gracefully */ }
-		}
+		for (const npc of allNpcs.value) await fetchNpcContext(npc)
 	},
 	{ immediate: true }
 )
+
+// Force-refresh every current NPC's context — called right before each send so
+// the system context block always carries the LATEST ConversationHistory, mood,
+// and relation (sequential on purpose: concurrent spreads would race).
+const refreshNpcContexts = async () => {
+	for (const npc of allNpcs.value) await fetchNpcContext(npc, true)
+}
 
 // Build the RP context block. Sent as a SYSTEM-role history entry (not part of
 // the user message) so persisted chat history stays clean and readable.
@@ -526,6 +539,7 @@ const send = async () => {
 	// but it never pollutes the saved chat.
 	let contextEntry = null
 	if (props.contextNpc) {
+		await refreshNpcContexts() // always send the CURRENT in-game dialogue
 		const block = buildContextBlock()
 		if (block) contextEntry = { role: 'system', content: block }
 	}
@@ -681,9 +695,10 @@ const quickWrite = () => {
 // ── Manual trigger: Brix clicks "NPC Responded!" ──
 // Replaces auto-react: file changes no longer make the Companion act on their
 // own — the dialogue view refreshes live, and Brix decides when to analyze.
-const onNpcResponded = () => {
+const onNpcResponded = async () => {
 	if (!props.contextNpc || isStreaming.value) return
 	reacted.value = true
+	await refreshNpcContexts() // the NPC's new reply must be in the context
 	const block = buildContextBlock({ mode: 'autoreact', autoReactNpc: props.contextNpc.name })
 	sendWithSystemContext(block, 'Analyze their response and draft my reply')
 }
