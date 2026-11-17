@@ -116,7 +116,7 @@ func aiCompanionChatStream(c *gin.Context) {
 	})
 	defer aiCompanionService.SetProgressCallback(nil)
 
-	err := aiCompanionService.ChatLLMStream(request.Message, request.History, func(chunk string) bool {
+	err := aiCompanionService.ChatLLMStream(request.Message, request.History, scope, func(chunk string) bool {
 		select {
 		case <-clientGone:
 			return false

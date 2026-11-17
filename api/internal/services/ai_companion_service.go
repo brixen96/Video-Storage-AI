@@ -897,14 +897,25 @@ func extractVideoCards(toolName string, result interface{}) []map[string]interfa
 // progress events to the client.
 // onTokenUsage is called (if non-nil) with accumulated token usage after each LLM call.
 // Returns false from onChunk to abort (client gone).
-func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, onChunk func(string) bool, onCards func([]map[string]interface{}), onToolCall func(name string), onTokenUsage func(map[string]interface{})) error {
+func (s *AICompanionService) ChatLLMStream(message string, history []map[string]string, scope string, onChunk func(string) bool, onCards func([]map[string]interface{}), onToolCall func(name string), onTokenUsage func(map[string]interface{})) error {
 	config := s.GetAIConfig()
 	if !config.Enabled {
 		return fmt.Errorf("LLM disabled in config")
 	}
 
-	appContext := s.GetFullContext() + s.GetProfileBlock() + s.GetRelevantMemoriesBlock(message)
-	systemPrompt := "You are the AI Companion for Video Storage. You have database access via tools.\n\nWhen users ask about data, use the appropriate tool to get real-time data.\nWhen users ask to create, add, or scrape something, call the tool IMMEDIATELY — do NOT just describe what you would do.\nFor library organization: use plan_structure_improvements first (read-only), present the plan, then execute_plan after approval.\nFor scraping: use create_scraper_tab or scrape_url tools directly. Do NOT call suggest_scraper_config first.\nAlways confirm before moving files or deleting records.\nBe concise. Use bullet points, not tables. Show at most 5 items then summarize.\n\n" + appContext
+	// scope="rp" = the Bannerlord RP mini-companion: its OWN identity (no
+	// video-library persona/context) and a whitelisted toolset (campaign data +
+	// model orchestration + storyboard). The main scope keeps the full
+	// video-library companion. Sharing one identity made the mini companion a
+	// clone of the main one — it literally had no Bannerlord tools.
+	isRP := scope == "rp"
+	var systemPrompt string
+	if isRP {
+		systemPrompt = rpSystemPrompt()
+	} else {
+		appContext := s.GetFullContext() + s.GetProfileBlock() + s.GetRelevantMemoriesBlock(message)
+		systemPrompt = "You are the AI Companion for Video Storage. You have database access via tools.\n\nWhen users ask about data, use the appropriate tool to get real-time data.\nWhen users ask to create, add, or scrape something, call the tool IMMEDIATELY — do NOT just describe what you would do.\nFor library organization: use plan_structure_improvements first (read-only), present the plan, then execute_plan after approval.\nFor scraping: use create_scraper_tab or scrape_url tools directly. Do NOT call suggest_scraper_config first.\nAlways confirm before moving files or deleting records.\nBe concise. Use bullet points, not tables. Show at most 5 items then summarize.\n\n" + appContext
+	}
 
 	messages := []map[string]interface{}{{"role": "system", "content": systemPrompt}}
 	for _, h := range history {
@@ -914,24 +925,29 @@ func (s *AICompanionService) ChatLLMStream(message string, history []map[string]
 	}
 	messages = append(messages, map[string]interface{}{"role": "user", "content": message})
 
-	// ── Intent pre-detection: force tool calls for obvious requests ──
-	lowerMsg := strings.ToLower(message)
-	if strings.Contains(lowerMsg, "scraper") && (strings.Contains(lowerMsg, "new") || strings.Contains(lowerMsg, "create") || strings.Contains(lowerMsg, "add") || strings.Contains(lowerMsg, "make")) {
-		messages = append(messages, map[string]interface{}{
-			"role":    "system",
-			"content": "The user wants to create a new scraper tab. You MUST call the create_scraper_tab tool immediately with the name and URL(s) they provided. Do NOT explain what you will do — just call the tool.",
-		})
-		log.Printf("[AI] Detected scraper creation intent, injecting tool directive")
-	} else if strings.Contains(lowerMsg, "scrape") && strings.Contains(lowerMsg, "http") {
-		messages = append(messages, map[string]interface{}{
-			"role":    "system",
-			"content": "The user wants to scrape a URL. You MUST call the scrape_url tool immediately with the URL they provided. Do NOT explain — just call the tool.",
-		})
-		log.Printf("[AI] Detected scrape URL intent, injecting tool directive")
+	// ── Intent pre-detection: force tool calls for obvious requests (main scope only) ──
+	if !isRP {
+		lowerMsg := strings.ToLower(message)
+		if strings.Contains(lowerMsg, "scraper") && (strings.Contains(lowerMsg, "new") || strings.Contains(lowerMsg, "create") || strings.Contains(lowerMsg, "add") || strings.Contains(lowerMsg, "make")) {
+			messages = append(messages, map[string]interface{}{
+				"role":    "system",
+				"content": "The user wants to create a new scraper tab. You MUST call the create_scraper_tab tool immediately with the name and URL(s) they provided. Do NOT explain what you will do — just call the tool.",
+			})
+			log.Printf("[AI] Detected scraper creation intent, injecting tool directive")
+		} else if strings.Contains(lowerMsg, "scrape") && strings.Contains(lowerMsg, "http") {
+			messages = append(messages, map[string]interface{}{
+				"role":    "system",
+				"content": "The user wants to scrape a URL. You MUST call the scrape_url tool immediately with the URL they provided. Do NOT explain — just call the tool.",
+			})
+			log.Printf("[AI] Detected scrape URL intent, injecting tool directive")
+		}
 	}
 
 	tools := s.getLMToolDefinitions()
-	log.Printf("[AI] ChatLLMStream: %d tools registered, model=%s", len(tools), config.ModelName)
+	if isRP {
+		tools = filterRPTools(tools)
+	}
+	log.Printf("[AI] ChatLLMStream: %d tools registered, scope=%s, model=%s", len(tools), scope, config.ModelName)
 
 	// Accumulate video card data across all tool iterations
 	var collectedCards []map[string]interface{}

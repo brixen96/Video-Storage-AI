@@ -48,6 +48,7 @@ func (s *AICompanionService) buildToolRegistry() {
 	s.registerModelTools()
 	s.registerStoryboardTools()
 	s.registerSceneTools()
+	s.registerBannerlordTools()
 }
 
 // getLMToolDefinitions returns all registered tool definitions, sorted by name
