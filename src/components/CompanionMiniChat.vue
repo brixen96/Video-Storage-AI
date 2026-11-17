@@ -502,6 +502,9 @@ const buildContextBlock = (opts = {}) => {
 		}
 		const n = c.npc || {}
 		lines.push(`\n## NPC: ${n.name || npc.name} (${n.string_id || npc.string_id})`)
+		// file_path lets the model call get_bannerlord_npc_context directly to
+		// re-read her latest in-game reply instead of drafting from a stale block
+		lines.push(`NPC file: ${npc.file_path} — call get_bannerlord_npc_context with this path when her latest response matters.`)
 		if (n.mood || n.relation_desc) {
 			lines.push(`State: Mood ${n.mood || 'unknown'}${n.mood_reason ? ' (' + n.mood_reason + ')' : ''} · Relation to Emil ${n.relation_desc || '?'} (${n.relation_value ?? '?'})${n.current_task ? ' · Task: ' + n.current_task : ''}`)
 		}
